@@ -1,0 +1,44 @@
+{
+  "name": "@elsword-protocol/protocol-ts",
+  "version": "1.0.0",
+  "description": "TypeScript 7.1 Beta migration of KncWX2Server ClientPacket, CommonPacket, EventID_System, EventID_Client (+ Global) and KNCSDK KSerializer wire codec.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./runtime": {
+      "types": "./dist/runtime/index.d.ts",
+      "default": "./dist/runtime/index.js"
+    },
+    "./flags": {
+      "types": "./dist/flags/index.d.ts",
+      "default": "./dist/flags/index.js"
+    },
+    "./events": {
+      "types": "./dist/events/index.d.ts",
+      "default": "./dist/events/index.js"
+    },
+    "./packets": {
+      "types": "./dist/packets/index.d.ts",
+      "default": "./dist/packets/index.js"
+    }
+  },
+  "scripts": {
+    "generate": "python3 scripts/generate.py",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.test.json",
+    "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "test:dist": "npm run build && node --test --experimental-strip-types tests/serializer.test.ts tests/events.test.ts tests/flags.test.ts tests/packets.test.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "7.1.0-beta"
+  },
+  "engines": {
+    "node": ">=22.6.0"
+  }
+}
