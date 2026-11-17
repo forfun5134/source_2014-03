@@ -115,7 +115,7 @@
 
 **決策層** `HandleCreateUnitReq(gameDb, userUID, authLevel, req, ack, err)`（UnitSelectArbiter）：暱稱 UTF-8 位元組數 1..12（>12 或空 → ERR_CREATE_UNIT_04=29；JP 未定義 SERV_NICK_NAME_MINIMUM_CHECK → 無最小長度）；含 KODBC 注入標記（`;` `'` `"` `--` `/*` `*/` `\`）→ ERR_CREATE_UNIT_08=33；`GameStore::CreateUnit` 結果映射：Ok→NET_OK、UserNotFoundOrDeleted→ERR_CREATE_UNIT_00=25、NicknameTaken→ERR_CREATE_UNIT_01=26、CapacityReached→ERR_CREATE_UNIT_05=30、NicknameInCooldown→ERR_CREATE_UNIT_06=31、DbError→ERR_CREATE_UNIT_02=27；成功後重讀角色，`kUnitInfo ← PopulateUnitInfoFromGUnit`；**vecSkillSlot / wstrEnableDate 原由 AccountDB（DBE_ACCOUNT_CREATE_UNIT_*）填寫，V2 一律空**（誠實佔位）。
 
-⚠ 誠實偏差：無職業 templet 表（iClass 由 GameStore tinyint 範圍把關）、無字串過濾器/PVP NPC 名檢查/每日建立上限、原版兩段式（DBE_GAME_CREATE_UNIT_* → DBE_ACCOUNT_CREATE_UNIT_*）未建模（V2 單段 game DB）、S_SERVER_SELECT 狀態閘門未建模；wire 佈局為自洽 golden bytes，**未對原 SDK 實機驗證**。`WideToUtf8`（含代理對合併）與 `Utf8ToWide` 互為逆運算（均為 Linux wchar_t=4 下的 UTF-16 代理對路徑，供線路互通）。
+⚠ 誠實偏差：無職業 templet 表（iClass 由 GameStore tinyint 範圍把關；IsInitNormalJob 閘門已移植 §0a3）、~~無字串過濾器/PVP NPC 名檢查~~（FT_NICKNAME §0w／PvP NPC 名 §0a4 已移植）/每日建立上限仍未建模、原版兩段式（DBE_GAME_CREATE_UNIT_* → DBE_ACCOUNT_CREATE_UNIT_*）未建模（V2 單段 game DB）、S_SERVER_SELECT 狀態閘門未建模；wire 佈局為自洽 golden bytes，**未對原 SDK 實機驗證**。`WideToUtf8`（含代理對合併）與 `Utf8ToWide` 互為逆運算（均為 Linux wchar_t=4 下的 UTF-16 代理對路徑，供線路互通）。
 
 **測試**（tests/test_create_unit.cpp）：codec roundtrip（含 CJK 暱稱/skillSlot/enableDate）、空暱稱→04、13+ bytes→04（UTF-8 CJK 3B/字邊界）、恰好 12 bytes→成功、重複暱稱→01、注入標記→08、guser 不存在→00、建立後 ListUnitsByUserUID 可見。測試自 685 → **713 passed / 0 failed**。vcxproj 登記 CreateUnitProtocol.{h,cpp}。**Loopback 未擴充 CREATE_UNIT**（會牽動 MY_UNIT_LIST/ghost 斷言鏈；codec roundtrip + 記憶體內決策層已覆蓋，create→list 副作用以 ListUnitsByUserUID 斷言替代）。
 
@@ -167,7 +167,7 @@
 
 **決策層** `HandleChangeNicknameReq(gameDb, userUID, req, ack, err)`（`HandleEntryPointChangeNicknameReq` 轉發至同一路徑）：UTF-8 1..12 bytes 否則 `_06`；KODBC 注入標記 → `_05`；**擁有權閘門**（GetUnitByUID 不存在/已刪除/非本人 → `_00`；原碼未檢查擁有權——V2 加固，誠實偏差）；`bCheckOnly=true` → `CheckNicknameAvailable(排除自身)`：Available→NET_OK／Taken→02／InCooldown→03；`bCheckOnly=false` → `ChangeUnitNickname`：Ok→NET_OK／UnitNotFoundOrDeleted→00／NotRestorable→01／Taken→02／InCooldown→03／Failure→04／DbError→false。ack 回顯 iUnitUID/wstrNickName/bCheckOnly。
 
-⚠ 誠實偏差：~~無 SiCXSLStringFilter~~ FT_NICKNAME 已移植（§0w）；無 SERV_PVP_NEW_SYSTEM **已定義**之 NPC 名檢查（不擋）；原碼依 server group 路由 1st/2nd GameDB → V2 單一 game DB，**iServerGroup 忽略**；SERV_GUARANTEE_UNIQUENESS_OF_NAME_CN 未定義 → 無 Giant RoleReg 路徑；成功後**無 LogDB**（ELOG_CHANGE_NICK_NAME_NOT）；S_SERVER_SELECT 閘門未建模；舊暱稱 14 天冷卻為 V2 重建（原 stored proc 未隨倉庫提供）。
+⚠ 誠實偏差：~~無 SiCXSLStringFilter~~ FT_NICKNAME 已移植（§0w）；~~無 SERV_PVP_NEW_SYSTEM **已定義**之 NPC 名檢查~~（§0a4 已移植，→ERR_CREATE_UNIT_01=26）；原碼依 server group 路由 1st/2nd GameDB → V2 單一 game DB，**iServerGroup 忽略**；SERV_GUARANTEE_UNIQUENESS_OF_NAME_CN 未定義 → 無 Giant RoleReg 路徑；成功後**無 LogDB**（ELOG_CHANGE_NICK_NAME_NOT）；S_SERVER_SELECT 閘門未建模；舊暱稱 14 天冷卻為 V2 重建（原 stored proc 未隨倉庫提供）。
 
 **測試**（tests/test_change_nickname.cpp，18 項）：codec roundtrip（兩種 REQ + ACK）、空→06、注入→05、非本人→00、bCheckOnly 可用/占用他人/**自己的現有名（排除自身）→NET_OK**、實際改名→NET_OK（再讀回 store 為新暱稱；**舊暱稱進 14 天冷卻 → check 回 03**）、改回冷卻中舊暱稱→03、同名改名→NET_OK、ENTRY_POINT 入口共享決策。測試自 790 → **826 passed / 0 failed**。vcxproj 登記 ChangeNicknameProtocol.{h,cpp}；Loopback 未擴充。**修正記錄**：測試首版 fixture「別人的占位」為 15 bytes CJK 被長度閘門擋下（06≠02），改 12 bytes fixture 後全綠（UTF-8 字節口徑需先自量）。
 
@@ -176,7 +176,7 @@
 原 `SERV_ENTRY_POINT`（ServerDefine.h:4304）家族的兩個變體事件完成移植。兩者皆為 EGS_ENTRY_POINT 版本，沿用既有後端決策：
 
 **EGS_CREATE_NEW_UNIT_REQ（1159）**＝{wstrNickName, iClass, iServerGroup}（PUT 順序機讀自 ClientPacket.cpp:15012 起），回覆 **EGS_CREATE_UNIT_ACK（37）**。`HandleCreateNewUnitReq` 忽略 iServerGroup 並轉發至 `HandleCreateUnitReq`。
-原碼特有閘門（**未建模**）：`SiCXSLUnitManager()->GetUnitTemplet` 驗證 iClass（無 templet → `ERR_CREATE_UNIT_03`=28）、`SiKPvpMatchManager()->IsExistPvpNpcName`（→ERR_CREATE_UNIT_01=26）。`IsInitNormalJob`（→ `ERR_CREATE_UNIT_11`，**enum 機讀實測＝1289**）**已於 §0a3 移植**（先於 length 檢查；templet 存在性/名稱閘門未建模，iClass=200 等一律以 1289 拒絕，原碼為 28）。注入分支原碼用 `ERR_ODBC_00=175`（與 EGS_CREATE_UNIT_REQ 的 ERR_CREATE_UNIT_08=33 不同）。V2 共用決策（長度→04／注入→08）與誠實偏差聲明不變。
+原碼特有閘門：`SiCXSLUnitManager()->GetUnitTemplet` 驗證 iClass（無 templet → `ERR_CREATE_UNIT_03`=28）**仍未建模**；`SiKPvpMatchManager()->IsExistPvpNpcName`（→ERR_CREATE_UNIT_01=26）**已於 §0a4 移植**（CREATE_UNIT 共用決策：length→StringFilter→本閘門→注入；原碼 CHANGE_NICK_NAME 順序為 StringFilter→注入→本閘門，V2 各 handler 對齊各自原碼順序）。`IsInitNormalJob`（→ `ERR_CREATE_UNIT_11`，**enum 機讀實測＝1289**）**已於 §0a3 移植**（先於 length 檢查；templet 存在性/名稱閘門未建模，iClass=200 等一律以 1289 拒絕，原碼為 28）。注入分支原碼用 `ERR_ODBC_00=175`（與 EGS_CREATE_UNIT_REQ 的 ERR_CREATE_UNIT_08=33 不同）。V2 共用決策（長度→04／注入→08）與誠實偏差聲明不變。
 
 **EGS_ENTRY_POINT_DELETE_UNIT_REQ（1160）**＝{iUnitUID, iUserUID, iServerGroup}（PUT 順序機讀自 :15028 起），回覆 **EGS_DELETE_UNIT_ACK（39）**。`HandleEntryPointDeleteUnitReq` 忽略 iServerGroup 並轉發至 `HandleDeleteUnitReq`（擁有權閘門等語意同前）。
 
@@ -336,6 +336,16 @@ tests/test_string_filter.cpp 的字元集閘門斷言改為依 `X2_REGION_*` 分
 - **已知偏差（誠實聲明）**：`ScriptData/UnitTemplet.mdb` 無法解析（access-parser Jet4 崩潰、mdbtools 不可達，見 §0a1 附近記錄）→ templet 存在性／名稱閘門未建模。iClass=100/121/122/200/255 等在原碼可能先被 templet 查詢擋下（ERR_CREATE_UNIT_03=28）；V2 一律以 ERR_CREATE_UNIT_11=1289 拒絕。iClass 1..9 以外且 2nd-class（≥1000 等）一向非初始普通職業，閘門語意一致。
 - **測試**：`tests/test_unit_templet.cpp`（RunUnitTempletTestsByRef）：IsInitNormalJob 邊界（0/-1/9/10/31/100/121/122/200/255）、HandleCreateUnitReq 合法 1/5/7/8/9 → NET_OK、非法 → 1289（暱稱唯一化確保不被唯一性閘門先行攔截）、ENTRY_POINT_CREATE_NEW_UNIT 共用閘門（iClass=100→1289）。
 - 測試自 1185 → **JP/TW/CN = 1232、EU = 1230 passed / 0 failed**（EU permissive 分支較少）。
+
+## 0a4. 2026-11-17 附記（CREATE_UNIT / CHANGE_NICK_NAME IsExistPvpNpcName 閘門（PvP NPC 保留暱稱））
+
+原碼 `KPvpMatchManager::IsExistPvpNpcName`（Common/PvpMatch/PvpMatchManager.cpp:496）：exact-match 比對 `m_vecPvpNpcName`（無大小寫摺疊），名單由啟動時 Lua `PvpNpcData.lua` 的 `AddPvpNpcName( '名稱' )` 填入；`SERV_PVP_NEW_SYSTEM`（ServerDefine.h:1188）已定義 → 閘門生效。原碼呼叫點共 4 處，全部命中 → `ERR_CREATE_UNIT_01`(26)：`EGS_CREATE_UNIT_REQ`(397)／`EGS_CREATE_NEW_UNIT_REQ`(10681，ENTRY_POINT 變體)／`EGS_CHANGE_NICK_NAME_REQ`(3180)／`EGS_ENTRY_POINT_CHANGE_NICK_NAME_REQ`(11001)。**無 GM 繞過**（與 StringFilter 不同）。
+
+- **新模組** `src/server/PvpNpcNames.{h,cpp}`（namespace `x2::pvp_npc_names`）：`IsExistPvpNpcName(wstrNickName)`；名單常數由 `PvpNpcNames<REGION>.inc` 提供。
+- **資料**（`tools/gen_pvp_npc_names.py`，純 stdlib）：解析 `ServerResource/<REGION>/PvpNpcData.lua`（僅匹配行首 `PvpMatchManager:AddPvpNpcName( '…' )`；JP 有 1 行註解 `-- PvpMatchManager:AddPvpNpcName( '0oLucifero0' )` 依 Lua 語意排除）。產出：**JP=390**（6 條完全重複保留）、**TW=497**、**EU=503**、**CN=633**（2 條重複保留）、**US=300**（計 2323）。HK 建置共用 TW 表（ServerResource 無 HK 獨立檔）；TH/ID/BR/PH 無資料 → 空表（永不命中，誠實缺口）；EU nation-flag 子表（PvpNpcData_DE/FR/…，SERV_UNITED_SERVER_EU 路徑）未建模——V2 無 nation flag；US 與原 NF_EN→PvpNpcData_EN.lua 內容一致（300≈301，根目錄 EN 檔比 US 檔多 1 行，V2 採 US 目錄檔）。
+- **接線**（對齊原碼各 handler 順序）：CREATE_UNIT／CREATE_NEW_UNIT（HandleCreateUnitReq）：IsInitNormalJob(§0a3) → length(→04) → StringFilter(→08) → **本閘門(→01)** → 注入(→08)；CHANGE_NICK_NAME／ENTRY_POINT_CHANGE_NICK_NAME（HandleChangeNicknameReq）：length(→06) → StringFilter(→05) → 注入(→05) → **本閘門(→01)** → 擁有權(→00)。本閘門無 GM 繞過、bCheckOnly 亦擋（與原碼位置一致）。
+- **測試** `tests/test_pvp_npc_names.cpp`：謂詞（地區 fixture，含 case-insensitive 反證：`bendaboss` 不命中／`BenDaBoss` 命中；TW=Ancel——**注意命名 fixture 須先確認不命中 StringFilter**：'Aleron' 命中 ban word 子字串）＋決策層（CREATE_UNIT 命中→26、GM authLevel=9 亦 26、正常名→NET_OK；CHANGE_NICK_NAME 命中→26、bCheckOnly→26、GM→26）。build_and_test.sh 的 REGION 巨集**僅經 -D 傳入**，Region.h 的 JP 預設 fallback 只在 `#include Region.h` 處生效——PvpNpcNames.cpp 與測試檔均須顯式包含之（否則 #if 分支誤走 #else 空表，實測 1256→1238＋7 FAIL 才察覺）。
+- **測試數**：**JP = 1256、TW = 1254、EU = 1252、CN = 1254、US = 1253 passed / 0 failed**（US 順帶驗證）。verify_generated.sh 擴充為 8 個 .inc 全數防漂移。
 
 ## 0. 一句話現況
 

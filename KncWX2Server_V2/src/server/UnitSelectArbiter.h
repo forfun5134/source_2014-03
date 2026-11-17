@@ -61,14 +61,16 @@ int32_t HandleSelectUnitReq(db::GameStore& gameDb, int64_t userUID, const Select
 //   0) IsInitNormalJob 閘門（§0a3）：iClass ∉ {1..9} → ERR_CREATE_UNIT_11(1289)（原 SERV_CHECK_CREATE_UNIT_CLASS，先於 length）
 //   1) 暱稱驗證：空或 UTF-8 位元組數 > 12 → ERR_CREATE_UNIT_04(29)（原版 CP_ACP 12 bytes；JP 未定義 SERV_NICK_NAME_MINIMUM_CHECK → 無最小長度檢查）
 //   1.5) FT_NICKNAME 過濾（§0w，authLevel ≥ UAL_GM(2) 繞過）→ ERR_CREATE_UNIT_08(33)
+//   1.6) IsExistPvpNpcName 閘門（§0a4，無 GM 繞過）：暱稱命中 PvP NPC 保留名單 → ERR_CREATE_UNIT_01(26)
 //      含 KODBC 注入標記（; ' " -- /* */ \）→ ERR_CREATE_UNIT_08(33)（「無法使用的暱稱」）
 //   2) GameStore::CreateUnit（guser 不存在/已刪除 → ERR_CREATE_UNIT_00(25)；暱稱重複 → ERR_CREATE_UNIT_01(26)；
 //      槽位達 USSize → ERR_CREATE_UNIT_05(30)；暱稱 14 天冷卻 → ERR_CREATE_UNIT_06(31)；DB 錯誤 → ERR_CREATE_UNIT_02(27)）
 //   3) 成功 → 重讀角色，kUnitInfo ← PopulateUnitInfoFromGUnit(userUID, authLevel, rec)；
 //      vecSkillSlot / wstrEnableDate 原由 AccountDB(DBE_ACCOUNT_CREATE_UNIT_*) 填寫，V2 一律空（誠實佔位）。
 //   （FT_NICKNAME 過濾已移植 §0w：字元集閘門＋禁用暱稱 266＋禁用字 1389＋禁用標記；無 NICKNAMEWORD 子列表、無禁用字 DB 動態更新）
-// 誠實偏差：無職業 templet 表（iClass 僅檢查 tinyint 範圍 0..255，由 GameStore 把關）、
-//   無 PVP NPC 名檢查/每日建立上限（ERR_CREATE_UNIT_03/09 的其他路徑未建模）、
+// 誠實偏差：無職業 templet 表（iClass 僅檢查 tinyint 範圍 0..255，由 GameStore 把關；IsInitNormalJob 閘門已移植 §0a3）、
+//   IsExistPvpNpcName 閘門已移植（§0a4；TH/ID/BR/PH 空表、EU nation-flag 子表與 HK 獨立表未建模）；
+//   每日建立上限（ERR_CREATE_UNIT_03/09 的其他路徑未建模）、
 //   原版 S_SERVER_SELECT 狀態閘門與 DBE_ACCOUNT_CREATE_UNIT_REQ 兩段式未建模（V2 單段 game DB）。
 bool HandleCreateUnitReq(db::GameStore& gameDb, int64_t userUID, int authLevel,
                          const create_unit::CreateUnitReq& req,
@@ -111,6 +113,7 @@ bool HandleCheckNicknameReq(db::GameStore& gameDb,
 // EGS_CHANGE_NICK_NAME_REQ / EGS_ENTRY_POINT_CHANGE_NICK_NAME_REQ 決策
 // （原 IMPL_ON_FUNC(EGS_CHANGE_NICK_NAME_REQ) + EGS_ENTRY_POINT_CHANGE_NICK_NAME_REQ，兩者共享 DBE_CHANGE_NICK_NAME_REQ 與 EGS_CHANGE_NICK_NAME_ACK）：
 //   1) 暱稱 UTF-8 位元組數 1..12 否則 ERR_RESTORE_NICK_NAME_06(334)；KODBC 注入標記 → ERR_RESTORE_NICK_NAME_05(333)
+//   1.6) IsExistPvpNpcName 閘門（§0a4：原 SERV_PVP_NEW_SYSTEM，無 GM 繞過，bCheckOnly 亦擋）→ ERR_CREATE_UNIT_01(26)
 //   2) 擁有權：GetUnitByUID(unitUID) 不存在/已刪除/rec.userUID != userUID → ERR_RESTORE_NICK_NAME_00(328)
 //      （原碼未檢查擁有權——任何客戶端可改任意角色暱稱；V2 加上擁有權閘門，誠實偏差）
 //   3) bCheckOnly=true：GameStore::CheckNicknameAvailable（**排除自身單位**——unitUID 對應自己時不算占用）
@@ -119,7 +122,7 @@ bool HandleCheckNicknameReq(db::GameStore& gameDb,
 //      Ok→NET_OK / UnitNotFoundOrDeleted→00(328) / Taken→02 / InCooldown→03 / Failure→04(332) / DbError→false
 // ack 回顯 m_iUnitUID / m_wstrNickName / m_bCheckOnly。
 //   1.5) FT_NICKNAME 過濾（§0w）→ ERR_RESTORE_NICK_NAME_05(333)；
-// 誠實偏差：無 SERV_PVP_NEW_SYSTEM NPC 名檢查（該巨集已定義）→ 不擋；
+// 誠實偏差：IsExistPvpNpcName 閘門已移植（§0a4；TH/ID/BR/PH 空表、EU nation-flag 子表與 HK 獨立表未建模）；
 //   原碼依 server group 路由 1st/2nd GameDB → V2 單一 game DB，iServerGroup 忽略；
 //   SERV_GUARANTEE_UNIQUENESS_OF_NAME_CN 未定義 → 無 Giant RoleReg 路徑；成功後無 LogDB（ELOG_CHANGE_NICK_NAME_NOT）。
 bool HandleChangeNicknameReq(db::GameStore& gameDb, int64_t userUID,
@@ -134,8 +137,9 @@ bool HandleEntryPointChangeNicknameReq(db::GameStore& gameDb, int64_t userUID,
 // EGS_CREATE_NEW_UNIT_REQ / EGS_ENTRY_POINT_DELETE_UNIT_REQ（EGS_ENTRY_POINT 變體）：
 //   兩者皆忽略 iServerGroup（V2 單一 game DB）後分別共用 HandleCreateUnitReq / HandleDeleteUnitReq 決策。
 // 誠實偏差（CREATE 變體特有）：原碼以 SiCXSLUnitManager()->GetUnitTemplet 驗證 m_iClass（無 templet → ERR_CREATE_UNIT_03(28)）、
-//   IsInitNormalJob 閘門已移植（§0a3；非初始普通職業 → ERR_CREATE_UNIT_11=1289，enum 機讀核對）、SiKPvpMatchManager()->IsExistPvpNpcName
-//   （→ ERR_CREATE_UNIT_01=26）——V2 無 XSL templet 表與 PVP NPC 名單，兩項閘門**未建模**；僅共用既有檢查
+//   IsInitNormalJob 閘門已移植（§0a3；非初始普通職業 → ERR_CREATE_UNIT_11=1289，enum 機讀核對）、IsExistPvpNpcName
+//   閘門已移植（§0a4；命中 PvP NPC 保留暱稱 → ERR_CREATE_UNIT_01=26，名單源自 ServerResource/<REGION>/PvpNpcData.lua）——
+//   V2 無 XSL templet 表，templet 閘門**未建模**；僅共用既有檢查
 //   （長度→04 / 注入→ODBC_00? 注意：原 ENTRY_POINT CREATE_NEW_UNIT 的注入分支用 ERR_ODBC_00 而非 ERR_CREATE_UNIT_08，
 //    但為了與 EGS_CREATE_UNIT_REQ 一致，V2 共用決策一律 ERR_CREATE_UNIT_08——見文件 §0q）。
 bool HandleCreateNewUnitReq(db::GameStore& gameDb, int64_t userUID, int authLevel,

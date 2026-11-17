@@ -4,6 +4,7 @@
 #include "StatTable.h"
 #include "StringFilter.h"
 #include "UnitTemplet.h"
+#include "PvpNpcNames.h"
 #include "../core/NetError.h"
 
 #include <string>
@@ -366,6 +367,12 @@ bool HandleChangeNicknameReq(db::GameStore& gameDb, int64_t userUID,
             return true;
         }
     }
+    // PvP NPC 保留暱稱（原 SERV_PVP_NEW_SYSTEM；無 GM 繞過；bCheckOnly 亦擋，與原碼位置一致）
+    if (pvp_npc_names::IsExistPvpNpcName(req.wstrNickName)) {
+        ack.iOK = ERR_CREATE_UNIT_01;   // 原碼 CHANGE_NICK_NAME/ENTRY_POINT_CHANGE_NICK_NAME 亦用此代碼
+        err.clear();
+        return true;
+    }
     // 擁有權閘門（V2 加固；原碼未檢查）
     db::GUnitRecord rec;
     bool found = false;
@@ -444,6 +451,12 @@ bool HandleCreateUnitReq(db::GameStore& gameDb, int64_t userUID, int authLevel,
     // KODBC 注入標記（比照原版 IsInvalidMarkIn 的常見集合；V2 無 KODBC 模組）
     if (authLevel < 2 && !string_filter::IsValidNickName(req.wstrNickName)) {   // 原碼 GetAuthLevel() < UAL_GM(2)
         ack.iOK = ERR_CREATE_UNIT_08;   // FT_NICKNAME 過濾（字元集/禁用暱稱/禁用字/標記）
+        err.clear();
+        return true;
+    }
+    // PvP NPC 保留暱稱（原 SERV_PVP_NEW_SYSTEM；無 GM 繞過）
+    if (pvp_npc_names::IsExistPvpNpcName(req.wstrNickName)) {
+        ack.iOK = ERR_CREATE_UNIT_01;   // 與原碼四處呼叫點一致（CREATE_UNIT/ENTRY_POINT 變體共用）
         err.clear();
         return true;
     }
