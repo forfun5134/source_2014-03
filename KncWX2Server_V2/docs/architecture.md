@@ -107,6 +107,18 @@
 
 ⚠ 誠實聲明：wire 佈局為自洽 golden bytes，**未對原 SDK 實機驗證**；角色衍生欄位（EXP→level、stat 表疊加、P2P）為佔位/沿用儲存值；nUnitSlot 來自 V2 guser（USSize=50 慣例）；MY_UNIT_LIST 之前的 S_SERVER_SELECT 狀態閘門未建模。
 
+## 0l. 2026-11-17 快照（CREATE_UNIT 流程移植）
+
+**NetError**：補 `ERR_CREATE_UNIT_00…09 = 25…34`（沿用 V2 原檔既有註解數值，與 SELECT_UNIT_00=35 銜接一致；ERR_CREATE_UNIT_10/11 數值未以編譯實測，**故不添加、勿推算**）。
+
+**新增模組** `src/server/CreateUnitProtocol.{h,cpp}`（命名空間 `x2::create_unit`）：`CreateUnitReq`（EGS_CREATE_UNIT_REQ=36；{wstrNickName, int iClass}，PUT 順序機讀自原 ClientPacket.cpp）、`CreateUnitAck`（37；{int iOK, KUnitInfo, vector<int> vecSkillSlot, wstr wstrEnableDate}；SERV_GUARANTEE_UNIQUENESS_OF_NAME_CN 未定義 → 無額外欄位）。
+
+**決策層** `HandleCreateUnitReq(gameDb, userUID, authLevel, req, ack, err)`（UnitSelectArbiter）：暱稱 UTF-8 位元組數 1..12（>12 或空 → ERR_CREATE_UNIT_04=29；JP 未定義 SERV_NICK_NAME_MINIMUM_CHECK → 無最小長度）；含 KODBC 注入標記（`;` `'` `"` `--` `/*` `*/` `\`）→ ERR_CREATE_UNIT_08=33；`GameStore::CreateUnit` 結果映射：Ok→NET_OK、UserNotFoundOrDeleted→ERR_CREATE_UNIT_00=25、NicknameTaken→ERR_CREATE_UNIT_01=26、CapacityReached→ERR_CREATE_UNIT_05=30、NicknameInCooldown→ERR_CREATE_UNIT_06=31、DbError→ERR_CREATE_UNIT_02=27；成功後重讀角色，`kUnitInfo ← PopulateUnitInfoFromGUnit`；**vecSkillSlot / wstrEnableDate 原由 AccountDB（DBE_ACCOUNT_CREATE_UNIT_*）填寫，V2 一律空**（誠實佔位）。
+
+⚠ 誠實偏差：無職業 templet 表（iClass 由 GameStore tinyint 範圍把關）、無字串過濾器/PVP NPC 名檢查/每日建立上限、原版兩段式（DBE_GAME_CREATE_UNIT_* → DBE_ACCOUNT_CREATE_UNIT_*）未建模（V2 單段 game DB）、S_SERVER_SELECT 狀態閘門未建模；wire 佈局為自洽 golden bytes，**未對原 SDK 實機驗證**。`WideToUtf8`（含代理對合併）與 `Utf8ToWide` 互為逆運算（均為 Linux wchar_t=4 下的 UTF-16 代理對路徑，供線路互通）。
+
+**測試**（tests/test_create_unit.cpp）：codec roundtrip（含 CJK 暱稱/skillSlot/enableDate）、空暱稱→04、13+ bytes→04（UTF-8 CJK 3B/字邊界）、恰好 12 bytes→成功、重複暱稱→01、注入標記→08、guser 不存在→00、建立後 ListUnitsByUserUID 可見。測試自 685 → **713 passed / 0 failed**。vcxproj 登記 CreateUnitProtocol.{h,cpp}。**Loopback 未擴充 CREATE_UNIT**（會牽動 MY_UNIT_LIST/ghost 斷言鏈；codec roundtrip + 記憶體內決策層已覆蓋，create→list 副作用以 ListUnitsByUserUID 斷言替代）。
+
 ## 0. 一句話現況
 
 V2 是原 Elsword 韓服伺服器（`X2Project`）的 **C++ 重寫地基**：平台無關的線路格式核心、安全模組已完成並以 golden bytes 測試驗證；最短網路路徑（同步 TCP + 原版 TCP 訊框 + 迴路 echo 整合測試）與 Session 層（SPI 握手換發、驗證失敗踢除、E_HEART_BEAT 丟棄、殭屍檢測、SERV_KEVENT_FROM 標記）已完成並 238 項測試全綠；**遊戲邏輯、非同步網路層未完成；資料庫層已完成 Phase 1（users 表 + 帳號存取層）**。V2 不是可運行的伺服器，不要部署它。

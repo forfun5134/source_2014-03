@@ -28,6 +28,7 @@
 #include "../db/GameStore.h"
 #include "SelectUnitProtocol.h"
 #include "UnitListProtocol.h"
+#include "CreateUnitProtocol.h"
 
 namespace x2 { namespace select_unit {
 
@@ -49,6 +50,20 @@ int32_t HandleSelectUnitReq(db::GameStore& gameDb, int64_t userUID, const Select
                             SelectUnitNot3* outNot3 = nullptr,
                             SelectUnitNot4* outNot4 = nullptr,
                             SelectUnitNot5* outNot5 = nullptr);
+
+// EGS_CREATE_UNIT_REQ 決策（原 GSUserGameCommon::IMPL_ON_FUNC(EGS_CREATE_UNIT_REQ)）：
+//   1) 暱稱驗證：空或 UTF-8 位元組數 > 12 → ERR_CREATE_UNIT_04(29)（原版 CP_ACP 12 bytes；JP 未定義 SERV_NICK_NAME_MINIMUM_CHECK → 無最小長度檢查）
+//      含 KODBC 注入標記（; ' " -- /* */ \）→ ERR_CREATE_UNIT_08(33)（「無法使用的暱稱」）
+//   2) GameStore::CreateUnit（guser 不存在/已刪除 → ERR_CREATE_UNIT_00(25)；暱稱重複 → ERR_CREATE_UNIT_01(26)；
+//      槽位達 USSize → ERR_CREATE_UNIT_05(30)；暱稱 14 天冷卻 → ERR_CREATE_UNIT_06(31)；DB 錯誤 → ERR_CREATE_UNIT_02(27)）
+//   3) 成功 → 重讀角色，kUnitInfo ← PopulateUnitInfoFromGUnit(userUID, authLevel, rec)；
+//      vecSkillSlot / wstrEnableDate 原由 AccountDB(DBE_ACCOUNT_CREATE_UNIT_*) 填寫，V2 一律空（誠實佔位）。
+// 誠實偏差：無職業 templet 表（iClass 僅檢查 tinyint 範圍 0..255，由 GameStore 把關）、
+//   無字串過濾器/PVP NPC 名檢查/每日建立上限（ERR_CREATE_UNIT_03/08/09 的其他路徑未建模）、
+//   原版 S_SERVER_SELECT 狀態閘門與 DBE_ACCOUNT_CREATE_UNIT_REQ 兩段式未建模（V2 單段 game DB）。
+bool HandleCreateUnitReq(db::GameStore& gameDb, int64_t userUID, int authLevel,
+                         const create_unit::CreateUnitReq& req,
+                         create_unit::CreateUnitAck& ack, std::string& err);
 
 // EGS_MY_UNIT_AND_INVENTORY_INFO_LIST_REQ（無參數）決策：
 //   guser（GetOrCreateGUser，缺則建，USSize=50）取 nUnitSlot；ListUnitsByUserUID（Deleted=0，UnitUID 升序）

@@ -36,6 +36,38 @@ std::wstring Utf8ToWide(const std::string& in)
     return out;
 }
 
+// wstring（V2 內部可能是 UTF-32 或 UTF-16；含代理對時成對出現）→ UTF-8
+std::string WideToUtf8(const std::wstring& in)
+{
+    std::string out;
+    for (size_t i = 0; i < in.size(); ++i) {
+        uint32_t cp = static_cast<uint32_t>(in[i]);
+        if (cp >= 0xD800 && cp <= 0xDBFF && i + 1 < in.size()) {
+            uint32_t lo = static_cast<uint32_t>(in[i + 1]);
+            if (lo >= 0xDC00 && lo <= 0xDFFF) {
+                cp = 0x10000u + (((cp - 0xD800) << 10) | (lo - 0xDC00));
+                ++i;
+            }
+        }
+        if (cp < 0x80) {
+            out.push_back(static_cast<char>(cp));
+        } else if (cp < 0x800) {
+            out.push_back(static_cast<char>(0xC0 | (cp >> 6)));
+            out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+        } else if (cp < 0x10000) {
+            out.push_back(static_cast<char>(0xE0 | (cp >> 12)));
+            out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+            out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+        } else {
+            out.push_back(static_cast<char>(0xF0 | (cp >> 18)));
+            out.push_back(static_cast<char>(0x80 | ((cp >> 12) & 0x3F)));
+            out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+            out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+        }
+    }
+    return out;
+}
+
 } // namespace
 
 namespace x2 { namespace select_unit {
@@ -161,6 +193,51 @@ size_t HandleGetMyInventoryReq(const std::map<int64_t, unit::InventoryItemInfo>&
     outAck.iOK = NET_OK;
     outAck.bIsRecommend = false;            // V2 無推薦系統狀態（誠實佔位）
     return outNots.size();
+}
+
+bool HandleCreateUnitReq(db::GameStore& gameDb, int64_t userUID, int authLevel,
+                         const create_unit::CreateUnitReq& req,
+                         create_unit::CreateUnitAck& ack, std::string& err)
+{
+    ack = create_unit::CreateUnitAck{};
+    const std::string nick = WideToUtf8(req.wstrNickName);
+    if (nick.empty() || nick.size() > 12) {
+        ack.iOK = ERR_CREATE_UNIT_04;      // 暱稱長度錯誤（原 CP_ACP > 12 bytes）
+        err.clear();
+        return true;                        // 決策性失敗（非基礎設施錯誤）：仍送 ACK
+    }
+    // KODBC 注入標記（比照原版 IsInvalidMarkIn 的常見集合；V2 無 KODBC 模組）
+    static const char* const kMarks[] = { ";", "'", "\"", "--", "/*", "*/", "\\" };
+    for (const char* m : kMarks) {
+        if (nick.find(m) != std::string::npos) {
+            ack.iOK = ERR_CREATE_UNIT_08;  // 無法使用的暱稱
+            err.clear();
+            return true;
+        }
+    }
+    int64_t unitUID = 0;
+    const auto result = gameDb.CreateUnit(userUID, nick, req.iClass, unitUID, err);
+    switch (result) {
+    case db::CreateUnitResult::Ok: break;
+    case db::CreateUnitResult::UserNotFoundOrDeleted: ack.iOK = ERR_CREATE_UNIT_00; return true;
+    case db::CreateUnitResult::NicknameTaken:         ack.iOK = ERR_CREATE_UNIT_01; return true;
+    case db::CreateUnitResult::CapacityReached:       ack.iOK = ERR_CREATE_UNIT_05; return true;
+    case db::CreateUnitResult::NicknameInCooldown:    ack.iOK = ERR_CREATE_UNIT_06; return true;
+    case db::CreateUnitResult::DbError:               ack.iOK = ERR_CREATE_UNIT_02; return true;  // err 有訊息
+    }
+    db::GUnitRecord rec;
+    bool found = false;
+    if (!gameDb.GetUnitByUID(unitUID, rec, found, err) || !found) {
+        ack.iOK = ERR_CREATE_UNIT_03;      // 建立後讀不回（理論上不該發生）
+        if (err.empty()) err = "unit vanished right after create";
+        return true;
+    }
+    PopulateUnitInfoFromGUnit(userUID, authLevel, rec, ack.kUnitInfo);
+    ack.vecSkillSlot.clear();              // 原由 AccountDB 填；V2 空（誠實佔位）
+    ack.wstrEnableDate = L"";              // 原由 AccountDB 填；V2 空（誠實佔位）
+    ack.iOK = NET_OK;
+    err.clear();
+    return true;
 }
 
 int32_t HandleSelectUnitReq(db::GameStore& gameDb, int64_t userUID, const SelectUnitReq& req,
