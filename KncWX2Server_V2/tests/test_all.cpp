@@ -47,6 +47,7 @@ void RunCreateDeleteFlowTestsByRef(int& pass, int& fail);
 void RunExpTableTestsByRef(int& pass, int& fail);
 void RunStatTableTestsByRef(int& pass, int& fail);
 void RunStringFilterTestsByRef(int& pass, int& fail);
+void RunNicknameFilterFlowTestsByRef(int& pass, int& fail);
 
 static int g_fail = 0, g_pass = 0;
 #define CHECK(cond, name) do { \
@@ -414,6 +415,7 @@ int main() {
     RunExpTableTestsByRef(g_pass, g_fail);
     RunStatTableTestsByRef(g_pass, g_fail);
     RunStringFilterTestsByRef(g_pass, g_fail);
+    RunNicknameFilterFlowTestsByRef(g_pass, g_fail);
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

@@ -271,6 +271,20 @@
 
 **測試**（tests/test_string_filter.cpp，50 項）：字元集閘門（alnum CJK 片假名 全形數字拒 半形括號 韓文 JPEG）、banned exact（NEXON 大小寫不敏感）、banned substring（FUCK/18금）、禁用標記（GM 含大小寫、括號、斜線、百分號、驚嘆號…）、CREATE_UNIT 接線（authLevel 1 擋 NEXON→_08、authLevel 2 GM 繞過、a'b→_08）、CHANGE_NICKNAME/CHECK_NICK_NAME 接線（authLevel 1→_05、GM 繞過、entry-point 透傳）。測試自 1002 → **1052 passed / 0 failed**。vcxproj/filters 登記；Linux 建置腳本自動納入；生建器僅需 xlrd。
 
+## 0x. 2026-11-17 快照（FT_NICKNAME 過濾器迴路整合測試）
+
+**新增** `tests/test_nickname_filter_flow.cpp`（`RunNicknameFilterFlowTestsByRef`）：以真實 mkstemp account/game 雙庫 + TCP loopback 跑 **CONNECT → VERIFY → CREATE_UNIT ×4 → MY_UNIT_AND_INVENTORY_INFO_LIST** 全鏈，authLevel 一律傳 **0（UAL_NORMAL）**：
+
+1. `NEXON`（banned nickname exact）→ ACK `ERR_CREATE_UNIT_08`；
+2. `FUCK之王`（banned word substring「FUCK」）→ `ERR_CREATE_UNIT_08`；
+3. `a'b`（JP 字元集閘門拒絕，半形單引號）→ `ERR_CREATE_UNIT_08`；
+4. `湯姆熊`（合法 CJK）→ `NET_OK`；
+5. MY_UNIT_LIST 只見建立成功的那一隻（unitUID 與第 4 步一致；前 3 個失敗請求不落库）。
+
+意義：§0w 的過濾器先前僅有決策層單元測試；本測試首次以**真實 socket + 真實雙庫**驗證非 GM 呼叫端的線路級拒絕與通過閉環（codec → 決策 → DB）。（既有 `tests/test_create_delete_flow.cpp` 以 authLevel=5 為 GM 繞過 harness，語意保留不動。）
+
+測試自 1052 → **1085 passed / 0 failed**。無新模組 → vcxproj 無需登記。§12-11（GDenyOption 等）不受影響。
+
 ## 0. 一句話現況
 
 V2 是原 Elsword 韓服伺服器（`X2Project`）的 **C++ 重寫地基**：平台無關的線路格式核心、安全模組已完成並以 golden bytes 測試驗證；最短網路路徑（同步 TCP + 原版 TCP 訊框 + 迴路 echo 整合測試）與 Session 層（SPI 握手換發、驗證失敗踢除、E_HEART_BEAT 丟棄、殭屍檢測、SERV_KEVENT_FROM 標記）已完成並 238 項測試全綠；**遊戲邏輯、非同步網路層未完成；資料庫層已完成 Phase 1（users 表 + 帳號存取層）**。V2 不是可運行的伺服器，不要部署它。
