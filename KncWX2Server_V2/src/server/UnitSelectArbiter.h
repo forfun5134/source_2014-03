@@ -31,6 +31,7 @@
 #include "CreateUnitProtocol.h"
 #include "DeleteUnitProtocol.h"
 #include "CreateTodayCountProtocol.h"
+#include "CheckNicknameProtocol.h"
 
 namespace x2 { namespace select_unit {
 
@@ -86,6 +87,19 @@ bool HandleDeleteUnitReq(db::GameStore& gameDb, int64_t userUID, int authLevel,
 //   V2 採「Deleted=0 且 RegDate >= 本機 UTC 今日 00:00」口徑，與 gup_create_unit 的 14 天冷卻查詢風格一致。
 bool HandleGetCreateUnitTodayCountReq(db::GameStore& gameDb, int64_t userUID,
                                       today_count::GetCreateUnitTodayCountAck& ack, std::string& err);
+
+// EGS_ENTRY_POINT_CHECK_NICK_NAME_REQ 決策（原 IMPL_ON_FUNC(EGS_ENTRY_POINT_CHECK_NICK_NAME_REQ)）：
+//   1) 暱稱 UTF-8 位元組數 1..12 → 否則 ERR_RESTORE_NICK_NAME_06(334)（原 CP_ACP > 12 bytes）
+//   2) KODBC 注入標記（; ' " -- /* */ \）→ ERR_RESTORE_NICK_NAME_05(333)（原 IsInvalidMarkIn → 同錯誤碼）
+//   3) GameStore::CheckNicknameAvailable → Available→NET_OK；Taken→ERR_RESTORE_NICK_NAME_02(330)（原 -1）；
+//      InCooldown→ERR_RESTORE_NICK_NAME_03(331)（原 -2）；DbError → return false（基礎設施錯誤）
+//   ack.iUnitUID=0（原碼未填）；ack.wstrNickName=回顯。
+// 誠實偏差：無 SiCXSLStringFilter（FT_NICKNAME，原碼對 GetAuthLevel() < UAL_GM 生效）→ 無效暱稱一律不擋（僅 1/2 兩關）；
+//   原碼依 server group 路由 1st/2nd GameDB → V2 單一 game DB，m_iServerGroup 忽略；
+//   AF_INTERNAL 分支（default: 內部旗標直接放行）未建模——V2 一律走查詢。
+bool HandleCheckNicknameReq(db::GameStore& gameDb,
+                            const check_nickname::EntryPointCheckNickNameReq& req,
+                            check_nickname::EntryPointCheckNickNameAck& ack, std::string& err);
 
 // EGS_MY_UNIT_AND_INVENTORY_INFO_LIST_REQ（無參數）決策：
 //   guser（GetOrCreateGUser，缺則建，USSize=50）取 nUnitSlot；ListUnitsByUserUID（Deleted=0，UnitUID 升序）

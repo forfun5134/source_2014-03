@@ -143,6 +143,20 @@
 
 **累計事件覆蓋（REQ/ACK 成對）**：CREATE(36/37)、DELETE(38/39)、SELECT(40/41)、SELECT_UNIT 1~5_NOT(42~46)、GET_MY_INVENTORY(47/48/49)、MY_UNIT_AND_INVENTORY_INFO_LIST(34/35)、GET_CREATE_UNIT_TODAY_COUNT(1163→1165)。
 
+## 0o. 2026-11-17 快照（ENTRY_POINT_CHECK_NICK_NAME 流程移植）
+
+**GameStore**：新增 `NicknameCheckResult CheckNicknameAvailable(nickname, err)`——純查詢（`gunit_nickname` 活躍暱稱 → `Taken`；`gdeleted_nickname_history` 14 天內 → `InCooldown`；否則 `Available`）。新增 enum `NicknameCheckResult { Available, Taken, InCooldown, DbError }`。
+
+**NetError**（NetError_def.h enum 機讀計數核對值）：補 `ERR_RESTORE_NICK_NAME_02=330`（同名已存在，原 gup_check_nickname -1）、`_03=331`（冷卻，原 -2）、`_05=333`（非法暱稱/注入標記）、`_06=334`（暱稱長度）。
+
+**新增模組** `src/server/CheckNicknameProtocol.{h,cpp}`（命名空間 `x2::check_nickname`）：`EntryPointCheckNickNameReq`（EGS_ENTRY_POINT_CHECK_NICK_NAME_REQ=1161；`{int32 iServerGroup, wstring wstrNickName}`，PUT 順序機讀自 ClientPacket.cpp:15013）、`EntryPointCheckNickNameAck`（=1162；**`KEGS_CHECK_NICK_NAME_ACK`** typedef 別名 `KEGS_ENTRY_POINT_CHECK_NICK_NAME_ACK`；`{int32 iOK, int64 iUnitUID, wstring wstrNickName}`）。wire 佈局自洽，**未對原 SDK 實機驗證**。
+
+**決策層** `HandleCheckNicknameReq(gameDb, req, ack, err)`：UTF-8 位元組數 1..12 否則 `ERR_RESTORE_NICK_NAME_06`；KODBC 注入標記 → `ERR_RESTORE_NICK_NAME_05`；`CheckNicknameAvailable` 映射 Available→NET_OK / Taken→02 / InCooldown→03；DB 錯誤 → return false。ack.iUnitUID=0（原碼未填）、wstrNickName=回顯。
+
+⚠ 誠實偏差：無 SiCXSLStringFilter（FT_NICKNAME；原碼對 GetAuthLevel() < UAL_GM 生效）→ 無效暱稱不擋（僅長度+注入兩關）；原碼依 server group 路由 1st/2nd GameDB → V2 單一 game DB，**m_iServerGroup 忽略**；AF_INTERNAL 分支（內部旗標直接放行）未建模；gup_check_nickname 在 NULL SERV_ALL_RENEWAL_SP 下的精確口徑以 V2 兩表查詢近似（與 CreateUnit 的冷卻查詢一致）。SERV_ENTRY_POINT 已定義（ServerDefine.h:4304）故功能可達。
+
+**測試**（tests/test_check_nickname.cpp，16 項）：REQ/ACK codec roundtrip（含 CJK）、可用→NET_OK+回顯、空→06、13+ bytes→06（UTF-8 CJK 3B/字邊界）、注入→05、暱稱已存在→02、SoftDeleteUnit 後冷卻→03。測試自 766 → **790 passed / 0 failed**。vcxproj 登記 CheckNicknameProtocol.{h,cpp}；Loopback 未擴充。**註**：首版測試暱稱為 21-byte CJK 誤判（>12）導致 2 FAIL，改用 9-byte 暱稱後全綠——UTF-8 位元組口徑測試需自量長度。
+
 ## 0. 一句話現況
 
 V2 是原 Elsword 韓服伺服器（`X2Project`）的 **C++ 重寫地基**：平台無關的線路格式核心、安全模組已完成並以 golden bytes 測試驗證；最短網路路徑（同步 TCP + 原版 TCP 訊框 + 迴路 echo 整合測試）與 Session 層（SPI 握手換發、驗證失敗踢除、E_HEART_BEAT 丟棄、殭屍檢測、SERV_KEVENT_FROM 標記）已完成並 238 項測試全綠；**遊戲邏輯、非同步網路層未完成；資料庫層已完成 Phase 1（users 表 + 帳號存取層）**。V2 不是可運行的伺服器，不要部署它。

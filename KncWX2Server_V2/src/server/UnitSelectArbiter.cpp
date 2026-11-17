@@ -231,6 +231,37 @@ bool HandleDeleteUnitReq(db::GameStore& gameDb, int64_t userUID, int authLevel,
     return true;
 }
 
+bool HandleCheckNicknameReq(db::GameStore& gameDb,
+                            const check_nickname::EntryPointCheckNickNameReq& req,
+                            check_nickname::EntryPointCheckNickNameAck& ack, std::string& err)
+{
+    ack = check_nickname::EntryPointCheckNickNameAck{};
+    const std::string nick = WideToUtf8(req.wstrNickName);
+    if (nick.empty() || nick.size() > 12) {
+        ack.iOK = ERR_RESTORE_NICK_NAME_06;   // 暱稱長度錯誤（原 CP_ACP > 12 bytes）
+        err.clear();
+        return true;
+    }
+    static const char* const kMarks[] = { ";", "'", "\"", "--", "/*", "*/", "\\" };
+    for (const char* m : kMarks) {
+        if (nick.find(m) != std::string::npos) {
+            ack.iOK = ERR_RESTORE_NICK_NAME_05;   // 非法暱稱（注入標記）
+            err.clear();
+            return true;
+        }
+    }
+    switch (gameDb.CheckNicknameAvailable(nick, err)) {
+    case db::NicknameCheckResult::Available:  ack.iOK = NET_OK; break;
+    case db::NicknameCheckResult::Taken:      ack.iOK = ERR_RESTORE_NICK_NAME_02; break;
+    case db::NicknameCheckResult::InCooldown: ack.iOK = ERR_RESTORE_NICK_NAME_03; break;
+    case db::NicknameCheckResult::DbError:    return false;   // 基礎設施錯誤
+    }
+    ack.iUnitUID = 0;                 // 原碼未填 → 0
+    ack.wstrNickName = req.wstrNickName;   // 回顯
+    if (ack.iOK == NET_OK) err.clear();
+    return true;
+}
+
 bool HandleGetCreateUnitTodayCountReq(db::GameStore& gameDb, int64_t userUID,
                                       today_count::GetCreateUnitTodayCountAck& ack, std::string& err)
 {

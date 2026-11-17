@@ -354,6 +354,32 @@ bool GameStore::GetUnitByUID(int64_t unitUID, GUnitRecord& out, bool& found, std
     return true;
 }
 
+NicknameCheckResult GameStore::CheckNicknameAvailable(const std::string& nickname, std::string& err)
+{
+    {   // 1) 暱稱已存在（含活躍角色）
+        Statement st;
+        if (!st.Prepare(m_db, "SELECT 1 FROM gunit_nickname WHERE NickName = ? COLLATE NOCASE LIMIT 1;", err))
+            return NicknameCheckResult::DbError;
+        if (!st.BindText(1, nickname, err)) return NicknameCheckResult::DbError;
+        std::string stepErr;
+        if (st.StepRow(stepErr)) { err.clear(); return NicknameCheckResult::Taken; }
+        if (!stepErr.empty()) { err = stepErr; return NicknameCheckResult::DbError; }
+    }
+    {   // 2) 14 天冷卻（GDeletedNickNameHistory）
+        Statement st;
+        if (!st.Prepare(m_db,
+                "SELECT 1 FROM gdeleted_nickname_history"
+                " WHERE NickName = ? COLLATE NOCASE AND RegDate > datetime('now', '-14 days') LIMIT 1;", err))
+            return NicknameCheckResult::DbError;
+        if (!st.BindText(1, nickname, err)) return NicknameCheckResult::DbError;
+        std::string stepErr;
+        if (st.StepRow(stepErr)) { err.clear(); return NicknameCheckResult::InCooldown; }
+        if (!stepErr.empty()) { err = stepErr; return NicknameCheckResult::DbError; }
+    }
+    err.clear();
+    return NicknameCheckResult::Available;
+}
+
 bool GameStore::CountUnitsCreatedTodayByUser(int64_t userUID, int& count, std::string& err)
 {
     Statement st;

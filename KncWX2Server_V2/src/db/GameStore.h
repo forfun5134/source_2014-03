@@ -75,6 +75,14 @@ struct GUnitRecord
     std::string nickname;             // JOIN gunit_nickname 帶出；軟刪除後 NickName 已被釋放（NULL），此列為空字串
 };
 
+enum class NicknameCheckResult
+{
+    Available,      // 可用
+    Taken,          // 原 gup_check_nickname -1：暱稱已存在
+    InCooldown,     // 原 gup_check_nickname -2：暱稱 14 天冷卻期內
+    DbError         // 基礎設施錯誤（err 有訊息）
+};
+
 enum class CreateUnitResult
 {
     Ok,                  // 0（原 iOK=0）
@@ -114,6 +122,8 @@ public:
     bool SoftDeleteUnit(int64_t unitUID, std::string& err);
     // 原 P_GUnit_CreateCNT_GET：計算本使用者「今日」建立（未刪除）的角色數。今日=本機 UTC 日（server day）。
     bool CountUnitsCreatedTodayByUser(int64_t userUID, int& count, std::string& err);
+    // 原 gup_check_nickname 語意：暱稱可用性（僅查詢；不寫入）。
+    NicknameCheckResult CheckNicknameAvailable(const std::string& nickname, std::string& err);
 
     // 角色登入：LoginCount+1、LastDate=now（不修改 PlayDayCnt——原版對應邏輯分散於多個 proc，未移植）
     bool RecordUnitLogin(int64_t unitUID, std::string& err);

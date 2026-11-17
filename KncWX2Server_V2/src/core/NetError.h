@@ -36,6 +36,10 @@ inline constexpr int ERR_SELECT_UNIT_05 = 39;  // 角色選擇過程 DB 錯誤
 inline constexpr int ERR_SELECT_UNIT_06 = 40;  // 暱稱需要變更
 inline constexpr int ERR_SELECT_UNIT_07 = 1081; // 非正常的角色選擇（實測編譯值）
 // NetError_def.h enum 計數機讀核對（前綴均連續 enum，已驗證 CREATE_UNIT_00=25/SELECT_UNIT_05=39/SELECT_UNIT_07=1081 顯式值等與既有常數一致）
+inline constexpr int ERR_RESTORE_NICK_NAME_02 = 330; // 同名暱稱已存在（原 gup_check_nickname -1）
+inline constexpr int ERR_RESTORE_NICK_NAME_03 = 331; // 暱稱 14 天冷卻中（原 gup_check_nickname -2）
+inline constexpr int ERR_RESTORE_NICK_NAME_05 = 333; // 非法暱稱（過濾器/注入標記）
+inline constexpr int ERR_RESTORE_NICK_NAME_06 = 334; // 暱稱長度錯誤
 inline constexpr int ERR_DELETE_UNIT_00 = 986; // 無法找到要刪除的角色（原 -1/-1）
 inline constexpr int ERR_DELETE_UNIT_05 = 987; // 角色刪除失敗（原 -1 以外的其他失敗）
 // ERR_DELETE_UNIT_01..04 = 979..982（[CN] SERV_UNIT_WAIT_DELETE 路徑，該巨集未定義且 JP 未啟用）
