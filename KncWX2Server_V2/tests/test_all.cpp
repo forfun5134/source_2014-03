@@ -39,6 +39,7 @@ void RunCreateUnitTestsByRef(int& pass, int& fail);
 void RunDeleteUnitTestsByRef(int& pass, int& fail);
 void RunCreateTodayCountTestsByRef(int& pass, int& fail);
 void RunCheckNicknameTestsByRef(int& pass, int& fail);
+void RunChangeNicknameTestsByRef(int& pass, int& fail);
 
 static int g_fail = 0, g_pass = 0;
 #define CHECK(cond, name) do { \
@@ -398,6 +399,7 @@ int main() {
     RunDeleteUnitTestsByRef(g_pass, g_fail);
     RunCreateTodayCountTestsByRef(g_pass, g_fail);
     RunCheckNicknameTestsByRef(g_pass, g_fail);
+    RunChangeNicknameTestsByRef(g_pass, g_fail);
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

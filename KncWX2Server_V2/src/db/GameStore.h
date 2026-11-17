@@ -123,7 +123,21 @@ public:
     // 原 P_GUnit_CreateCNT_GET：計算本使用者「今日」建立（未刪除）的角色數。今日=本機 UTC 日（server day）。
     bool CountUnitsCreatedTodayByUser(int64_t userUID, int& count, std::string& err);
     // 原 gup_check_nickname 語意：暱稱可用性（僅查詢；不寫入）。
-    NicknameCheckResult CheckNicknameAvailable(const std::string& nickname, std::string& err);
+    NicknameCheckResult CheckNicknameAvailable(const std::string& nickname, std::string& err,
+                                               int64_t excludeUnitUID = 0);   // 排除指定角色自身（改名情境）
+    // 原 gup_restore_nickname 語意：變更角色暱稱（非 bCheckOnly 分支）。事務化；
+    // 舊暱稱寫入 gdeleted_nickname_history（對應 CreateUnit/SoftDeleteUnit 的 14 天冷卻機制）。
+    enum class ChangeNicknameResult
+    {
+        Ok,                  // 0（原 iOK=0）
+        UnitNotFoundOrDeleted, // 原 -1 → ERR_RESTORE_NICK_NAME_00
+        NotRestorable,       // 原 -2 → ERR_RESTORE_NICK_NAME_01（V2 未使用路徑，保留映射）
+        Taken,               // 原 -3 → ERR_RESTORE_NICK_NAME_02
+        InCooldown,          // 原 -4 → ERR_RESTORE_NICK_NAME_03
+        Failure,             // 原 -5 → ERR_RESTORE_NICK_NAME_04
+        DbError              // 基礎設施錯誤（err 有訊息）
+    };
+    ChangeNicknameResult ChangeUnitNickname(int64_t unitUID, const std::string& newNickname, std::string& err);
 
     // 角色登入：LoginCount+1、LastDate=now（不修改 PlayDayCnt——原版對應邏輯分散於多個 proc，未移植）
     bool RecordUnitLogin(int64_t unitUID, std::string& err);

@@ -113,6 +113,7 @@
     <ClCompile Include="src\server\DeleteUnitProtocol.cpp" />
     <ClCompile Include="src\server\CreateTodayCountProtocol.cpp" />
     <ClCompile Include="src\server\CheckNicknameProtocol.cpp" />
+    <ClCompile Include="src\server\ChangeNicknameProtocol.cpp" />
     <ClCompile Include="src\server\UnitData.cpp" />
     <ClCompile Include="src\core\SerBuffer.cpp" />
     <ClCompile Include="src\core\UidType.cpp" />
@@ -163,6 +164,7 @@
     <ClInclude Include="src\server\DeleteUnitProtocol.h" />
     <ClInclude Include="src\server\CreateTodayCountProtocol.h" />
     <ClInclude Include="src\server\CheckNicknameProtocol.h" />
+    <ClInclude Include="src\server\ChangeNicknameProtocol.h" />
     <ClInclude Include="src\server\UnitData.h" />
     <ClInclude Include="src\server\WireHelpers.h" />
     <ClInclude Include="src\core\NetError.h" />

@@ -262,6 +262,72 @@ bool HandleCheckNicknameReq(db::GameStore& gameDb,
     return true;
 }
 
+bool HandleChangeNicknameReq(db::GameStore& gameDb, int64_t userUID,
+                             const change_nickname::ChangeNickNameReq& req,
+                             change_nickname::ChangeNickNameAck& ack, std::string& err)
+{
+    ack = change_nickname::ChangeNickNameAck{};
+    ack.iUnitUID = req.iUnitUID;
+    ack.wstrNickName = req.wstrNickName;
+    ack.bCheckOnly = req.bCheckOnly;
+
+    const std::string nick = WideToUtf8(req.wstrNickName);
+    if (nick.empty() || nick.size() > 12) {
+        ack.iOK = ERR_RESTORE_NICK_NAME_06;   // 暱稱長度錯誤
+        err.clear();
+        return true;
+    }
+    static const char* const kMarks[] = { ";", "'", "\"", "--", "/*", "*/", "\\" };
+    for (const char* m : kMarks) {
+        if (nick.find(m) != std::string::npos) {
+            ack.iOK = ERR_RESTORE_NICK_NAME_05;   // 非法暱稱（注入標記）
+            err.clear();
+            return true;
+        }
+    }
+    // 擁有權閘門（V2 加固；原碼未檢查）
+    db::GUnitRecord rec;
+    bool found = false;
+    if (!gameDb.GetUnitByUID(req.iUnitUID, rec, found, err)) return false;
+    if (!found || rec.deleted || rec.userUID != userUID) {
+        ack.iOK = ERR_RESTORE_NICK_NAME_00;   // 找不到可改名的角色
+        err.clear();
+        return true;
+    }
+    if (req.bCheckOnly) {
+        switch (gameDb.CheckNicknameAvailable(nick, err, req.iUnitUID)) {
+        case db::NicknameCheckResult::Available:  ack.iOK = NET_OK; err.clear(); break;
+        case db::NicknameCheckResult::Taken:      ack.iOK = ERR_RESTORE_NICK_NAME_02; err.clear(); break;
+        case db::NicknameCheckResult::InCooldown: ack.iOK = ERR_RESTORE_NICK_NAME_03; err.clear(); break;
+        case db::NicknameCheckResult::DbError:    return false;
+        }
+        return true;
+    }
+    switch (gameDb.ChangeUnitNickname(req.iUnitUID, nick, err)) {
+    case db::GameStore::ChangeNicknameResult::Ok:                 ack.iOK = NET_OK; break;
+    case db::GameStore::ChangeNicknameResult::UnitNotFoundOrDeleted: ack.iOK = ERR_RESTORE_NICK_NAME_00; break;
+    case db::GameStore::ChangeNicknameResult::NotRestorable:      ack.iOK = ERR_RESTORE_NICK_NAME_01; break;
+    case db::GameStore::ChangeNicknameResult::Taken:              ack.iOK = ERR_RESTORE_NICK_NAME_02; break;
+    case db::GameStore::ChangeNicknameResult::InCooldown:         ack.iOK = ERR_RESTORE_NICK_NAME_03; break;
+    case db::GameStore::ChangeNicknameResult::Failure:            ack.iOK = ERR_RESTORE_NICK_NAME_04; break;
+    case db::GameStore::ChangeNicknameResult::DbError:            return false;
+    }
+    if (ack.iOK == NET_OK) err.clear();
+    return true;
+}
+
+bool HandleEntryPointChangeNicknameReq(db::GameStore& gameDb, int64_t userUID,
+                                       const change_nickname::EntryPointChangeNickNameReq& req,
+                                       change_nickname::ChangeNickNameAck& ack, std::string& err)
+{
+    // V2 單一 game DB，忽略 iServerGroup；共用決策（見 HandleChangeNicknameReq 之說明）
+    change_nickname::ChangeNickNameReq sub;
+    sub.iUnitUID = req.iUnitUID;
+    sub.wstrNickName = req.wstrNickName;
+    sub.bCheckOnly = req.bCheckOnly;
+    return HandleChangeNicknameReq(gameDb, userUID, sub, ack, err);
+}
+
 bool HandleGetCreateUnitTodayCountReq(db::GameStore& gameDb, int64_t userUID,
                                       today_count::GetCreateUnitTodayCountAck& ack, std::string& err)
 {

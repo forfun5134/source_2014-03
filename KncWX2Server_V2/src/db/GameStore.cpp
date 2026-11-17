@@ -354,13 +354,15 @@ bool GameStore::GetUnitByUID(int64_t unitUID, GUnitRecord& out, bool& found, std
     return true;
 }
 
-NicknameCheckResult GameStore::CheckNicknameAvailable(const std::string& nickname, std::string& err)
+NicknameCheckResult GameStore::CheckNicknameAvailable(const std::string& nickname, std::string& err,
+                                                      int64_t excludeUnitUID)
 {
-    {   // 1) 暱稱已存在（含活躍角色）
+    {   // 1) 暱稱已存在（含活躍角色；excludeUnitUID 排除自身）
         Statement st;
-        if (!st.Prepare(m_db, "SELECT 1 FROM gunit_nickname WHERE NickName = ? COLLATE NOCASE LIMIT 1;", err))
+        if (!st.Prepare(m_db, "SELECT 1 FROM gunit_nickname WHERE NickName = ? COLLATE NOCASE AND UnitUID != ? LIMIT 1;", err))
             return NicknameCheckResult::DbError;
         if (!st.BindText(1, nickname, err)) return NicknameCheckResult::DbError;
+        if (!st.BindInt(2, excludeUnitUID, err)) return NicknameCheckResult::DbError;
         std::string stepErr;
         if (st.StepRow(stepErr)) { err.clear(); return NicknameCheckResult::Taken; }
         if (!stepErr.empty()) { err = stepErr; return NicknameCheckResult::DbError; }
@@ -378,6 +380,70 @@ NicknameCheckResult GameStore::CheckNicknameAvailable(const std::string& nicknam
     }
     err.clear();
     return NicknameCheckResult::Available;
+}
+
+GameStore::ChangeNicknameResult GameStore::ChangeUnitNickname(int64_t unitUID, const std::string& newNickname, std::string& err)
+{
+    if (newNickname.empty() || newNickname.size() > 16) { err = "nickname must be 1..16 bytes"; return ChangeNicknameResult::Failure; }
+    if (!m_db.Begin(err)) return ChangeNicknameResult::DbError;
+
+    std::string oldNickname;
+    {   // 1) 角色存在且未刪除；讀出目前暱稱
+        Statement st;
+        if (!st.Prepare(m_db,
+                "SELECT u.Deleted, COALESCE(n.NickName, '') FROM gunit u"
+                " LEFT JOIN gunit_nickname n ON n.UnitUID = u.UnitUID WHERE u.UnitUID = ?;", err)) {
+            std::string u; m_db.Rollback(u); return ChangeNicknameResult::DbError;
+        }
+        if (!st.BindInt(1, unitUID, err)) { std::string u; m_db.Rollback(u); return ChangeNicknameResult::DbError; }
+        std::string stepErr;
+        if (st.StepRow(stepErr)) {
+            const bool deleted = st.ColumnInt64(0) != 0;
+            oldNickname = st.ColumnText(1);
+            err.clear();
+            if (deleted) { std::string u; m_db.Rollback(u); err.clear(); return ChangeNicknameResult::UnitNotFoundOrDeleted; }
+        } else {
+            std::string u; m_db.Rollback(u);
+            err = stepErr.empty() ? ("unit not found: " + std::to_string(unitUID)) : stepErr;
+            return ChangeNicknameResult::UnitNotFoundOrDeleted;
+        }
+    }
+    // 2) 新暱稱可用性（排除自身）+ 冷卻
+    switch (CheckNicknameAvailable(newNickname, err, unitUID)) {
+    case NicknameCheckResult::Available: break;
+    case NicknameCheckResult::Taken:     { std::string u; m_db.Rollback(u); err.clear(); return ChangeNicknameResult::Taken; }
+    case NicknameCheckResult::InCooldown:{ std::string u; m_db.Rollback(u); err.clear(); return ChangeNicknameResult::InCooldown; }
+    case NicknameCheckResult::DbError:   { std::string u; m_db.Rollback(u); return ChangeNicknameResult::DbError; }
+    }
+    // 3) 舊暱稱寫入冷卻歷史（若有）——與 SoftDeleteUnit 同語意
+    if (!oldNickname.empty()) {
+        Statement st;
+        if (!st.Prepare(m_db,
+                "INSERT INTO gdeleted_nickname_history (NickName, UnitUID, RegDate) VALUES (?, ?, datetime('now'));", err)) {
+            std::string u; m_db.Rollback(u); return ChangeNicknameResult::DbError;
+        }
+        if (!st.BindText(1, oldNickname, err)) { std::string u; m_db.Rollback(u); return ChangeNicknameResult::DbError; }
+        if (!st.BindInt(2, unitUID, err)) { std::string u; m_db.Rollback(u); return ChangeNicknameResult::DbError; }
+        std::string stepErr;
+        if (st.StepRow(stepErr)) { std::string u; m_db.Rollback(u); err = "unexpected row from INSERT"; return ChangeNicknameResult::DbError; }
+        if (!stepErr.empty()) { std::string u; m_db.Rollback(u); err = stepErr; return ChangeNicknameResult::DbError; }
+    }
+    // 4) 更新暱稱
+    {
+        Statement st;
+        if (!st.Prepare(m_db, "UPDATE gunit_nickname SET NickName = ?, RegDate = datetime('now') WHERE UnitUID = ?;", err)) {
+            std::string u; m_db.Rollback(u); return ChangeNicknameResult::DbError;
+        }
+        if (!st.BindText(1, newNickname, err)) { std::string u; m_db.Rollback(u); return ChangeNicknameResult::DbError; }
+        if (!st.BindInt(2, unitUID, err)) { std::string u; m_db.Rollback(u); return ChangeNicknameResult::DbError; }
+        std::string stepErr;
+        if (st.StepRow(stepErr)) { std::string u; m_db.Rollback(u); err = "unexpected row from UPDATE"; return ChangeNicknameResult::DbError; }
+        if (!stepErr.empty()) { std::string u; m_db.Rollback(u); err = stepErr; return ChangeNicknameResult::DbError; }
+        st.Finalize();
+    }
+    if (!m_db.Commit(err)) return ChangeNicknameResult::DbError;
+    err.clear();
+    return ChangeNicknameResult::Ok;
 }
 
 bool GameStore::CountUnitsCreatedTodayByUser(int64_t userUID, int& count, std::string& err)

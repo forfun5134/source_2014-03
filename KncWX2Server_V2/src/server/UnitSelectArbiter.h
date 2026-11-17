@@ -32,6 +32,7 @@
 #include "DeleteUnitProtocol.h"
 #include "CreateTodayCountProtocol.h"
 #include "CheckNicknameProtocol.h"
+#include "ChangeNicknameProtocol.h"
 
 namespace x2 { namespace select_unit {
 
@@ -100,6 +101,26 @@ bool HandleGetCreateUnitTodayCountReq(db::GameStore& gameDb, int64_t userUID,
 bool HandleCheckNicknameReq(db::GameStore& gameDb,
                             const check_nickname::EntryPointCheckNickNameReq& req,
                             check_nickname::EntryPointCheckNickNameAck& ack, std::string& err);
+
+// EGS_CHANGE_NICK_NAME_REQ / EGS_ENTRY_POINT_CHANGE_NICK_NAME_REQ 決策
+// （原 IMPL_ON_FUNC(EGS_CHANGE_NICK_NAME_REQ) + EGS_ENTRY_POINT_CHANGE_NICK_NAME_REQ，兩者共享 DBE_CHANGE_NICK_NAME_REQ 與 EGS_CHANGE_NICK_NAME_ACK）：
+//   1) 暱稱 UTF-8 位元組數 1..12 否則 ERR_RESTORE_NICK_NAME_06(334)；KODBC 注入標記 → ERR_RESTORE_NICK_NAME_05(333)
+//   2) 擁有權：GetUnitByUID(unitUID) 不存在/已刪除/rec.userUID != userUID → ERR_RESTORE_NICK_NAME_00(328)
+//      （原碼未檢查擁有權——任何客戶端可改任意角色暱稱；V2 加上擁有權閘門，誠實偏差）
+//   3) bCheckOnly=true：GameStore::CheckNicknameAvailable（**排除自身單位**——unitUID 對應自己時不算占用）
+//      Available→NET_OK / Taken→02(330) / InCooldown→03(331)
+//   4) bCheckOnly=false：GameStore::ChangeUnitNickname（事務化：讀舊暱稱→可用性→舊暱稱入冷卻歷史→UPDATE）
+//      Ok→NET_OK / UnitNotFoundOrDeleted→00(328) / Taken→02 / InCooldown→03 / Failure→04(332) / DbError→false
+// ack 回顯 m_iUnitUID / m_wstrNickName / m_bCheckOnly。
+// 誠實偏差：無 SiCXSLStringFilter（FT_NICKNAME）；無 SERV_PVP_NEW_SYSTEM NPC 名檢查（該巨集已定義）→ 不擋；
+//   原碼依 server group 路由 1st/2nd GameDB → V2 單一 game DB，iServerGroup 忽略；
+//   SERV_GUARANTEE_UNIQUENESS_OF_NAME_CN 未定義 → 無 Giant RoleReg 路徑；成功後無 LogDB（ELOG_CHANGE_NICK_NAME_NOT）。
+bool HandleChangeNicknameReq(db::GameStore& gameDb, int64_t userUID,
+                             const change_nickname::ChangeNickNameReq& req,
+                             change_nickname::ChangeNickNameAck& ack, std::string& err);
+bool HandleEntryPointChangeNicknameReq(db::GameStore& gameDb, int64_t userUID,
+                                       const change_nickname::EntryPointChangeNickNameReq& req,
+                                       change_nickname::ChangeNickNameAck& ack, std::string& err);
 
 // EGS_MY_UNIT_AND_INVENTORY_INFO_LIST_REQ（無參數）決策：
 //   guser（GetOrCreateGUser，缺則建，USSize=50）取 nUnitSlot；ListUnitsByUserUID（Deleted=0，UnitUID 升序）

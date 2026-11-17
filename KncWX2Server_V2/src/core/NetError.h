@@ -36,6 +36,9 @@ inline constexpr int ERR_SELECT_UNIT_05 = 39;  // 角色選擇過程 DB 錯誤
 inline constexpr int ERR_SELECT_UNIT_06 = 40;  // 暱稱需要變更
 inline constexpr int ERR_SELECT_UNIT_07 = 1081; // 非正常的角色選擇（實測編譯值）
 // NetError_def.h enum 計數機讀核對（前綴均連續 enum，已驗證 CREATE_UNIT_00=25/SELECT_UNIT_05=39/SELECT_UNIT_07=1081 顯式值等與既有常數一致）
+inline constexpr int ERR_RESTORE_NICK_NAME_00 = 328; // 無法找到角色（gup_restore_nickname -1）
+inline constexpr int ERR_RESTORE_NICK_NAME_01 = 329; // 非暱稱復原對象（gup_restore_nickname -2）
+inline constexpr int ERR_RESTORE_NICK_NAME_04 = 332; // 暱稱復原失敗（gup_restore_nickname -5；SP 未命中）
 inline constexpr int ERR_RESTORE_NICK_NAME_02 = 330; // 同名暱稱已存在（原 gup_check_nickname -1）
 inline constexpr int ERR_RESTORE_NICK_NAME_03 = 331; // 暱稱 14 天冷卻中（原 gup_check_nickname -2）
 inline constexpr int ERR_RESTORE_NICK_NAME_05 = 333; // 非法暱稱（過濾器/注入標記）

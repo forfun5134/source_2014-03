@@ -157,6 +157,20 @@
 
 **測試**（tests/test_check_nickname.cpp，16 項）：REQ/ACK codec roundtrip（含 CJK）、可用→NET_OK+回顯、空→06、13+ bytes→06（UTF-8 CJK 3B/字邊界）、注入→05、暱稱已存在→02、SoftDeleteUnit 後冷卻→03。測試自 766 → **790 passed / 0 failed**。vcxproj 登記 CheckNicknameProtocol.{h,cpp}；Loopback 未擴充。**註**：首版測試暱稱為 21-byte CJK 誤判（>12）導致 2 FAIL，改用 9-byte 暱稱後全綠——UTF-8 位元組口徑測試需自量長度。
 
+## 0p. 2026-11-17 快照（CHANGE_NICK_NAME 流程移植）
+
+**NetError**（NetError_def.h enum 機讀計數核對值；解析器已重現既有信任常數）：補 `ERR_RESTORE_NICK_NAME_00=328`（找不到角色，原 -1）、`_01=329`（非復原對象，原 -2）、`_04=332`（復原失敗/SP 未命中，原 -5）。
+
+**GameStore**：① `CheckNicknameAvailable` 增加 `excludeUnitUID` 參數（預設 0；`UnitUID != ?` 排除自身——改名情境用）；② 新增 enum `ChangeNicknameResult{Ok, UnitNotFoundOrDeleted, NotRestorable, Taken, InCooldown, Failure, DbError}` 與 `ChangeUnitNickname(unitUID, newNickname)`——事務化：讀舊暱稱（含刪除標記）→ `CheckNicknameAvailable`（排除自身）→ **舊暱稱寫入 `gdeleted_nickname_history`**（與 SoftDeleteUnit 同語意）→ `UPDATE gunit_nickname`。
+
+**新增模組** `src/server/ChangeNicknameProtocol.{h,cpp}`（命名空間 `x2::change_nickname`）：`ChangeNickNameReq`（EGS_CHANGE_NICK_NAME_REQ=431；`{iUnitUID, wstrNickName, bCheckOnly}`，PUT 順序機讀自 ClientPacket.cpp:5715）、`EntryPointChangeNickNameReq`（EGS_ENTRY_POINT_CHANGE_NICK_NAME_REQ=1168；`{iServerGroup, iUnitUID, wstrNickName, bCheckOnly}`，:15044）、`ChangeNickNameAck`（EGS_CHANGE_NICK_NAME_ACK=432；`{iOK, iUnitUID, wstrNickName, bCheckOnly}`，:5731）。wire 佈局自洽，**未對原 SDK 實機驗證**。
+
+**決策層** `HandleChangeNicknameReq(gameDb, userUID, req, ack, err)`（`HandleEntryPointChangeNicknameReq` 轉發至同一路徑）：UTF-8 1..12 bytes 否則 `_06`；KODBC 注入標記 → `_05`；**擁有權閘門**（GetUnitByUID 不存在/已刪除/非本人 → `_00`；原碼未檢查擁有權——V2 加固，誠實偏差）；`bCheckOnly=true` → `CheckNicknameAvailable(排除自身)`：Available→NET_OK／Taken→02／InCooldown→03；`bCheckOnly=false` → `ChangeUnitNickname`：Ok→NET_OK／UnitNotFoundOrDeleted→00／NotRestorable→01／Taken→02／InCooldown→03／Failure→04／DbError→false。ack 回顯 iUnitUID/wstrNickName/bCheckOnly。
+
+⚠ 誠實偏差：無 SiCXSLStringFilter（FT_NICKNAME）；無 SERV_PVP_NEW_SYSTEM **已定義**之 NPC 名檢查（不擋）；原碼依 server group 路由 1st/2nd GameDB → V2 單一 game DB，**iServerGroup 忽略**；SERV_GUARANTEE_UNIQUENESS_OF_NAME_CN 未定義 → 無 Giant RoleReg 路徑；成功後**無 LogDB**（ELOG_CHANGE_NICK_NAME_NOT）；S_SERVER_SELECT 閘門未建模；舊暱稱 14 天冷卻為 V2 重建（原 stored proc 未隨倉庫提供）。
+
+**測試**（tests/test_change_nickname.cpp，18 項）：codec roundtrip（兩種 REQ + ACK）、空→06、注入→05、非本人→00、bCheckOnly 可用/占用他人/**自己的現有名（排除自身）→NET_OK**、實際改名→NET_OK（再讀回 store 為新暱稱；**舊暱稱進 14 天冷卻 → check 回 03**）、改回冷卻中舊暱稱→03、同名改名→NET_OK、ENTRY_POINT 入口共享決策。測試自 790 → **826 passed / 0 failed**。vcxproj 登記 ChangeNicknameProtocol.{h,cpp}；Loopback 未擴充。**修正記錄**：測試首版 fixture「別人的占位」為 15 bytes CJK 被長度閘門擋下（06≠02），改 12 bytes fixture 後全綠（UTF-8 字節口徑需先自量）。
+
 ## 0. 一句話現況
 
 V2 是原 Elsword 韓服伺服器（`X2Project`）的 **C++ 重寫地基**：平台無關的線路格式核心、安全模組已完成並以 golden bytes 測試驗證；最短網路路徑（同步 TCP + 原版 TCP 訊框 + 迴路 echo 整合測試）與 Session 層（SPI 握手換發、驗證失敗踢除、E_HEART_BEAT 丟棄、殭屍檢測、SERV_KEVENT_FROM 標記）已完成並 238 項測試全綠；**遊戲邏輯、非同步網路層未完成；資料庫層已完成 Phase 1（users 表 + 帳號存取層）**。V2 不是可運行的伺服器，不要部署它。
