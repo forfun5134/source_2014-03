@@ -10,8 +10,8 @@
 //   事件 ID（V2 EventIDs.h 實測）：EGS_SELECT_UNIT_REQ=40, EGS_SELECT_UNIT_ACK=41,
 //                                    EGS_SELECT_UNIT_1_NOT..5_NOT = 42..46。
 //
-// ⚠ 本檔覆蓋 REQ、「收尾 ACK」、SELECT_UNIT_1_NOT…3_NOT。
-//   SELECT_UNIT_4_NOT…5_NOT（KDenyOptions / KMessengerInfo / KGamePlayStatusContainer …）**尚未移植**；
+// ⚠ 本檔覆蓋 REQ、「收尾 ACK」、SELECT_UNIT_1_NOT…4_NOT。
+//   SELECT_UNIT_5_NOT（SERV_CHAR_LOG map / SERV_CONTENT_MANAGER / KUserPShopAgencyInfo …）**尚未移植**；
 //   在它們完成前，真實客戶端無法用 V2 完成角色選擇流程（見 docs/architecture.md §12）。
 //   線路佈局為自洽 golden bytes，未對原 SDK 實機驗證。
 #pragma once
@@ -111,8 +111,36 @@ struct SelectUnitNot3
 
 bool PutSelectUnitNot2(Serializer& ks, const SelectUnitNot2& v);
 bool GetSelectUnitNot2(Serializer& ks, SelectUnitNot2& v);
+// EGS_SELECT_UNIT_4_NOT（服務端 → 客戶端）：社交/教學/累積連線/Henir排行/Messenger/戰場狀態分片。
+// JP INT_INTERNAL（SERV_RELATIONSHIP_SYSTEM:3643、SERV_ACC_TIME_EVENT:288、CUMULATIVE_TIME_EVENT:101、
+// SERV_BATTLE_FIELD_SYSTEM:2768、SERV_RIDING_PET_SYSTM:2523 皆已定義；
+// SERV_RECRUIT_EVENT_BASE、SERV_ARCHUANGEL_S_COIN_EVENT_GUIDE、SERV_HENIR_RENEWAL_2013 未定義——2026-11-17 機讀核對）
+// PUT 順序機讀自 CommonPacket.cpp（2026-11-17）：
+//   iOK, vecChatBlackList<KChatBlackListUnit>, kDenyOptions, bIsRecommend(bool), iRecommendUnitUID(UidType),
+//   vecTutorialDBUnitInfo<KTutorialDBUnitInfo>, vecConnectTimeEvent<KConnectTimeEventInfo>,
+//   vecCumulativeTimeEvent<KCumulativeTimeEventInfo>, vecHenirRanking<KHenirRankingInfo>,
+//   kMessengerInfo, kGamePlayStatus<KGamePlayStatusContainer>
+// 事件 ID：EGS_SELECT_UNIT_4_NOT = 45。
+// ⚠ 自洽 golden bytes；未對原 SDK 實機驗證。
+struct SelectUnitNot4
+{
+    int32_t iOK = 0;
+    std::vector<unit::ChatBlackListUnit> vecChatBlackList;          // vector<KChatBlackListUnit>
+    unit::DenyOptions kDenyOptions;                                 // KDenyOptions
+    bool bIsRecommend = false;                                      // bool
+    int64_t iRecommendUnitUID = 0;                                  // UidType
+    std::vector<unit::TutorialDBUnitInfo> vecTutorialDBUnitInfo;    // vector<KTutorialDBUnitInfo>
+    std::vector<unit::ConnectTimeEventInfo> vecConnectTimeEvent;    // vector<KConnectTimeEventInfo>
+    std::vector<unit::CumulativeTimeEventInfo> vecCumulativeTimeEvent;  // CUMULATIVE_TIME_EVENT
+    std::vector<unit::HenirRankingInfo> vecHenirRanking;            // vector<KHenirRankingInfo>
+    unit::MessengerInfo kMessengerInfo;                             // KMessengerInfo
+    unit::GamePlayStatusContainer kGamePlayStatus;                  // SERV_BATTLE_FIELD_SYSTEM
+};
+
 bool PutSelectUnitNot3(Serializer& ks, const SelectUnitNot3& v);
 bool GetSelectUnitNot3(Serializer& ks, SelectUnitNot3& v);
+bool PutSelectUnitNot4(Serializer& ks, const SelectUnitNot4& v);
+bool GetSelectUnitNot4(Serializer& ks, SelectUnitNot4& v);
 
 } // namespace select_unit
 } // namespace x2

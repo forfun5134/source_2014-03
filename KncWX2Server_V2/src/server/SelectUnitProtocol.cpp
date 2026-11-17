@@ -144,4 +144,43 @@ bool GetSelectUnitNot3(Serializer& ks, SelectUnitNot3& v)
             });
 }
 
+bool PutSelectUnitNot4(Serializer& ks, const SelectUnitNot4& v)
+{
+    if (!ks.Put(v.iOK)) return false;
+    if (!x2::detail::PutCountPrefixVec(ks, v.vecChatBlackList,
+            [](Serializer& s2, const unit::ChatBlackListUnit& e) { return unit::PutChatBlackListUnit(s2, e); })) return false;
+    if (!unit::PutDenyOptions(ks, v.kDenyOptions)) return false;
+    if (!ks.Put(v.bIsRecommend)) return false;
+    if (!ks.Put(v.iRecommendUnitUID)) return false;
+    if (!x2::detail::PutCountPrefixVec(ks, v.vecTutorialDBUnitInfo,
+            [](Serializer& s2, const unit::TutorialDBUnitInfo& e) { return unit::PutTutorialDBUnitInfo(s2, e); })) return false;
+    if (!x2::detail::PutCountPrefixVec(ks, v.vecConnectTimeEvent,
+            [](Serializer& s2, const unit::ConnectTimeEventInfo& e) { return unit::PutConnectTimeEventInfo(s2, e); })) return false;
+    if (!x2::detail::PutCountPrefixVec(ks, v.vecCumulativeTimeEvent,
+            [](Serializer& s2, const unit::CumulativeTimeEventInfo& e) { return unit::PutCumulativeTimeEventInfo(s2, e); })) return false;
+    if (!x2::detail::PutCountPrefixVec(ks, v.vecHenirRanking,
+            [](Serializer& s2, const unit::HenirRankingInfo& e) { return unit::PutHenirRankingInfo(s2, e); })) return false;
+    if (!unit::PutMessengerInfo(ks, v.kMessengerInfo)) return false;
+    return unit::PutGamePlayStatusContainer(ks, v.kGamePlayStatus);
+}
+bool GetSelectUnitNot4(Serializer& ks, SelectUnitNot4& v)
+{
+    if (!ks.Get(v.iOK)) return false;
+    if (!x2::detail::GetCountPrefixVec(ks, v.vecChatBlackList,
+            [](Serializer& s2, unit::ChatBlackListUnit& e) { return unit::GetChatBlackListUnit(s2, e); })) return false;
+    if (!unit::GetDenyOptions(ks, v.kDenyOptions)) return false;
+    if (!ks.Get(v.bIsRecommend)) return false;
+    if (!ks.Get(v.iRecommendUnitUID)) return false;
+    if (!x2::detail::GetCountPrefixVec(ks, v.vecTutorialDBUnitInfo,
+            [](Serializer& s2, unit::TutorialDBUnitInfo& e) { return unit::GetTutorialDBUnitInfo(s2, e); })) return false;
+    if (!x2::detail::GetCountPrefixVec(ks, v.vecConnectTimeEvent,
+            [](Serializer& s2, unit::ConnectTimeEventInfo& e) { return unit::GetConnectTimeEventInfo(s2, e); })) return false;
+    if (!x2::detail::GetCountPrefixVec(ks, v.vecCumulativeTimeEvent,
+            [](Serializer& s2, unit::CumulativeTimeEventInfo& e) { return unit::GetCumulativeTimeEventInfo(s2, e); })) return false;
+    if (!x2::detail::GetCountPrefixVec(ks, v.vecHenirRanking,
+            [](Serializer& s2, unit::HenirRankingInfo& e) { return unit::GetHenirRankingInfo(s2, e); })) return false;
+    if (!unit::GetMessengerInfo(ks, v.kMessengerInfo)) return false;
+    return unit::GetGamePlayStatusContainer(ks, v.kGamePlayStatus);
+}
+
 }} // namespace x2::select_unit

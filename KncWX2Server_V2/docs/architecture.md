@@ -45,7 +45,7 @@
 
 **組裝路徑**：`BuildSelectUnitNot1(userUID, authLevel, GUnitRecord, out)`（UnitSelectArbiter）由 V2 game DB 的 gunit 表組裝——level/exp/win/lose/stat/lastPos.mapID(←lastPosition)/nickname/regDate/lastDate 有真實資料源；**items/inventorySlotSize/dungeonClear/tcClear/spirit/rating/ED/resStone/skillPages 無對應表，一律填空容器/0/單一全預設技能頁（pages=1/1，與 KUnitSkillData 一致），這些值不代表角色實際狀態，不得當真**。`HandleSelectUnitReq` 成功路徑新增 outNot1/authLevel 參數（二級密碼閘門之後）。迴路整合測試：server 端成功時**先送 1_NOT(42) 再送收尾 ACK**（對齊原 `SendSelectUnitACK` 次序），client 端先收 1_NOT 再收 ACK。測試自 524 → **557 passed / 0 failed**（新增 Not1 codec golden roundtrip + gunit→Not1 建構 + 迴路 1_NOT 順序斷言）。
 
-⚠ 誠實聲明：golden bytes 為自洽佈局，**未對原 SDK 實機驗證**；SELECT_UNIT **4_NOT…5_NOT 未移植**（2_NOT/3_NOT 已由 §0f/§0g 補上；收尾 ACK 本身已移植）；1_NOT 中無資料來源的欄位全為佔位值（見上）；更換巨集組合佈局即變。
+⚠ 誠實聲明：golden bytes 為自洽佈局，**未對原 SDK 實機驗證**；SELECT_UNIT **5_NOT 未移植**（2_NOT/3_NOT/4_NOT 已由 §0f/§0g/§0h 補上；收尾 ACK 本身已移植）；1_NOT 中無資料來源的欄位全為佔位值（見上）；更換巨集組合佈局即變。
 
 ## 0f. 2026-11-17 快照（SELECT_UNIT_2_NOT 移植）
 
@@ -66,6 +66,16 @@
 **組裝**：`BuildSelectUnitNot3(out)`——V2 game DB 無 mission/title/pet/petItem 表，容器空、iSummonedPetUID=0（誠實佔位）。迴路：server 成功時**1_NOT → 2_NOT → 3_NOT → 收尾 ACK**；client 按序斷言。測試自 572 → **590 passed / 0 failed**。
 
 ⚠ 誠實聲明：golden bytes 為自洽佈局，**未對原 SDK 實機驗證**；SELECT_UNIT **4_NOT…5_NOT 未移植**；3_NOT 容器為空佔位（見上）。
+
+## 0h. 2026-11-17 快照（SELECT_UNIT_4_NOT 移植）
+
+**UnitData 擴充**：`ChatBlackListUnit`、`DenyOptions`（SERV_RELATIONSHIP_SYSTEM 下 6×char）、`TutorialUnitInfo`、`TutorialDBUnitInfo`、`ConnectTimeEventInfo`（SERV_ACC_TIME_EVENT）、`CumulativeTimeEventInfo`（CUMULATIVE_TIME_EVENT + SERV_ACC_TIME_EVENT）、`HenirRankingInfo`（UINT m_ulPlayTime 以 uint32_t 序列化＝wire 4 bytes；SERV_HENIR_RENEWAL_2013 未定義 → 無 bytePlayStartedUserNum）、`FriendInfo`、`FriendMessageInfo`、`MessengerInfo`（map<int64,FriendInfo> + map<char,wstr> + vec<FriendMessageInfo>）、`GamePlayStatus`（含 set<int> m_mapPetMP，依 SDK SerSet＝計數+元素；SERV_RIDING_PET_SYSTM 已定義 → mapRidingPetCoolTime 在線）、`GamePlayStatusContainer`。Put 順序機讀自 CommonPacket.cpp。
+
+**SelectUnitNot4**（`SelectUnitProtocol.{h,cpp}`，事件 ID 45）：`int32 iOK → vecChatBlackList → kDenyOptions → bool bIsRecommend → int64 iRecommendUnitUID → vecTutorialDBUnitInfo → vecConnectTimeEvent → vecCumulativeTimeEvent → vecHenirRanking → kMessengerInfo → kGamePlayStatus`。JP 巨集核對（寬鬆樣式）：SERV_RELATIONSHIP_SYSTEM:3643、SERV_ACC_TIME_EVENT:288、CUMULATIVE_TIME_EVENT:101、SERV_BATTLE_FIELD_SYSTEM:2768、SERV_RIDING_PET_SYSTM:2523 已定義；SERV_RECRUIT_EVENT_BASE、SERV_ARCHUANGEL_S_COIN_EVENT_GUIDE、SERV_HENIR_RENEWAL_2013 未定義。
+
+**組裝**：`BuildSelectUnitNot4(out)`——V2 無黑名單/拒絕選項/教學/連線時間/Henir/好友/戰場狀態表，全預設/空（誠實佔位；不代表角色真實狀態）。迴路：server **1_NOT → 2_NOT → 3_NOT → 4_NOT → 收尾 ACK**；client 按序斷言。測試自 590 → **610 passed / 0 failed**。
+
+⚠ 誠實聲明：golden bytes 為自洽佈局，**未對原 SDK 實機驗證**；SELECT_UNIT **5_NOT 未移植**；4_NOT 各欄位為佔位（見上）。
 
 ## 0. 一句話現況
 
@@ -358,7 +368,7 @@ V2 目前**原樣保留**協議所需的密碼學直譯，這些本身**不符�
 6. 效能與容量測試；記憶體/句柄洩漏基線（原版以 VLD 除錯，V2 無對應）。
 7. `LoadINIFile`、設定檔格式與部署工具（原 `ReleaseTool`/`.bat` 流程）。
 8. EventIDs 以外的大型表（道具/技能/副本資料）從 `X2/dat/Script` 的轉換管道。
-9. `SELECT_UNIT` 的 REQ/收尾 ACK + 決策層已完成（§0c）；`SELECT_UNIT_1_NOT` codec + 組裝（gunit 表 → Not1，缺資料項佔位）已完成（§0e）；`SELECT_UNIT_2_NOT` codec + 組裝（任務無資料源→空容器佔位）已完成（§0f）；`SELECT_UNIT_3_NOT` codec + 組裝（mission/title/pet 無資料源→空容器佔位）已完成（§0g）；`SELECT_UNIT_4_NOT…5_NOT` 分片與完整角色資料載入管線未開始。Login 切片打通到 SELECT_UNIT_1_NOT 為止（items/任務/寵物/ED/rating 等無資料來源，值為佔位）。
+9. `SELECT_UNIT` 的 REQ/收尾 ACK + 決策層已完成（§0c）；`SELECT_UNIT_1_NOT` codec + 組裝（gunit 表 → Not1，缺資料項佔位）已完成（§0e）；`SELECT_UNIT_2_NOT` codec + 組裝（任務無資料源→空容器佔位）已完成（§0f）；`SELECT_UNIT_3_NOT` codec + 組裝（mission/title/pet 無資料源→空容器佔位）已完成（§0g）；`SELECT_UNIT_4_NOT` codec + 組裝（社交/Henir/Messenger/戰場狀態無資料源→空容器/零值佔位）已完成（§0h）；`SELECT_UNIT_5_NOT` 分片與完整角色資料載入管線未開始。Login 切片打通到 SELECT_UNIT_1_NOT 為止（items/任務/寵物/ED/rating 等無資料來源，值為佔位）。
 11. GDenyOption（社群拒絕選項）／GResurrectionStoneCnt／角色技能與任務衛星表未實作；帳號→角色建立的完整 `gup_create_unit` 副作用不完整。
 10. Wire 相容：Login 切片 codec 只有自洽 golden bytes，**缺原 SDK 實機對照向量**（見 §13）。
 

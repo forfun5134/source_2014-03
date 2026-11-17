@@ -171,6 +171,174 @@ bool GetQuestInstance(Serializer& ks, QuestInstance& v)
                [](Serializer& s2, SubQuestInstance& e) { return GetSubQuestInstance(s2, e); });
 }
 
+bool PutChatBlackListUnit(Serializer& ks, const ChatBlackListUnit& v)
+{
+    return ks.Put(v.iUnitUID) && ks.Put(v.wstrNickName);
+}
+bool GetChatBlackListUnit(Serializer& ks, ChatBlackListUnit& v)
+{
+    return ks.Get(v.iUnitUID) && ks.Get(v.wstrNickName);
+}
+
+bool PutDenyOptions(Serializer& ks, const DenyOptions& v)
+{
+    return ks.Put(v.cDenyFriendShip) && ks.Put(v.cDenyInviteGuild) && ks.Put(v.cDenyParty) &&
+           ks.Put(v.cDenyPersonalTrade) && ks.Put(v.cDenyRequestCouple) && ks.Put(v.cDenyInvitePracticePVP);
+}
+bool GetDenyOptions(Serializer& ks, DenyOptions& v)
+{
+    return ks.Get(v.cDenyFriendShip) && ks.Get(v.cDenyInviteGuild) && ks.Get(v.cDenyParty) &&
+           ks.Get(v.cDenyPersonalTrade) && ks.Get(v.cDenyRequestCouple) && ks.Get(v.cDenyInvitePracticePVP);
+}
+
+bool PutTutorialUnitInfo(Serializer& ks, const TutorialUnitInfo& v)
+{
+    return ks.Put(v.iUnitUID) && ks.Put(v.ucLevel) && ks.Put(v.wstrNickName) && ks.Put(v.bIsOnline);
+}
+bool GetTutorialUnitInfo(Serializer& ks, TutorialUnitInfo& v)
+{
+    return ks.Get(v.iUnitUID) && ks.Get(v.ucLevel) && ks.Get(v.wstrNickName) && ks.Get(v.bIsOnline);
+}
+
+bool PutTutorialDBUnitInfo(Serializer& ks, const TutorialDBUnitInfo& v)
+{
+    return PutTutorialUnitInfo(ks, v.kTutorialUnitInfo) && ks.Put(v.wstrLastDate);
+}
+bool GetTutorialDBUnitInfo(Serializer& ks, TutorialDBUnitInfo& v)
+{
+    return GetTutorialUnitInfo(ks, v.kTutorialUnitInfo) && ks.Get(v.wstrLastDate);
+}
+
+bool PutConnectTimeEventInfo(Serializer& ks, const ConnectTimeEventInfo& v)
+{
+    return ks.Put(v.iEventUID) && ks.Put(v.wstrEventTime) && ks.Put(v.bAccountEvent);
+}
+bool GetConnectTimeEventInfo(Serializer& ks, ConnectTimeEventInfo& v)
+{
+    return ks.Get(v.iEventUID) && ks.Get(v.wstrEventTime) && ks.Get(v.bAccountEvent);
+}
+
+bool PutCumulativeTimeEventInfo(Serializer& ks, const CumulativeTimeEventInfo& v)
+{
+    return ks.Put(v.iEventUID) && ks.Put(v.iCumulativeTime) && ks.Put(v.bAccountEvent);
+}
+bool GetCumulativeTimeEventInfo(Serializer& ks, CumulativeTimeEventInfo& v)
+{
+    return ks.Get(v.iEventUID) && ks.Get(v.iCumulativeTime) && ks.Get(v.bAccountEvent);
+}
+
+bool PutHenirRankingInfo(Serializer& ks, const HenirRankingInfo& v)
+{
+    return ks.Put(v.iRank) && ks.Put(v.iStageCount) && ks.Put(v.ulPlayTime) && ks.Put(v.tRegDate) &&
+           ks.Put(v.iUnitUID) && ks.Put(v.wstrNickName) && ks.Put(v.cUnitClass) && ks.Put(v.ucLevel);
+}
+bool GetHenirRankingInfo(Serializer& ks, HenirRankingInfo& v)
+{
+    return ks.Get(v.iRank) && ks.Get(v.iStageCount) && ks.Get(v.ulPlayTime) && ks.Get(v.tRegDate) &&
+           ks.Get(v.iUnitUID) && ks.Get(v.wstrNickName) && ks.Get(v.cUnitClass) && ks.Get(v.ucLevel);
+}
+
+bool PutFriendInfo(Serializer& ks, const FriendInfo& v)
+{
+    return ks.Put(v.iUnitUID) && ks.Put(v.wstrNickName) && ks.Put(v.cGroupID) && ks.Put(v.cStatus) && ks.Put(v.cPosition);
+}
+bool GetFriendInfo(Serializer& ks, FriendInfo& v)
+{
+    return ks.Get(v.iUnitUID) && ks.Get(v.wstrNickName) && ks.Get(v.cGroupID) && ks.Get(v.cStatus) && ks.Get(v.cPosition);
+}
+
+bool PutFriendMessageInfo(Serializer& ks, const FriendMessageInfo& v)
+{
+    return ks.Put(v.iUnitUID) && ks.Put(v.wstrNickName) && ks.Put(v.cMessageType) &&
+           ks.Put(v.wstrMessage) && ks.Put(v.wstrRegDate);
+}
+bool GetFriendMessageInfo(Serializer& ks, FriendMessageInfo& v)
+{
+    return ks.Get(v.iUnitUID) && ks.Get(v.wstrNickName) && ks.Get(v.cMessageType) &&
+           ks.Get(v.wstrMessage) && ks.Get(v.wstrRegDate);
+}
+
+bool PutMessengerInfo(Serializer& ks, const MessengerInfo& v)
+{
+    if (!x2::detail::PutCountPrefixMap(ks, v.mapFriendInfo,
+            [](Serializer& s2, const int64_t& e) { return s2.Put(e); },
+            [](Serializer& s2, const FriendInfo& e) { return PutFriendInfo(s2, e); })) return false;
+    if (!x2::detail::PutCountPrefixMap(ks, v.mapGroup,
+            [](Serializer& s2, const int8_t& e) { return s2.Put(e); },
+            [](Serializer& s2, const std::wstring& e) { return s2.Put(e); })) return false;
+    return x2::detail::PutCountPrefixVec(ks, v.vecFriendMessageInfo,
+               [](Serializer& s2, const FriendMessageInfo& e) { return PutFriendMessageInfo(s2, e); });
+}
+bool GetMessengerInfo(Serializer& ks, MessengerInfo& v)
+{
+    if (!x2::detail::GetCountPrefixMap(ks, v.mapFriendInfo,
+            [](Serializer& s2, int64_t& e) { return s2.Get(e); },
+            [](Serializer& s2, FriendInfo& e) { return GetFriendInfo(s2, e); })) return false;
+    if (!x2::detail::GetCountPrefixMap(ks, v.mapGroup,
+            [](Serializer& s2, int8_t& e) { return s2.Get(e); },
+            [](Serializer& s2, std::wstring& e) { return s2.Get(e); })) return false;
+    return x2::detail::GetCountPrefixVec(ks, v.vecFriendMessageInfo,
+               [](Serializer& s2, FriendMessageInfo& e) { return GetFriendMessageInfo(s2, e); });
+}
+
+bool PutGamePlayStatus(Serializer& ks, const GamePlayStatus& v)
+{
+    if (!ks.Put(v.iMaxHP) || !ks.Put(v.iCurHP) || !ks.Put(v.iMaxMP) || !ks.Put(v.iCurMP)) return false;
+    if (!ks.Put(v.iCurHyperGage) || !ks.Put(v.cCurHyperCount) || !ks.Put(v.cCharAbilType)) return false;
+    if (!ks.Put(v.iCharAbilCount)) return false;
+    {
+        const std::map<int32_t,int32_t>& m = v.mapSkillCoolTime;
+        if (!x2::detail::PutCountPrefixMap(ks, m,
+                [](Serializer& s2, const int32_t& e) { return s2.Put(e); },
+                [](Serializer& s2, const int32_t& e) { return s2.Put(e); })) return false;
+    }
+    if (!x2::detail::PutCountPrefixMap(ks, v.mapQuickSlotCoolTime,
+            [](Serializer& s2, const int32_t& e) { return s2.Put(e); },
+            [](Serializer& s2, const int32_t& e) { return s2.Put(e); })) return false;
+    if (!ks.Put(static_cast<uint32_t>(v.mapPetMP.size()))) return false;   // set<int>：SDK SerSet 行為＝計數+元素
+    for (int32_t e : v.mapPetMP) if (!ks.Put(e)) return false;
+    return x2::detail::PutCountPrefixMap(ks, v.mapRidingPetCoolTime,
+            [](Serializer& s2, const int32_t& e) { return s2.Put(e); },
+            [](Serializer& s2, const int32_t& e) { return s2.Put(e); });
+}
+bool GetGamePlayStatus(Serializer& ks, GamePlayStatus& v)
+{
+    if (!ks.Get(v.iMaxHP) || !ks.Get(v.iCurHP) || !ks.Get(v.iMaxMP) || !ks.Get(v.iCurMP)) return false;
+    if (!ks.Get(v.iCurHyperGage) || !ks.Get(v.cCurHyperCount) || !ks.Get(v.cCharAbilType)) return false;
+    if (!ks.Get(v.iCharAbilCount)) return false;
+    if (!x2::detail::GetCountPrefixMap(ks, v.mapSkillCoolTime,
+            [](Serializer& s2, int32_t& e) { return s2.Get(e); },
+            [](Serializer& s2, int32_t& e) { return s2.Get(e); })) return false;
+    if (!x2::detail::GetCountPrefixMap(ks, v.mapQuickSlotCoolTime,
+            [](Serializer& s2, int32_t& e) { return s2.Get(e); },
+            [](Serializer& s2, int32_t& e) { return s2.Get(e); })) return false;
+    {
+        uint32_t n = 0;
+        if (!ks.Get(n)) return false;
+        if (n > 65536) return false;
+        v.mapPetMP.clear();
+        for (uint32_t i = 0; i < n; ++i) {
+            int32_t e = 0;
+            if (!ks.Get(e)) return false;
+            v.mapPetMP.insert(e);
+        }
+    }
+    return x2::detail::GetCountPrefixMap(ks, v.mapRidingPetCoolTime,
+            [](Serializer& s2, int32_t& e) { return s2.Get(e); },
+            [](Serializer& s2, int32_t& e) { return s2.Get(e); });
+}
+
+bool PutGamePlayStatusContainer(Serializer& ks, const GamePlayStatusContainer& v)
+{
+    return x2::detail::PutCountPrefixVec(ks, v.vecGamePlayStatus,
+               [](Serializer& s2, const GamePlayStatus& e) { return PutGamePlayStatus(s2, e); });
+}
+bool GetGamePlayStatusContainer(Serializer& ks, GamePlayStatusContainer& v)
+{
+    return x2::detail::GetCountPrefixVec(ks, v.vecGamePlayStatus,
+               [](Serializer& s2, GamePlayStatus& e) { return GetGamePlayStatus(s2, e); });
+}
+
 bool PutSubMissionInstance(Serializer& ks, const SubMissionInstance& v)
 {
     return ks.Put(v.iID) && ks.Put(v.sClearData) && ks.Put(v.bIsSuccess);

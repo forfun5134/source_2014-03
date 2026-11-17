@@ -45,6 +45,7 @@ static const uint16_t kSelectUnitAckID = static_cast<uint16_t>(EventID::EGS_SELE
 static const uint16_t kSelectUnit1NotID = static_cast<uint16_t>(EventID::EGS_SELECT_UNIT_1_NOT);
 static const uint16_t kSelectUnit2NotID = static_cast<uint16_t>(EventID::EGS_SELECT_UNIT_2_NOT);
 static const uint16_t kSelectUnit3NotID = static_cast<uint16_t>(EventID::EGS_SELECT_UNIT_3_NOT);
+static const uint16_t kSelectUnit4NotID = static_cast<uint16_t>(EventID::EGS_SELECT_UNIT_4_NOT);
 static const uint16_t kConnectReqID = static_cast<uint16_t>(EventID::EGS_CONNECT_REQ);
 static const uint16_t kConnectAckID = static_cast<uint16_t>(EventID::EGS_CONNECT_ACK);
 static const uint16_t kVerifyReqID  = static_cast<uint16_t>(EventID::EGS_VERIFY_ACCOUNT_REQ);
@@ -389,6 +390,80 @@ static void TestBuildSelectUnitNot3Defaults()
           "not3 builder: no fabricated mission/title/pet data (empty placeholders)");
 }
 
+static void TestSelectUnitNot4Codec()
+{
+    SelectUnitNot4 v;
+    v.iOK = NET_OK;
+    v.vecChatBlackList.push_back({ 0x0BADCAFE12345678LL, L"壞人" });
+    v.kDenyOptions = { 1, 2, 0, 1, 2, 0 };
+    v.bIsRecommend = true;
+    v.iRecommendUnitUID = 0x1122334455667788LL;
+    {
+        unit::TutorialDBUnitInfo t;
+        t.kTutorialUnitInfo = { 0x0BADCAFE12345678LL, 55, L"朋友", true };
+        t.wstrLastDate = L"2026-11-10 12:00:00";
+        v.vecTutorialDBUnitInfo.push_back(t);
+    }
+    v.vecConnectTimeEvent.push_back({ 1234, L"2026-11-01 00:00:00", true });
+    v.vecCumulativeTimeEvent.push_back({ 2234, 7200, true });
+    v.vecHenirRanking.push_back({ 1, 99, 3600, 0x0102030405060708LL, 0x0BADCAFE12345678LL, L"排行第一", 5, 42 });
+    {
+        unit::MessengerInfo msg;
+        msg.mapFriendInfo[0x0BADCAFE12345678LL] = { 0x0BADCAFE12345678LL, L"老友", 1, 3, 1 };
+        msg.mapGroup[1] = L"同學";
+        msg.mapGroup[2] = L"同事";
+        msg.vecFriendMessageInfo.push_back({ 0x0BADCAFE12345678LL, L"老友", 0, L"一起玩嗎", L"2026-11-16 20:00:00" });
+        v.kMessengerInfo = msg;
+    }
+    {
+        unit::GamePlayStatus st;
+        st.iMaxHP = 1000; st.iCurHP = 800; st.iMaxMP = 200; st.iCurMP = 150;
+        st.iCurHyperGage = 50; st.cCurHyperCount = 2; st.cCharAbilType = 1; st.iCharAbilCount = 7;
+        st.mapSkillCoolTime[10001] = 30;
+        st.mapQuickSlotCoolTime[20001] = 5;
+        st.mapPetMP = { 301, 302, 303 };
+        st.mapRidingPetCoolTime[40001] = 60;
+        v.kGamePlayStatus.vecGamePlayStatus.push_back(st);
+    }
+
+    SerBuffer buf = PutPayload([&v](Serializer& s) { return PutSelectUnitNot4(s, v); });
+    CHECK(buf.GetLength() > 0, "not4 encodes");
+
+    Serializer ks2;
+    SerBuffer tmp = buf;
+    SelectUnitNot4 out;
+    CHECK(ks2.BeginReading(&tmp), "not4 begin read");
+    CHECK(GetSelectUnitNot4(ks2, out), "not4 decodes");
+    ks2.EndReading();
+    CHECK(out.iOK == NET_OK, "not4 iOK rt");
+    CHECK(out.vecChatBlackList.size() == 1 && out.vecChatBlackList[0].wstrNickName == L"壞人", "not4 blacklist rt");
+    CHECK(out.kDenyOptions.cDenyFriendShip == 1 && out.kDenyOptions.cDenyRequestCouple == 2 && out.kDenyOptions.cDenyInvitePracticePVP == 0, "not4 denyOptions rt");
+    CHECK(out.bIsRecommend && out.iRecommendUnitUID == 0x1122334455667788LL, "not4 recommend rt");
+    CHECK(out.vecTutorialDBUnitInfo.size() == 1 && out.vecTutorialDBUnitInfo[0].kTutorialUnitInfo.ucLevel == 55 && out.vecTutorialDBUnitInfo[0].wstrLastDate == L"2026-11-10 12:00:00", "not4 tutorial rt");
+    CHECK(out.vecConnectTimeEvent.size() == 1 && out.vecConnectTimeEvent[0].bAccountEvent && out.vecConnectTimeEvent[0].iEventUID == 1234, "not4 connectTime rt");
+    CHECK(out.vecCumulativeTimeEvent.size() == 1 && out.vecCumulativeTimeEvent[0].iCumulativeTime == 7200, "not4 cumulativeTime rt");
+    CHECK(out.vecHenirRanking.size() == 1 && out.vecHenirRanking[0].ulPlayTime == 3600 && out.vecHenirRanking[0].ucLevel == 42, "not4 henir rt");
+    CHECK(out.kMessengerInfo.mapFriendInfo.size() == 1 && out.kMessengerInfo.mapGroup.size() == 2 &&
+          out.kMessengerInfo.mapGroup[2] == L"同事" && out.kMessengerInfo.vecFriendMessageInfo.size() == 1 &&
+          out.kMessengerInfo.vecFriendMessageInfo[0].wstrMessage == L"一起玩嗎", "not4 messenger rt");
+    CHECK(out.kGamePlayStatus.vecGamePlayStatus.size() == 1 &&
+          out.kGamePlayStatus.vecGamePlayStatus[0].mapSkillCoolTime[10001] == 30 &&
+          out.kGamePlayStatus.vecGamePlayStatus[0].mapPetMP.count(302) == 1 &&
+          out.kGamePlayStatus.vecGamePlayStatus[0].mapRidingPetCoolTime[40001] == 60, "not4 gamePlayStatus rt");
+}
+
+static void TestBuildSelectUnitNot4Defaults()
+{
+    SelectUnitNot4 not4;
+    BuildSelectUnitNot4(not4);
+    CHECK(not4.iOK == NET_OK, "not4 builder iOK");
+    CHECK(not4.vecChatBlackList.empty() && not4.vecTutorialDBUnitInfo.empty() && not4.vecHenirRanking.empty() &&
+          not4.kMessengerInfo.mapFriendInfo.empty() && not4.kGamePlayStatus.vecGamePlayStatus.empty() &&
+          !not4.bIsRecommend && not4.iRecommendUnitUID == 0 &&
+          not4.kDenyOptions.cDenyFriendShip == 0 && not4.kDenyOptions.cDenyInvitePracticePVP == 0,
+          "not4 builder: no fabricated social/tutorial data (zeroed/empty placeholders)");
+}
+
 // ---- loopback：CONNECT → VERIFY → SELECT_UNIT（雙庫聯動）----
 static void TestSelectUnitLoopback()
 {
@@ -503,7 +578,8 @@ static void TestSelectUnitLoopback()
                 SelectUnitNot1 not1;
                 SelectUnitNot2 not2;
                 SelectUnitNot3 not3;
-                HandleSelectUnitReq(gameStore, seenUserUID.load(), req, ack, err, true, nullptr, &not1, 5, &not2, &not3);
+                SelectUnitNot4 not4;
+                HandleSelectUnitReq(gameStore, seenUserUID.load(), req, ack, err, true, nullptr, &not1, 5, &not2, &not3, &not4);
                 if (ack.iOK == NET_OK) {
                     SerBuffer p1 = PutPayload([&not1](Serializer& s2) { return PutSelectUnitNot1(s2, not1); });
                     if (!srv.SendEvent(MakeEvent(kSelectUnit1NotID, p1))) return;
@@ -511,6 +587,8 @@ static void TestSelectUnitLoopback()
                     if (!srv.SendEvent(MakeEvent(kSelectUnit2NotID, p2))) return;
                     SerBuffer p3 = PutPayload([&not3](Serializer& s2) { return PutSelectUnitNot3(s2, not3); });
                     if (!srv.SendEvent(MakeEvent(kSelectUnit3NotID, p3))) return;
+                    SerBuffer p4 = PutPayload([&not4](Serializer& s2) { return PutSelectUnitNot4(s2, not4); });
+                    if (!srv.SendEvent(MakeEvent(kSelectUnit4NotID, p4))) return;
                 }
                 SerBuffer payload = PutPayload([&ack](Serializer& s) { return PutSelectUnitAck(s, ack); });
                 if (!srv.SendEvent(MakeEvent(kSelectUnitAckID, payload))) return;
@@ -594,6 +672,15 @@ static void TestSelectUnitLoopback()
         CHECK(GetSelectUnitNot3(ksNot3, not3), "decode 3_NOT");
         ksNot3.EndReading();
         CHECK(not3.iOK == NET_OK, "3_NOT iOK");
+        Event not4Ev;
+        CHECK(client.RecvEvent(not4Ev, 5000) == Session::RecvResult::Event, "select 4_NOT received");
+        CHECK(not4Ev.eventID == kSelectUnit4NotID, "select 4_NOT id == 45");
+        SelectUnitNot4 not4;
+        Serializer ksNot4;
+        CHECK(ksNot4.BeginReading(&not4Ev.payload), "read 4_NOT");
+        CHECK(GetSelectUnitNot4(ksNot4, not4), "decode 4_NOT");
+        ksNot4.EndReading();
+        CHECK(not4.iOK == NET_OK, "4_NOT iOK");
         Event ackEv;
         CHECK(client.RecvEvent(ackEv, 5000) == Session::RecvResult::Event, "select ack (own) received");
         CHECK(ackEv.eventID == kSelectUnitAckID, "select ack (own) id");
@@ -666,6 +753,8 @@ void RunSelectUnitTestsByRef(int& pass, int& fail)
     TestBuildSelectUnitNot2Defaults();
     TestSelectUnitNot3Codec();
     TestBuildSelectUnitNot3Defaults();
+    TestSelectUnitNot4Codec();
+    TestBuildSelectUnitNot4Defaults();
     TestUnitSelectArbiterDecisions();
     TestSelectUnitLoopback();
     pass += g_pass_sel;

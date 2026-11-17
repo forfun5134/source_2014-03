@@ -33,6 +33,7 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <set>
 
 namespace x2 { class Serializer; }
 
@@ -244,6 +245,108 @@ struct PetInfo                          // KPetInfo（SERV_PETID_DATA_TYPE_CHANG
     bool     bAutoLooting = false;         // SERV_PET_AUTO_LOOTING
 };
 
+struct ChatBlackListUnit               // KChatBlackListUnit
+{
+    int64_t iUnitUID = 0;                  // UidType
+    std::wstring wstrNickName;
+};
+
+struct DenyOptions                       // KDenyOptions（SERV_RELATIONSHIP_SYSTEM 定義：6 個 char）
+{
+    int8_t cDenyFriendShip = 0;            // DOS_ON=0 / DOS_OFF=1 / DOS_ONLY_FRIEND=2
+    int8_t cDenyInviteGuild = 0;
+    int8_t cDenyParty = 0;
+    int8_t cDenyPersonalTrade = 0;
+    int8_t cDenyRequestCouple = 0;         // SERV_RELATIONSHIP_SYSTEM
+    int8_t cDenyInvitePracticePVP = 0;
+};
+
+struct TutorialUnitInfo                  // KTutorialUnitInfo
+{
+    int64_t iUnitUID = 0;                  // UidType
+    uint8_t ucLevel = 0;                   // u_char
+    std::wstring wstrNickName;
+    bool bIsOnline = false;
+};
+
+struct TutorialDBUnitInfo                // KTutorialDBUnitInfo
+{
+    TutorialUnitInfo kTutorialUnitInfo;
+    std::wstring wstrLastDate;
+};
+
+struct ConnectTimeEventInfo              // KConnectTimeEventInfo（SERV_ACC_TIME_EVENT 定義）
+{
+    int32_t iEventUID = 0;                 // int
+    std::wstring wstrEventTime;
+    bool bAccountEvent = false;            // SERV_ACC_TIME_EVENT
+};
+
+struct CumulativeTimeEventInfo           // KCumulativeTimeEventInfo（CUMULATIVE_TIME_EVENT + SERV_ACC_TIME_EVENT）
+{
+    int32_t iEventUID = 0;                 // int
+    int32_t iCumulativeTime = 0;           // int
+    bool bAccountEvent = false;            // SERV_ACC_TIME_EVENT
+};
+
+struct HenirRankingInfo                  // KHenirRankingInfo（SERV_HENIR_RENEWAL_2013 未定義）
+{
+    int32_t  iRank = 0;                    // int
+    int32_t  iStageCount = 0;              // int
+    uint32_t ulPlayTime = 0;               // UINT（wire 4 bytes）
+    int64_t  tRegDate = 0;                 // __int64
+    int64_t  iUnitUID = 0;                 // UidType
+    std::wstring wstrNickName;
+    int8_t   cUnitClass = 0;               // char
+    uint8_t  ucLevel = 0;                  // UCHAR
+};
+
+struct FriendInfo                        // KFriendInfo
+{
+    int64_t iUnitUID = 0;                  // UidType
+    std::wstring wstrNickName;
+    int8_t cGroupID = 0;                   // char
+    int8_t cStatus = 0;                    // FS_NORMAL=0...
+    int8_t cPosition = 0;                  // FP_OFF_LINE=0, FP_ON_LINE=1
+};
+
+struct FriendMessageInfo                 // KFriendMessageInfo
+{
+    int64_t iUnitUID = 0;                  // UidType
+    std::wstring wstrNickName;
+    int8_t  cMessageType = 0;              // MT_REQUEST_FRIEND=0
+    std::wstring wstrMessage;
+    std::wstring wstrRegDate;
+};
+
+struct MessengerInfo                     // KMessengerInfo
+{
+    std::map<int64_t, FriendInfo> mapFriendInfo;   // map<UidType,KFriendInfo>
+    std::map<int8_t, std::wstring> mapGroup;       // map<char,wstring>
+    std::vector<FriendMessageInfo> vecFriendMessageInfo;
+};
+
+struct GamePlayStatus                    // KGamePlayStatus（SERV_RIDING_PET_SYSTM 已定義）
+{
+    int32_t iMaxHP = 0;
+    int32_t iCurHP = 0;
+    int32_t iMaxMP = 0;
+    int32_t iCurMP = 0;
+    int32_t iCurHyperGage = 0;
+    int8_t  cCurHyperCount = 0;            // char
+    int8_t  cCharAbilType = 0;             // char (CAC_NONE=0)
+    int32_t iCharAbilCount = 0;
+    std::map<int32_t, int32_t> mapSkillCoolTime;
+    std::map<int32_t, int32_t> mapQuickSlotCoolTime;
+    std::set<int32_t> mapPetMP;            // wire = count + int elements（SDK SerSet 行為）
+    std::map<int32_t, int32_t> mapRidingPetCoolTime;   // SERV_RIDING_PET_SYSTM
+};
+
+struct GamePlayStatusContainer           // KGamePlayStatusContainer
+{
+    std::vector<GamePlayStatus> vecGamePlayStatus;
+};
+
 struct RelationshipInfo               // SERV_RELATIONSHIP_SYSTEM（KRelationshipInfo）
 {
     int8_t  relationshipType = 0;         // char
@@ -331,6 +434,30 @@ bool PutSubQuestInstance(Serializer& ks, const SubQuestInstance& v);
 bool GetSubQuestInstance(Serializer& ks, SubQuestInstance& v);
 bool PutQuestInstance(Serializer& ks, const QuestInstance& v);
 bool GetQuestInstance(Serializer& ks, QuestInstance& v);
+bool PutChatBlackListUnit(Serializer& ks, const ChatBlackListUnit& v);
+bool GetChatBlackListUnit(Serializer& ks, ChatBlackListUnit& v);
+bool PutDenyOptions(Serializer& ks, const DenyOptions& v);
+bool GetDenyOptions(Serializer& ks, DenyOptions& v);
+bool PutTutorialUnitInfo(Serializer& ks, const TutorialUnitInfo& v);
+bool GetTutorialUnitInfo(Serializer& ks, TutorialUnitInfo& v);
+bool PutTutorialDBUnitInfo(Serializer& ks, const TutorialDBUnitInfo& v);
+bool GetTutorialDBUnitInfo(Serializer& ks, TutorialDBUnitInfo& v);
+bool PutConnectTimeEventInfo(Serializer& ks, const ConnectTimeEventInfo& v);
+bool GetConnectTimeEventInfo(Serializer& ks, ConnectTimeEventInfo& v);
+bool PutCumulativeTimeEventInfo(Serializer& ks, const CumulativeTimeEventInfo& v);
+bool GetCumulativeTimeEventInfo(Serializer& ks, CumulativeTimeEventInfo& v);
+bool PutHenirRankingInfo(Serializer& ks, const HenirRankingInfo& v);
+bool GetHenirRankingInfo(Serializer& ks, HenirRankingInfo& v);
+bool PutFriendInfo(Serializer& ks, const FriendInfo& v);
+bool GetFriendInfo(Serializer& ks, FriendInfo& v);
+bool PutFriendMessageInfo(Serializer& ks, const FriendMessageInfo& v);
+bool GetFriendMessageInfo(Serializer& ks, FriendMessageInfo& v);
+bool PutMessengerInfo(Serializer& ks, const MessengerInfo& v);
+bool GetMessengerInfo(Serializer& ks, MessengerInfo& v);
+bool PutGamePlayStatus(Serializer& ks, const GamePlayStatus& v);
+bool GetGamePlayStatus(Serializer& ks, GamePlayStatus& v);
+bool PutGamePlayStatusContainer(Serializer& ks, const GamePlayStatusContainer& v);
+bool GetGamePlayStatusContainer(Serializer& ks, GamePlayStatusContainer& v);
 bool PutSubMissionInstance(Serializer& ks, const SubMissionInstance& v);
 bool GetSubMissionInstance(Serializer& ks, SubMissionInstance& v);
 bool PutMissionInstance(Serializer& ks, const MissionInstance& v);
