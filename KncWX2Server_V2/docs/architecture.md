@@ -87,6 +87,16 @@
 
 ⚠ 誠實聲明：golden bytes 為自洽佈局，**未對原 SDK 實機驗證**；1_NOT 中 items/ED/rating/spirit… 與 2_NOT…5_NOT 各容器皆為**佔位值，不代表角色真實狀態**；角色資料載入管線（items/quests/missions/pets/messenger/… 真實 DB 表）未開始。
 
+## 0j. 2026-11-17 快照（GET_MY_INVENTORY 流程移植）
+
+**新增封包**（`SelectUnitProtocol.{h,cpp}`）：`GetMyInventoryReq`（EGS_GET_MY_INVENTORY_REQ=47，原 `IMPL_ON_FUNC_NOPARAM`，空 payload）、`GetMyInventoryAck`（48；{int iOK, bool bIsRecommend}；SERV_SHARING_BANK_QUEST_CASH 未定義 → 無 m_bSharingBank）、`SelectUnitInventoryInfoNot`（EGS_SELECT_UNIT_INVENTORY_INFO_NOT=49；{int iSlotCategory, map<int64,InventoryItemInfo> mapItem}；PUT 順序機讀自原 ClientPacket.cpp）。
+
+**決策**：`HandleGetMyInventoryReq(items, outAck, outNots)`——依 `slotCategory` 分組、空 category 不送（與原 `KInventory::GetSelectUnitInventoryInfo` 一致）、category 升序輸出；`outAck.bIsRecommend=false`（V2 無推薦系統狀態，佔位）。原版會跳過 CXSLInventory ST_BANK/ST_E_EQUIP，V2 未建模該分類常量，**不跳過**。
+
+**迴路**：client 送空 payload 的 47 REQ → server 注入**合成背包**（僅測試線路分片，非真實角色資料）→ 依 category 收到 2 個 49 NOT（category 1→2 升序）→ 48 ACK（iOK=NET_OK）。另有 `TestHandleGetMyInventoryReqGroupsByCategory`（分組排序、空背包 0 NOT 直接 ACK）與 47/48/49 codec roundtrip 測試。測試自 626 → **654 passed / 0 failed**。
+
+⚠ 誠實聲明：V2 **無背包 DB 表**（gunit 無 items；1_NOT items 亦為佔位）——HandleGetMyInventoryReq 不接 DB，呼叫方須傳入 items（目前僅測試以合成資料注入）；wire 佈局為自洽 golden bytes，**未對原 SDK 實機驗證**；推薦狀態 bIsRecommend 為佔位 false；ST_BANK/ST_E_EQUIP 跳過邏輯未建模。
+
 ## 0. 一句話現況
 
 V2 是原 Elsword 韓服伺服器（`X2Project`）的 **C++ 重寫地基**：平台無關的線路格式核心、安全模組已完成並以 golden bytes 測試驗證；最短網路路徑（同步 TCP + 原版 TCP 訊框 + 迴路 echo 整合測試）與 Session 層（SPI 握手換發、驗證失敗踢除、E_HEART_BEAT 丟棄、殭屍檢測、SERV_KEVENT_FROM 標記）已完成並 238 項測試全綠；**遊戲邏輯、非同步網路層未完成；資料庫層已完成 Phase 1（users 表 + 帳號存取層）**。V2 不是可運行的伺服器，不要部署它。

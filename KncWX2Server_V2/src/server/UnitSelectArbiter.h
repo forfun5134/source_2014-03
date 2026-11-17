@@ -54,6 +54,18 @@ int32_t HandleSelectUnitReq(db::GameStore& gameDb, int64_t userUID, const Select
 // 全 false/0/空容器（誠實佔位；不代表角色真實狀態）。iOK=NET_OK。
 void BuildSelectUnitNot5(SelectUnitNot5& out);
 
+// EGS_GET_MY_INVENTORY_REQ 決策（原 IMPL_ON_FUNC_NOPARAM(EGS_GET_MY_INVENTORY_REQ)）：
+// 依槽位分類把 items 分組成 SELECT_UNIT_INVENTORY_INFO_NOT 分片（空 category 不送，
+// 與原 KInventory::GetSelectUnitInventoryInfo 一致）。
+// 誠實說明：V2 **沒有背包 DB 表**（gunit 無 items 欄位；1_NOT 的 items 亦為佔位）；
+// 呼叫方須自行提供 items（目前僅測試以合成資料注入）。原版會跳過 CXSLInventory
+// ST_BANK / ST_E_EQUIP 兩類，V2 未建模該分類常量，**不跳過**。
+// outAck：iOK=NET_OK、bIsRecommend=false（V2 無推薦系統狀態，佔位）。
+// 回傳分片數量（= outNots.size()）。
+size_t HandleGetMyInventoryReq(const std::map<int64_t, unit::InventoryItemInfo>& items,
+                               GetMyInventoryAck& outAck,
+                               std::vector<SelectUnitInventoryInfoNot>& outNots);
+
 // 組裝 SELECT_UNIT_4_NOT（成功路徑的社交/教學/Henir排行/Messenger/戰場狀態分片）。
 // 誠實說明：V2 game DB 無黑名單/拒絕選項/教學/連線時間/Henir排行/好友/戰場狀態表，
 // 容器一律空、旗標全 false/0（kDenyOptions 全 0；不代表角色真實狀態）。iOK=NET_OK。

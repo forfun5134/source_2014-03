@@ -210,4 +210,39 @@ bool GetSelectUnitNot5(Serializer& ks, SelectUnitNot5& v)
     return ks.Get(v.bLocalRankingUser);
 }
 
+bool PutGetMyInventoryReq(Serializer& ks, const GetMyInventoryReq& /*v*/)
+{
+    (void)ks;
+    return true;   // 原 NOPARAM：無欄位；BeginWriting/EndWriting 即構成合法空 payload
+}
+bool GetGetMyInventoryReq(Serializer& ks, GetMyInventoryReq& /*v*/)
+{
+    (void)ks;
+    return true;
+}
+
+bool PutGetMyInventoryAck(Serializer& ks, const GetMyInventoryAck& v)
+{
+    return ks.Put(v.iOK) && ks.Put(v.bIsRecommend);
+}
+bool GetGetMyInventoryAck(Serializer& ks, GetMyInventoryAck& v)
+{
+    return ks.Get(v.iOK) && ks.Get(v.bIsRecommend);
+}
+
+bool PutSelectUnitInventoryInfoNot(Serializer& ks, const SelectUnitInventoryInfoNot& v)
+{
+    if (!ks.Put(v.iSlotCategory)) return false;
+    return x2::detail::PutCountPrefixMap(ks, v.mapItem,
+            [](Serializer& s2, const int64_t& e) { return s2.Put(e); },
+            [](Serializer& s2, const unit::InventoryItemInfo& e) { return unit::PutInventoryItemInfo(s2, e); });
+}
+bool GetSelectUnitInventoryInfoNot(Serializer& ks, SelectUnitInventoryInfoNot& v)
+{
+    if (!ks.Get(v.iSlotCategory)) return false;
+    return x2::detail::GetCountPrefixMap(ks, v.mapItem,
+            [](Serializer& s2, int64_t& e) { return s2.Get(e); },
+            [](Serializer& s2, unit::InventoryItemInfo& e) { return unit::GetInventoryItemInfo(s2, e); });
+}
+
 }} // namespace x2::select_unit

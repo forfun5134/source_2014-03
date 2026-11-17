@@ -2,8 +2,8 @@
 // 涵蓋：REQ/ACK 線路 codec（含 golden bytes）、UnitSelectArbiter 決策（in-memory game DB）、
 //      loopback TCP 完整流程（Session 握手 → CONNECT → VERIFY → SELECT_UNIT，含歸屬錯誤/不存在兩路徑，
 //      account DB 與 game DB 雙庫聯動）。
-// ⚠ SELECT_UNIT_1_NOT…5_NOT 分片（KUnitInfo/背包/任務/寵物等，約 20 個巢狀型別）尚未移植；
-//   本測試只驗證 REQ 解碼 → 決策 → 收尾 EGS_SELECT_UNIT_ACK。
+// 涵蓋 SELECT_UNIT_1_NOT…5_NOT 分片（codec + gunit→Not1 組裝 + 迴路先 NOT 後 ACK）、
+//   EGS_GET_MY_INVENTORY_REQ/ACK 與 EGS_SELECT_UNIT_INVENTORY_INFO_NOT（合成背包資料）。
 //   golden bytes 為自洽佈局，未對原 SDK 實機驗證。
 #include <cstdio>
 #include <cstring>
@@ -47,6 +47,9 @@ static const uint16_t kSelectUnit2NotID = static_cast<uint16_t>(EventID::EGS_SEL
 static const uint16_t kSelectUnit3NotID = static_cast<uint16_t>(EventID::EGS_SELECT_UNIT_3_NOT);
 static const uint16_t kSelectUnit4NotID = static_cast<uint16_t>(EventID::EGS_SELECT_UNIT_4_NOT);
 static const uint16_t kSelectUnit5NotID = static_cast<uint16_t>(EventID::EGS_SELECT_UNIT_5_NOT);
+static const uint16_t kGetMyInventoryReqID = static_cast<uint16_t>(EventID::EGS_GET_MY_INVENTORY_REQ);
+static const uint16_t kGetMyInventoryAckID = static_cast<uint16_t>(EventID::EGS_GET_MY_INVENTORY_ACK);
+static const uint16_t kInventoryInfoNotID = static_cast<uint16_t>(EventID::EGS_SELECT_UNIT_INVENTORY_INFO_NOT);
 static const uint16_t kConnectReqID = static_cast<uint16_t>(EventID::EGS_CONNECT_REQ);
 static const uint16_t kConnectAckID = static_cast<uint16_t>(EventID::EGS_CONNECT_ACK);
 static const uint16_t kVerifyReqID  = static_cast<uint16_t>(EventID::EGS_VERIFY_ACCOUNT_REQ);
@@ -538,6 +541,84 @@ static void TestBuildSelectUnitNot5Defaults()
           "not5 builder: no fabricated state (false/0 placeholders)");
 }
 
+static void TestGetMyInventoryCodec()
+{
+    // REQ：空 payload，Put/Get 皆回 true
+    GetMyInventoryReq req;
+    SerBuffer reqBuf = PutPayload([&req](Serializer& s) { return PutGetMyInventoryReq(s, req); });
+    CHECK(reqBuf.GetLength() == 0, "getMyInventoryReq encodes to empty payload");
+    {
+        Serializer ks;
+        SerBuffer tmp = reqBuf;
+        GetMyInventoryReq rOut;
+        CHECK(ks.BeginReading(&tmp) && GetGetMyInventoryReq(ks, rOut), "getMyInventoryReq decodes");
+        ks.EndReading();
+    }
+    // ACK golden
+    GetMyInventoryAck ack;
+    ack.iOK = NET_OK;
+    ack.bIsRecommend = true;
+    SerBuffer buf = PutPayload([&ack](Serializer& s) { return PutGetMyInventoryAck(s, ack); });
+    {
+        Serializer ks;
+        SerBuffer tmp = buf;
+        GetMyInventoryAck aOut;
+        CHECK(ks.BeginReading(&tmp) && GetGetMyInventoryAck(ks, aOut), "getMyInventoryAck decodes");
+        ks.EndReading();
+        CHECK(aOut.iOK == NET_OK && aOut.bIsRecommend, "getMyInventoryAck rt");
+    }
+    // INFO_NOT golden
+    SelectUnitInventoryInfoNot invInfo;
+    invInfo.iSlotCategory = 3;
+    unit::InventoryItemInfo ii;
+    ii.itemUID = 0x0BADCAFE12345678LL;
+    ii.slotCategory = 3;
+    ii.slotID = 10;
+    ii.itemInfo.itemID = 555;
+    ii.itemInfo.quantity = 2;
+    invInfo.mapItem[ii.itemUID] = ii;
+    buf = PutPayload([&invInfo](Serializer& s) { return PutSelectUnitInventoryInfoNot(s, invInfo); });
+    CHECK(buf.GetLength() > 0, "inventoryInfoNot encodes");
+    {
+        Serializer ks;
+        SerBuffer tmp = buf;
+        SelectUnitInventoryInfoNot nOut;
+        CHECK(ks.BeginReading(&tmp) && GetSelectUnitInventoryInfoNot(ks, nOut), "inventoryInfoNot decodes");
+        ks.EndReading();
+        CHECK(nOut.iSlotCategory == 3 && nOut.mapItem.size() == 1 &&
+              nOut.mapItem.begin()->second.itemInfo.itemID == 555 &&
+              nOut.mapItem.begin()->second.itemInfo.quantity == 2, "inventoryInfoNot rt");
+    }
+}
+
+static void TestHandleGetMyInventoryReqGroupsByCategory()
+{
+    std::map<int64_t, unit::InventoryItemInfo> items;
+    auto mk = [](int64_t uid, int32_t cat, int32_t id) {
+        unit::InventoryItemInfo ii;
+        ii.itemUID = uid; ii.slotCategory = cat; ii.slotID = 1; ii.itemInfo.itemID = id;
+        return ii;
+    };
+    items[0x1000] = mk(0x1000, 2, 200);
+    items[0x1001] = mk(0x1001, 1, 100);
+    items[0x1002] = mk(0x1002, 2, 201);
+
+    GetMyInventoryAck ack;
+    std::vector<SelectUnitInventoryInfoNot> nots;
+    size_t n = HandleGetMyInventoryReq(items, ack, nots);
+    CHECK(n == 2, "two non-empty categories -> 2 NOTs");
+    CHECK(nots[0].iSlotCategory == 1 && nots[0].mapItem.size() == 1, "category 1 group (sorted)");
+    CHECK(nots[1].iSlotCategory == 2 && nots[1].mapItem.size() == 2, "category 2 group (sorted)");
+    CHECK(ack.iOK == NET_OK && !ack.bIsRecommend, "ack iOK=NET_OK, bIsRecommend=false (V2 no recommend state)");
+
+    // 空背包 → 0 個 NOT，直接 ACK（原版亦對空 category 不送）
+    std::map<int64_t, unit::InventoryItemInfo> empty;
+    GetMyInventoryAck ack2;
+    std::vector<SelectUnitInventoryInfoNot> nots2;
+    size_t n2 = HandleGetMyInventoryReq(empty, ack2, nots2);
+    CHECK(n2 == 0 && nots2.empty() && ack2.iOK == NET_OK, "empty inventory -> ACK only");
+}
+
 // ---- loopback：CONNECT → VERIFY → SELECT_UNIT（雙庫聯動）----
 static void TestSelectUnitLoopback()
 {
@@ -669,6 +750,27 @@ static void TestSelectUnitLoopback()
                 }
                 SerBuffer payload = PutPayload([&ack](Serializer& s) { return PutSelectUnitAck(s, ack); });
                 if (!srv.SendEvent(MakeEvent(kSelectUnitAckID, payload))) return;
+            } else if (ev.eventID == kGetMyInventoryReqID) {
+                // V2 無背包 DB 表：注入合成背包（僅測試線路分片；非真實角色資料）
+                std::map<int64_t, unit::InventoryItemInfo> synthetic;
+                auto mkSyn = [](int64_t uid, int32_t cat, int32_t slot, int32_t id) {
+                    unit::InventoryItemInfo ii;
+                    ii.itemUID = uid; ii.slotCategory = cat; ii.slotID = slot;
+                    ii.itemInfo.itemID = id; ii.itemInfo.quantity = 1;
+                    return ii;
+                };
+                synthetic[0x5000] = mkSyn(0x5000, 1, 0, 1001);
+                synthetic[0x5001] = mkSyn(0x5001, 1, 1, 1002);
+                synthetic[0x5002] = mkSyn(0x5002, 2, 0, 2001);
+                GetMyInventoryAck invAck;
+                std::vector<SelectUnitInventoryInfoNot> nots;
+                HandleGetMyInventoryReq(synthetic, invAck, nots);
+                for (const auto& one : nots) {
+                    SerBuffer p = PutPayload([&one](Serializer& s2) { return PutSelectUnitInventoryInfoNot(s2, one); });
+                    if (!srv.SendEvent(MakeEvent(kInventoryInfoNotID, p))) return;
+                }
+                SerBuffer invPayload = PutPayload([&invAck](Serializer& s2) { return PutGetMyInventoryAck(s2, invAck); });
+                if (!srv.SendEvent(MakeEvent(kGetMyInventoryAckID, invPayload))) return;
             }
         }
         serverOk = true;
@@ -776,6 +878,30 @@ static void TestSelectUnitLoopback()
         CHECK(GetSelectUnitAck(ks, ack), "decode select ack");
         ks.EndReading();
         CHECK(ack.iOK == NET_OK, "own unit select -> NET_OK");
+        // EGS_GET_MY_INVENTORY_REQ（NOPARAM，空 payload）→ 依 category 分片 NOT ×2 → ACK
+        CHECK(client.SendEvent(MakeEvent(kGetMyInventoryReqID, SerBuffer{})), "get my inventory req sent");
+        for (int expectCat = 1; expectCat <= 2; ++expectCat) {
+            Event invEv;
+            CHECK(client.RecvEvent(invEv, 5000) == Session::RecvResult::Event, "inventory info not received");
+            CHECK(invEv.eventID == kInventoryInfoNotID, "inventory info not id == 49");
+            SelectUnitInventoryInfoNot invNot;
+            Serializer ksInv;
+            CHECK(ksInv.BeginReading(&invEv.payload), "read inventory info not");
+            CHECK(GetSelectUnitInventoryInfoNot(ksInv, invNot), "decode inventory info not");
+            ksInv.EndReading();
+            CHECK(invNot.iSlotCategory == expectCat, "inventory info not category ascending");
+        }
+        {
+            Event invAckEv;
+            CHECK(client.RecvEvent(invAckEv, 5000) == Session::RecvResult::Event, "get my inventory ack received");
+            CHECK(invAckEv.eventID == kGetMyInventoryAckID, "get my inventory ack id == 48");
+            GetMyInventoryAck invAck;
+            Serializer ksInvAck;
+            CHECK(ksInvAck.BeginReading(&invAckEv.payload), "read get my inventory ack");
+            CHECK(GetGetMyInventoryAck(ksInvAck, invAck), "decode get my inventory ack");
+            ksInvAck.EndReading();
+            CHECK(invAck.iOK == NET_OK && !invAck.bIsRecommend, "get my inventory ack NET_OK, bIsRecommend=false");
+        }
     }
 
     // SELECT_UNIT_REQ #2：別人的角色 → ERR_SELECT_UNIT_07
@@ -843,6 +969,8 @@ void RunSelectUnitTestsByRef(int& pass, int& fail)
     TestBuildSelectUnitNot4Defaults();
     TestSelectUnitNot5Codec();
     TestBuildSelectUnitNot5Defaults();
+    TestGetMyInventoryCodec();
+    TestHandleGetMyInventoryReqGroupsByCategory();
     TestUnitSelectArbiterDecisions();
     TestSelectUnitLoopback();
     pass += g_pass_sel;

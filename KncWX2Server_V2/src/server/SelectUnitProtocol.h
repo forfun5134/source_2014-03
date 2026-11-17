@@ -10,7 +10,8 @@
 //   事件 ID（V2 EventIDs.h 實測）：EGS_SELECT_UNIT_REQ=40, EGS_SELECT_UNIT_ACK=41,
 //                                    EGS_SELECT_UNIT_1_NOT..5_NOT = 42..46。
 //
-// ⚠ 本檔覆蓋 REQ、「收尾 ACK」、SELECT_UNIT_1_NOT…5_NOT。
+// ⚠ 本檔覆蓋 REQ、「收尾 ACK」、SELECT_UNIT_1_NOT…5_NOT，
+//   以及 EGS_GET_MY_INVENTORY_REQ/ACK（47/48）與 EGS_SELECT_UNIT_INVENTORY_INFO_NOT（49）。
 //   在它們完成前，真實客戶端無法用 V2 完成角色選擇流程（見 docs/architecture.md §12）。
 //   線路佈局為自洽 golden bytes，未對原 SDK 實機驗證。
 #pragma once
@@ -166,8 +167,42 @@ struct SelectUnitNot5
 
 bool PutSelectUnitNot4(Serializer& ks, const SelectUnitNot4& v);
 bool GetSelectUnitNot4(Serializer& ks, SelectUnitNot4& v);
+// EGS_GET_MY_INVENTORY_REQ（無參數，原 IMPL_ON_FUNC_NOPARAM）：REQ 無欄位。
+// 事件 ID：EGS_GET_MY_INVENTORY_REQ = 47。
+struct GetMyInventoryReq
+{
+};
+
+// EGS_GET_MY_INVENTORY_ACK（服務端 → 客戶端）：iOK + bIsRecommend。
+// SERV_SHARING_BANK_QUEST_CASH **未定義**（2026-11-17 機讀核對 ServerDefine.h）→ 無 m_bSharingBank。
+// 事件 ID：EGS_GET_MY_INVENTORY_ACK = 48。
+// ⚠ 自洽 golden bytes；未對原 SDK 實機驗證。
+struct GetMyInventoryAck
+{
+    int32_t iOK = 0;          // NetError（NET_OK=0）
+    bool bIsRecommend = false;
+};
+
+// EGS_SELECT_UNIT_INVENTORY_INFO_NOT（服務端 → 客戶端）：依槽位分類拆分的背包分片。
+// PUT 順序（ClientPacket.cpp 機讀）：iSlotCategory(int) → mapItem<UidType,KInventoryItemInfo>
+// 原 KInventory::GetSelectUnitInventoryInfo 會跳過 ST_BANK / ST_E_EQUIP 且空 category 不送；
+// V2 未建模 CXSLInventory 分類常量，分組時不跳過（見 BuildSelectUnitInventoryInfoNots 註解）。
+// 事件 ID：EGS_SELECT_UNIT_INVENTORY_INFO_NOT = 49。
+// ⚠ 自洽 golden bytes；未對原 SDK 實機驗證。
+struct SelectUnitInventoryInfoNot
+{
+    int32_t iSlotCategory = 0;                              // int
+    std::map<int64_t, unit::InventoryItemInfo> mapItem;     // map<UidType,KInventoryItemInfo>
+};
+
 bool PutSelectUnitNot5(Serializer& ks, const SelectUnitNot5& v);
 bool GetSelectUnitNot5(Serializer& ks, SelectUnitNot5& v);
+bool PutGetMyInventoryReq(Serializer& ks, const GetMyInventoryReq& v);
+bool GetGetMyInventoryReq(Serializer& ks, GetMyInventoryReq& v);
+bool PutGetMyInventoryAck(Serializer& ks, const GetMyInventoryAck& v);
+bool GetGetMyInventoryAck(Serializer& ks, GetMyInventoryAck& v);
+bool PutSelectUnitInventoryInfoNot(Serializer& ks, const SelectUnitInventoryInfoNot& v);
+bool GetSelectUnitInventoryInfoNot(Serializer& ks, SelectUnitInventoryInfoNot& v);
 
 } // namespace select_unit
 } // namespace x2

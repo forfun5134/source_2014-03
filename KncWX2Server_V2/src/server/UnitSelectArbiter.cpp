@@ -117,6 +117,26 @@ void BuildSelectUnitNot1(int64_t userUID, int authLevel, const db::GUnitRecord& 
     out.relationshipInfo = unit::RelationshipInfo{};  // 無伴侶 → 全預設
 }
 
+size_t HandleGetMyInventoryReq(const std::map<int64_t, unit::InventoryItemInfo>& items,
+                               GetMyInventoryAck& outAck,
+                               std::vector<SelectUnitInventoryInfoNot>& outNots)
+{
+    outNots.clear();
+    // 依 slotCategory 分組（map<int32, map<int64, InventoryItemInfo>>），與原版「每 category 一個 NOT」一致
+    std::map<int32_t, std::map<int64_t, unit::InventoryItemInfo>> byCategory;
+    for (const auto& kv : items) byCategory[kv.second.slotCategory][kv.first] = kv.second;
+    for (const auto& cat : byCategory) {
+        if (cat.second.empty()) continue;   // 空 category 不送（原版亦如此）
+        SelectUnitInventoryInfoNot one;
+        one.iSlotCategory = cat.first;
+        one.mapItem = cat.second;
+        outNots.push_back(std::move(one));
+    }
+    outAck.iOK = NET_OK;
+    outAck.bIsRecommend = false;            // V2 無推薦系統狀態（誠實佔位）
+    return outNots.size();
+}
+
 int32_t HandleSelectUnitReq(db::GameStore& gameDb, int64_t userUID, const SelectUnitReq& req,
                             SelectUnitAck& ack, std::string& err,
                             bool secondSecurityOk,
