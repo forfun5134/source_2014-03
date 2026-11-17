@@ -51,5 +51,12 @@ inline constexpr int ERR_DELETE_UNIT_05 = 987; // 角色刪除失敗（原 -1 �
 // ERR_DELETE_UNIT_01..04 = 979..982（[CN] SERV_UNIT_WAIT_DELETE 路徑，該巨集未定義且 JP 未啟用）
 // ERR_DELETE_UNIT_06 = 1258（인연 상태不可刪除；V2 無 Relationship 系統）
 inline constexpr int ERR_VERIFY_21      = 578;  // 認證過程系統錯誤（實測編譯值）
+// ERR_TITLE_*（494–499；2026-11-17 以 g++ 直接編譯原 NetError_def.h 實測，與 JP build 一致）
+inline constexpr int ERR_TITLE_00 = 494;  // 보유하고 있는 칭호가 아닙니다.（未持有該稱號）
+inline constexpr int ERR_TITLE_01 = 495;  // 이미 장착중인 칭호입니다.（已裝備中）
+inline constexpr int ERR_TITLE_02 = 496;  // 사용 가능한 기간이 지난 칭호입니다.（已過期）
+inline constexpr int ERR_TITLE_03 = 497;  // 존재하지 않는 칭호입니다.（不存在該稱號）
+inline constexpr int ERR_TITLE_04 = 498;  // 칭호를 획득하지 못했습니다.
+inline constexpr int ERR_TITLE_05 = 499;  // 이미 보유 중인 칭호입니다.
 
 } // namespace x2

@@ -330,6 +330,11 @@ public:
     //   UPDATE gtitle_complete SET IsHang = 1 WHERE UnitUID = ? AND TitleID = ?；
     // 單一 transaction；失敗整體 rollback、回傳 false（呼叫端可記錄後續行，原碼僅 log 不中斷選角）。
     bool RepairDuplicateEquippedTitle(int64_t unitUID, int32_t equippedTitleID, std::string& err);
+    // 稱號配裝寫入（§0a20；原 gup_update_title_hang 等價 SQL，SERV_TITLE_DATA_SIZE 語義）：
+    //   newTitleID == 0 → UPDATE gtitle_complete SET IsHang = 0 WHERE UnitUID = ?（proc @iTitleID=0 全脫）；
+    //   否則 → 先脫 oldTitleID（≠0 才執行；proc @iOldID），再掛 newTitleID（proc @iTitleID）。
+    // 單一 transaction；attach 前驗證持有列存在；失敗 → rollback + false。
+    bool EquipTitleHang(int64_t unitUID, int32_t oldTitleID, int32_t newTitleID, std::string& err);
 
 private:
     Database& m_db;

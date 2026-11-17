@@ -60,6 +60,7 @@ void RunTitleReadbackTestsByRef(int& pass, int& fail);
 void RunSelectNot4ReadbackTestsByRef(int& pass, int& fail);
 void RunInventoryReadbackTestsByRef(int& pass, int& fail);
 void RunSelectNot45ReadbackTestsByRef(int& pass, int& fail);
+void RunEquipTitleTestsByRef(int& pass, int& fail);
 
 static int g_fail = 0, g_pass = 0;
 #define CHECK(cond, name) do { \
@@ -440,6 +441,7 @@ int main() {
     RunSelectNot4ReadbackTestsByRef(g_pass, g_fail);
     RunInventoryReadbackTestsByRef(g_pass, g_fail);
     RunSelectNot45ReadbackTestsByRef(g_pass, g_fail);
+    RunEquipTitleTestsByRef(g_pass, g_fail);
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

@@ -1461,6 +1461,59 @@ bool GameStore::RepairDuplicateEquippedTitle(int64_t unitUID, int32_t equippedTi
     return m_db.Commit(err);
 }
 
+bool GameStore::EquipTitleHang(int64_t unitUID, int32_t oldTitleID, int32_t newTitleID, std::string& err)
+{
+    if (!m_db.Begin(err)) return false;
+    auto rollback = [this]() { std::string u; m_db.Rollback(u); };
+    if (newTitleID == 0) {
+        // 全部脫下（proc @iTitleID=0 分支）
+        Statement st;
+        if (!st.Prepare(m_db, "UPDATE gtitle_complete SET IsHang = 0 WHERE UnitUID = ?;", err)) { rollback(); return false; }
+        if (!st.BindInt(1, unitUID, err)) { rollback(); return false; }
+        std::string stepErr;
+        if (st.StepRow(stepErr)) { rollback(); err = "unexpected row from UPDATE"; return false; }
+        if (!stepErr.empty()) { err = stepErr; rollback(); return false; }
+        return m_db.Commit(err);
+    }
+    // 持有驗證（attach 前；proc -2 的等價保險）
+    {
+        Statement st;
+        if (!st.Prepare(m_db, "SELECT COUNT(*) FROM gtitle_complete WHERE UnitUID = ? AND TitleID = ?;", err)) { rollback(); return false; }
+        if (!st.BindInt(1, unitUID, err) || !st.BindInt(2, newTitleID, err)) { rollback(); return false; }
+        std::string stepErr;
+        if (!st.StepRow(stepErr)) { rollback(); err = "count query failed"; return false; }
+        if (st.ColumnInt64(0) != 1) { rollback(); err = "title not owned"; return false; }
+    }
+    // 脫下舊稱號（proc @iOldID 分支；僅 oldTitleID != 0）
+    if (oldTitleID != 0 && oldTitleID != newTitleID) {
+        Statement st;
+        if (!st.Prepare(m_db, "UPDATE gtitle_complete SET IsHang = 0 WHERE UnitUID = ? AND TitleID = ?;", err)) { rollback(); return false; }
+        if (!st.BindInt(1, unitUID, err) || !st.BindInt(2, oldTitleID, err)) { rollback(); return false; }
+        std::string stepErr;
+        if (st.StepRow(stepErr)) { rollback(); err = "unexpected row from UPDATE"; return false; }
+        if (!stepErr.empty()) { err = stepErr; rollback(); return false; }
+    }
+    // 掛上新稱號（proc @iTitleID 分支）
+    {
+        Statement st;
+        if (!st.Prepare(m_db, "UPDATE gtitle_complete SET IsHang = 1 WHERE UnitUID = ? AND TitleID = ?;", err)) { rollback(); return false; }
+        if (!st.BindInt(1, unitUID, err) || !st.BindInt(2, newTitleID, err)) { rollback(); return false; }
+        std::string stepErr;
+        if (st.StepRow(stepErr)) { rollback(); err = "unexpected row from UPDATE"; return false; }
+        if (!stepErr.empty()) { err = stepErr; rollback(); return false; }
+    }
+    // 掛上後驗證（IsHang=1 恰好一列——防禦；失敗 → rollback）
+    {
+        Statement st;
+        if (!st.Prepare(m_db, "SELECT COUNT(*) FROM gtitle_complete WHERE UnitUID = ? AND TitleID = ? AND IsHang = 1;", err)) { rollback(); return false; }
+        if (!st.BindInt(1, unitUID, err) || !st.BindInt(2, newTitleID, err)) { rollback(); return false; }
+        std::string stepErr;
+        if (!st.StepRow(stepErr)) { rollback(); err = "verify query failed"; return false; }
+        if (st.ColumnInt64(0) != 1) { rollback(); err = "attach verify failed"; return false; }
+    }
+    return m_db.Commit(err);
+}
+
 bool GameStore::GetRecommendOldUID(int64_t newUID, int64_t& outOldUID, bool& found, std::string& err)
 {
     outOldUID = 0;

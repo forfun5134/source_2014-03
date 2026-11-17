@@ -358,6 +358,42 @@ tests/test_string_filter.cpp 的字元集閘門斷言改為依 `X2_REGION_*` 分
 - **測試數**：**JP = 1297、TW = 1295、EU = 1293、CN = 1295 passed / 0 failed**。
 - 剩餘未移植：gmo_*_skill（技能 slot 更新）／gup_get_community_opt_unituid（社群選項查詢——V2 改以 gdenyoption 直接讀回近似，§0a9；relationship 6 欄寫入 EGS_UPDATE_COMMUNITY_OPT 已於 §0a10 以 write-through upsert 移植；P_GDenyOption_UPD 仍缺 proc）／class 5..9 技能列（原 proc 不存在）／LogDB；gspirit 的 Flag 完整語意與復活石補充/精力重置已於 §0a8 移植；Flag 並列槽位 UI 亦未建模。
 
+## 0a20. 2026-11-17 附記（EGS_EQUIP_TITLE_REQ：칭호 장착/해제——首個稱號寫入事件；write-through）
+
+選角路徑（§0a19）處理「重複配裝損壞修復」；稱號的**主動裝/卸事件**（客戶端稱號欄點擊）此前未實作。本切片落地 `EGS_EQUIP_TITLE_REQ/ACK`（事件 543/544）。
+
+原版：
+
+- **GSUserGameCommon::IMPL_ON_FUNC( EGS_EQUIP_TITLE_REQ )**（GSUserGameCommon.cpp:6540–…）：VERIFY_STATE(S_FIELD_MAP/S_ROOM)；`m_kUserTitleManager.EquipTitle( iTitleID )`（UserTitleManager.cpp:1437–1506）：
+  - [1] `SiCXSLTitleManager()->IsExistTitleID(iTitleID)` 不存在 → ERR_TITLE_03；
+  - [2] `m_iEquippedTitle == iTitleID` → ERR_TITLE_01；
+  - [3] 未持有（in-memory `m_mapTitle` 無）→ ERR_TITLE_00；
+  - [4] 過期（`tCurTime > m_kCTime`；`m_kCTime` 為稱號讀入時的 EndDate 換算）→ ERR_TITLE_02；
+  - [5] 成功 → 改寫記憶體 `m_iEquippedTitle` → NET_OK。
+- ACK{ m_iOK, m_iTitleID }（CLIENT 回顯 iTitleID，不歸零）。非 FIELD_MAP/ROOM 狀態 → SEND ERM_CHANGE_EQUIPPED_*_NOT（稱號換裝廣播）。
+- **DB 寫入延遲**到下一次 DBE_UPDATE_UNIT_INFO_REQ（Query_UpdateUnit → `gup_update_title_hang(unitUID, m_iInitTitleID, m_iEquippedTitleID)`；SERV_TITLE_DATA_SIZE；proc 存在於倉庫）。
+
+**V2 實作**：
+
+- **協議** `src/server/EquipTitleProtocol.{h,cpp}`（x2::equip_title）：REQ{iTitleID:int32}；ACK{iOK, iTitleID}；events 543/544；golden bytes 自洽。
+- **NetError**：新增 `ERR_TITLE_00..05 = 494..499`（**以 g++ 實際編譯原 `NetError_def.h` 實測**，與既有「實測編譯值」慣例一致；原 enum 計數人工/機器核對不可靠——見 NOTE）。
+- **handler**：unitUID 對應原 GetCharUID()（呼叫端傳入）；`nowUtc` 可注入（測試固定時間，字串比較）。驗證順序同原 [2][3][4]（見偏差聲明 1），通過後 **write-through** `GameStore::EquipTitleHang`：
+  - `iTitleID == 0` → 全部 `IsHang = 0`（proc @iTitleID=0 分支）；
+  - 否則 → detach 舊配裝（≠0 且≠新；proc @iOldID）＋ attach 新（proc @iTitleID）；transaction 內先驗證持有（COUNT=1）、attach 後驗證 IsHang=1 恰一列；失敗 → rollback + false。
+- **ERR_TITLE_03**（templet 不存在）V2 無法產生（無 ScriptDB；見偏差聲明 1）；負值 iTitleID → ERR_TITLE_03。
+- **DBE 失敗碼**：無原碼對應 → 採 **ERR_TITLE_04（498，稱號を獲得できませんでした）**，非 ERR_TITLE_03（避免誤導「不存在」）。
+- **測試**：`tests/test_equip_title.cpp`（golden bytes、句柄 event id、ERR_TITLE_* 值=編譯實測值、handler 全分支：已配裝/未持有/過期/切換/全卸/負值/不可解析 EndDate fail-closed/回饒/foreign unit）。
+- **測試數**：**JP = 1853、TW = 1851、EU = 1849、CN = 1851、US = 1850 passed / 0 failed**。
+- **偏差聲明**：
+  1. **SiCXSLTitleManager（Title 腳本表）不在倉庫** → [1] 稱號存在性不驗證；持有背書取代（gtitle_complete 主鍵 (UnitUID, TitleID)）。
+  2. **write-through vs 延遲寫**：原版在 DBE_UPDATE_UNIT_INFO（副本結束或強制 info update）才落盤；V2 無 session 記憶體與副本結束路徑 → 立即寫入同一 transaction（與 §0a10 社群選項同慣例；V2 選角/副本系統未來落地時可改為 write-back）。
+  3. **當前配裝態來自 DB**：讀 gtitle_complete 首個 IsHang=1（TitleID ASC）——與選角路徑一致（§0a12/§0a19）；並發以 transaction 內再驗證兜底（無跨請求鎖）。
+  4. **VERIFY_STATE / ERM_CHANGE_EQUIPPED_*_NOT 不移植**（無 FSM；無 Room/Field 子系統）。
+  5. **過期以 EndDate 字串比較**：非空但無法解析 → 視為過期（fail closed；原 CTime 轉換失敗後 GetTime()=0 語義）；NULL（永久）恆有效。
+  6. 線路佈局自洽 golden bytes；未對原 SDK 實機驗證。
+
+NOTE：`NetError_def.h` 的 enum 人工/樸素腳本核對計數與實際編譯值不符（ERR_SELECT_UNIT_07 實測 1081≠朴素計數 1020）——**凡新增 NetError 常數一律以 g++ -I 直接編譯原標頭實測**。
+
 ## 0a19. 2026-11-17 附記（SELECT_UNIT_1_NOT：重複 IsHang 修復寫路徑——原 bResetTitle 路徑）
 
 §0a12 將「bResetTitle 寫路徑」列為待辦；本節落地。
