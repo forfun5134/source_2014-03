@@ -27,6 +27,7 @@
 
 #include "../db/GameStore.h"
 #include "SelectUnitProtocol.h"
+#include "UnitListProtocol.h"
 
 namespace x2 { namespace select_unit {
 
@@ -48,6 +49,17 @@ int32_t HandleSelectUnitReq(db::GameStore& gameDb, int64_t userUID, const Select
                             SelectUnitNot3* outNot3 = nullptr,
                             SelectUnitNot4* outNot4 = nullptr,
                             SelectUnitNot5* outNot5 = nullptr);
+
+// EGS_MY_UNIT_AND_INVENTORY_INFO_LIST_REQ（無參數）決策：
+//   guser（GetOrCreateGUser，缺則建，USSize=50）取 nUnitSlot；ListUnitsByUserUID（Deleted=0，UnitUID 升序）
+//   取角色清單並逐個以 PopulateUnitInfoFromGUnit 填 KUnitInfo；ack.iOK=NET_OK。
+// 誠實偏差：原版以 EXP 表換算 level/nowEXP/nextEXP、以職業/等級 stat 表疊加 stat、填 P2P IP/port——
+//   V2 無這些表/系統，沿用 gunit 儲存值、IP/port 填空（見 architecture §0k）。原版 S_SERVER_SELECT 狀態閘門未建模。
+// 失敗：GetOrCreateGUser 或 ListUnitsByUserUID 出錯 → false（ack.iOK 由呼叫端定，err 有訊息）。
+bool HandleMyUnitAndInventoryInfoListReq(db::GameStore& gameDb, int64_t userUID, const std::string& userID,
+                                         int authLevel,
+                                         unit_list::MyUnitAndInventoryInfoListAck& ack,
+                                         std::string& err);
 
 // 組裝 SELECT_UNIT_5_NOT（成功路徑的首次選擇/ETC 分片）。
 // 誠實說明：V2 無 spirit/CHAR_LOG/pshop-agency/henir-reward/cashshop 狀態表，
@@ -80,6 +92,11 @@ void BuildSelectUnitNot3(SelectUnitNot3& out);
 // 誠實說明：V2 game DB 無任務/日常任務/隨機日常任務表，vecQuest/vecCompletQuest/mapRandomQuestList
 // 一律空容器——不代表角色真實任務狀態。iOK=NET_OK。
 void BuildSelectUnitNot2(SelectUnitNot2& out);
+
+// 由 GUnitRecord 填出 KUnitInfo（LoginCount/IP/port/exp→level 換算等原版衍生欄位無 V2 對應表，沿用儲存值）。
+// 供 BuildSelectUnitNot1 與 MY_UNIT_AND_INVENTORY_INFO_LIST_ACK 共用。
+void PopulateUnitInfoFromGUnit(int64_t userUID, int authLevel, const db::GUnitRecord& unit,
+                               unit::UnitInfo& outUnitInfo);
 
 // 由 GUnitRecord 組裝 SELECT_UNIT_1_NOT（成功路徑的角色資料分片，第一手資料）。
 // 誠實說明：V2 game DB 僅有 gunit 一表可用——items/quests/titles/resStone/spirit/rating 等

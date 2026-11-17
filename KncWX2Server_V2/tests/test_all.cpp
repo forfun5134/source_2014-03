@@ -34,6 +34,7 @@ void RunLoginSliceTestsByRef(int& pass, int& fail);
 void RunGameStoreTestsByRef(int& pass, int& fail);
 void RunSelectUnitTestsByRef(int& pass, int& fail);
 void RunUnitDataTestsByRef(int& pass, int& fail);
+void RunUnitListTestsByRef(int& pass, int& fail);
 
 static int g_fail = 0, g_pass = 0;
 #define CHECK(cond, name) do { \
@@ -388,6 +389,7 @@ int main() {
     RunGameStoreTestsByRef(g_pass, g_fail);
     RunSelectUnitTestsByRef(g_pass, g_fail);
     RunUnitDataTestsByRef(g_pass, g_fail);
+    RunUnitListTestsByRef(g_pass, g_fail);
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

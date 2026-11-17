@@ -27,6 +27,7 @@
 #include "../src/server/LoginProtocol.h"
 #include "../src/server/SelectUnitProtocol.h"
 #include "../src/server/UnitSelectArbiter.h"
+#include "../src/server/UnitListProtocol.h"
 
 using namespace x2;
 using namespace x2::db;
@@ -54,6 +55,8 @@ static const uint16_t kConnectReqID = static_cast<uint16_t>(EventID::EGS_CONNECT
 static const uint16_t kConnectAckID = static_cast<uint16_t>(EventID::EGS_CONNECT_ACK);
 static const uint16_t kVerifyReqID  = static_cast<uint16_t>(EventID::EGS_VERIFY_ACCOUNT_REQ);
 static const uint16_t kVerifyAckID  = static_cast<uint16_t>(EventID::EGS_VERIFY_ACCOUNT_ACK);
+static const uint16_t kMyUnitListReqID = static_cast<uint16_t>(EventID::EGS_MY_UNIT_AND_INVENTORY_INFO_LIST_REQ);
+static const uint16_t kMyUnitListAckID = static_cast<uint16_t>(EventID::EGS_MY_UNIT_AND_INVENTORY_INFO_LIST_ACK);
 
 static SerBuffer PutPayload(const std::function<bool(Serializer&)>& fn)
 {
@@ -701,7 +704,7 @@ static void TestSelectUnitLoopback()
         cfg.udpPort = 6000;
         cfg.channelId = 4242;
 
-        for (int i = 0; i < 6; ++i) {
+        for (int i = 0; i < 7; ++i) {   // CONNECT, VERIFY, MY_UNIT_LIST, SELECT, GET_MY_INVENTORY, SELECT(foreign), SELECT(ghost)
             Event ev;
             if (srv.RecvEvent(ev, 5000) != Session::RecvResult::Event) break;
             Serializer ks;
@@ -750,6 +753,16 @@ static void TestSelectUnitLoopback()
                 }
                 SerBuffer payload = PutPayload([&ack](Serializer& s) { return PutSelectUnitAck(s, ack); });
                 if (!srv.SendEvent(MakeEvent(kSelectUnitAckID, payload))) return;
+            } else if (ev.eventID == kMyUnitListReqID) {
+                // EGS_MY_UNIT_AND_INVENTORY_INFO_LIST_REQ：真實資料來源為 game DB guser/gunit（此迴路即連真實 mkstemp 庫）
+                unit_list::MyUnitAndInventoryInfoListAck ulAck;
+                std::string ulErr;
+                if (!HandleMyUnitAndInventoryInfoListReq(gameStore, seenUserUID.load(), "selectslice", 5, ulAck, ulErr)) {
+                    ulAck = unit_list::MyUnitAndInventoryInfoListAck{};
+                    ulAck.iOK = ERR_SELECT_UNIT_05;   // DB 錯誤（誠實失敗）
+                }
+                SerBuffer ulPayload = PutPayload([&ulAck](Serializer& s2) { return unit_list::PutMyUnitAndInventoryInfoListAck(s2, ulAck); });
+                if (!srv.SendEvent(MakeEvent(kMyUnitListAckID, ulPayload))) return;
             } else if (ev.eventID == kGetMyInventoryReqID) {
                 // V2 無背包 DB 表：注入合成背包（僅測試線路分片；非真實角色資料）
                 std::map<int64_t, unit::InventoryItemInfo> synthetic;
@@ -815,6 +828,21 @@ static void TestSelectUnitLoopback()
         ks.EndReading();
         CHECK(ack.iOK == NET_OK, "verify accepted");
         CHECK(ack.accountInfo.userUID == loginUID, "account userUID == seeded LoginUID");
+        // EGS_MY_UNIT_AND_INVENTORY_INFO_LIST_REQ（NOPARAM）→ ACK（iOK/nUnitSlot/vecUnitInfo）
+        {
+            CHECK(client.SendEvent(MakeEvent(kMyUnitListReqID, SerBuffer{})), "my unit list req sent");
+            Event ulAckEv;
+            CHECK(client.RecvEvent(ulAckEv, 5000) == Session::RecvResult::Event, "my unit list ack received");
+            CHECK(ulAckEv.eventID == kMyUnitListAckID, "my unit list ack id == 35");
+            unit_list::MyUnitAndInventoryInfoListAck ulAck;
+            Serializer ksUl;
+            CHECK(ksUl.BeginReading(&ulAckEv.payload), "read my unit list ack");
+            CHECK(unit_list::GetMyUnitAndInventoryInfoListAck(ksUl, ulAck), "decode my unit list ack");
+            ksUl.EndReading();
+            CHECK(ulAck.iOK == NET_OK && ulAck.nUnitSlot == 50, "my unit list ack NET_OK, USSize 50");
+            CHECK(ulAck.vecUnitInfo.size() == 1 && ulAck.vecUnitInfo[0].unitUID == unitUID &&
+                  ulAck.vecUnitInfo[0].nickName == L"選擇切片", "my unit list ack carries seeded unit");
+        }
     }
 
     // SELECT_UNIT_REQ #1：自己的角色 → NET_OK

@@ -69,13 +69,10 @@ void BuildSelectUnitNot2(SelectUnitNot2& out)
     // vecQuest / vecCompletQuest / mapRandomQuestList：無資料來源 → 空容器（誠實佔位）
 }
 
-void BuildSelectUnitNot1(int64_t userUID, int authLevel, const db::GUnitRecord& unit,
-                         SelectUnitNot1& out)
+void PopulateUnitInfoFromGUnit(int64_t userUID, int authLevel, const db::GUnitRecord& unit,
+                               unit::UnitInfo& u)
 {
-    out = SelectUnitNot1{};
-    out.iOK = NET_OK;
-
-    auto& u = out.unitInfo;
+    u = unit::UnitInfo{};
     u.ownerUserUID = userUID;
     u.authLevel = static_cast<int8_t>(authLevel);
     u.unitUID = unit.unitUID;
@@ -107,6 +104,15 @@ void BuildSelectUnitNot1(int64_t userUID, int authLevel, const db::GUnitRecord& 
     u.titleID = 0;
     u.userGuildInfo = unit::UserGuildInfo{};
     u.lastLoginTime = Utf8ToWide(unit.lastDate);
+}
+
+void BuildSelectUnitNot1(int64_t userUID, int authLevel, const db::GUnitRecord& unit,
+                         SelectUnitNot1& out)
+{
+    out = SelectUnitNot1{};
+    out.iOK = NET_OK;
+
+    PopulateUnitInfoFromGUnit(userUID, authLevel, unit, out.unitInfo);
 
     out.unitCreateDate = Utf8ToWide(unit.regDate);  // SERV_CHAR_LOG
     out.realDataED = 0;                             // SERV_LOGOUT_ED_CHECK（無資料來源）
@@ -115,6 +121,26 @@ void BuildSelectUnitNot1(int64_t userUID, int authLevel, const db::GUnitRecord& 
     out.vecUserSkillPageData.push_back(unit::UserSkillPageData{});  // 一頁全預設（pages 1/1 一致）
     // vecSkillUnsealed / mapSkillNote：空；skillNoteMaxPageNum = 0
     out.relationshipInfo = unit::RelationshipInfo{};  // 無伴侶 → 全預設
+}
+
+bool HandleMyUnitAndInventoryInfoListReq(db::GameStore& gameDb, int64_t userUID, const std::string& userID,
+                                         int authLevel,
+                                         unit_list::MyUnitAndInventoryInfoListAck& ack,
+                                         std::string& err)
+{
+    ack = unit_list::MyUnitAndInventoryInfoListAck{};
+    db::GUserRecord guser;
+    if (!gameDb.GetOrCreateGUser(userUID, userID, guser, err)) return false;
+    ack.nUnitSlot = guser.usSize;
+    std::vector<db::GUnitRecord> units;
+    if (!gameDb.ListUnitsByUserUID(userUID, units, err)) return false;
+    for (const auto& u : units) {
+        unit::UnitInfo info;
+        PopulateUnitInfoFromGUnit(userUID, authLevel, u, info);
+        ack.vecUnitInfo.push_back(std::move(info));
+    }
+    ack.iOK = NET_OK;
+    return true;
 }
 
 size_t HandleGetMyInventoryReq(const std::map<int64_t, unit::InventoryItemInfo>& items,

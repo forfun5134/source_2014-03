@@ -97,6 +97,16 @@
 
 ⚠ 誠實聲明：V2 **無背包 DB 表**（gunit 無 items；1_NOT items 亦為佔位）——HandleGetMyInventoryReq 不接 DB，呼叫方須傳入 items（目前僅測試以合成資料注入）；wire 佈局為自洽 golden bytes，**未對原 SDK 實機驗證**；推薦狀態 bIsRecommend 為佔位 false；ST_BANK/ST_E_EQUIP 跳過邏輯未建模。
 
+## 0k. 2026-11-17 快照（MY_UNIT_AND_INVENTORY_INFO_LIST 流程移植）
+
+**新增模組** `src/server/UnitListProtocol.{h,cpp}`（命名空間 `x2::unit_list`）：`MyUnitAndInventoryInfoListReq`（EGS_MY_UNIT_AND_INVENTORY_INFO_LIST_REQ=34，NOPARAM 空 payload）、`MyUnitAndInventoryInfoListAck`（35；{int iOK, int nUnitSlot, vector<KUnitInfo> vecUnitInfo}；SERV_SHARING_BANK_QUEST_CASH / SERV_4TH_ANNIVERSARY_EVENT 皆未定義 → 無額外欄位）。PUT 順序機讀自原 ClientPacket.cpp。
+
+**決策層** `HandleMyUnitAndInventoryInfoListReq(gameDb, userUID, userID, authLevel, ack, err)`（UnitSelectArbiter）：guser 以 GetOrCreateGUser 取/建（USSize=50）→ `ListUnitsByUserUID`（Deleted=0、UnitUID 升序）→ 每個角色以 `PopulateUnitInfoFromGUnit`（**自 BuildSelectUnitNot1 抽取的共用填值函式**，UnitData/SelectUnit 行為不變）填 KUnitInfo；ack.iOK=NET_OK。原版對每個角色衍生 level/nowEXP/nextEXP（EXP 表）、疊加職業/等級 stat（stat 表）、填 P2P IP/port——**V2 無 EXP 表/stat 表/P2P，沿用 gunit 儲存值、IP/port 填空**（誠實偏差）；原版 S_SERVER_SELECT 狀態閘門與二級密碼前置未建模。DB 失敗 → false（呼叫端可回 ERR_SELECT_UNIT_05）。
+
+**迴路**（雙庫 mkstemp）：CONNECT → VERIFY → **MY_UNIT_LIST REQ → ACK（iOK=NET_OK、nUnitSlot=50、含種子角色「選擇切片」）** → SELECT_UNIT（own）→ 5×NOT → ACK → GET_MY_INVENTORY（合成背包）→ SELECT_UNIT（foreign → ERR_SELECT_UNIT_07）→ SELECT_UNIT（ghost → ERR_SELECT_UNIT_00）。**附帶修正：迴路伺服器事件迴圈上限 6→7**（新增 MY_UNIT_LIST 後原本 6 個事件不夠，ghost 被吃掉；曾以 stdbuf 追出）。另有 `tests/test_unit_list.cpp`（codec roundtrip、guser 自建、ListUnits 過濾其他使用者、空帳號 USSize=50）。測試自 654 → **685 passed / 0 failed**。vcxproj 登記 UnitListProtocol.{h,cpp}。
+
+⚠ 誠實聲明：wire 佈局為自洽 golden bytes，**未對原 SDK 實機驗證**；角色衍生欄位（EXP→level、stat 表疊加、P2P）為佔位/沿用儲存值；nUnitSlot 來自 V2 guser（USSize=50 慣例）；MY_UNIT_LIST 之前的 S_SERVER_SELECT 狀態閘門未建模。
+
 ## 0. 一句話現況
 
 V2 是原 Elsword 韓服伺服器（`X2Project`）的 **C++ 重寫地基**：平台無關的線路格式核心、安全模組已完成並以 golden bytes 測試驗證；最短網路路徑（同步 TCP + 原版 TCP 訊框 + 迴路 echo 整合測試）與 Session 層（SPI 握手換發、驗證失敗踢除、E_HEART_BEAT 丟棄、殭屍檢測、SERV_KEVENT_FROM 標記）已完成並 238 項測試全綠；**遊戲邏輯、非同步網路層未完成；資料庫層已完成 Phase 1（users 表 + 帳號存取層）**。V2 不是可運行的伺服器，不要部署它。
