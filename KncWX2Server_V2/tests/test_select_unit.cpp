@@ -468,14 +468,26 @@ static void TestSelectUnitNot4Codec()
 
 static void TestBuildSelectUnitNot4Defaults()
 {
+    db::DenyOptionValues deny;   // 預設全 1（DOS_OFF）
     SelectUnitNot4 not4;
-    BuildSelectUnitNot4(not4);
+    BuildSelectUnitNot4(not4, deny);
     CHECK(not4.iOK == NET_OK, "not4 builder iOK");
     CHECK(not4.vecChatBlackList.empty() && not4.vecTutorialDBUnitInfo.empty() && not4.vecHenirRanking.empty() &&
           not4.kMessengerInfo.mapFriendInfo.empty() && not4.kGamePlayStatus.vecGamePlayStatus.empty() &&
-          !not4.bIsRecommend && not4.iRecommendUnitUID == 0 &&
-          not4.kDenyOptions.cDenyFriendShip == 0 && not4.kDenyOptions.cDenyInvitePracticePVP == 0,
+          !not4.bIsRecommend && not4.iRecommendUnitUID == 0,
           "not4 builder: no fabricated social/tutorial data (zeroed/empty placeholders)");
+    CHECK(not4.kDenyOptions.cDenyFriendShip == 1 && not4.kDenyOptions.cDenyInviteGuild == 1 &&
+          not4.kDenyOptions.cDenyParty == 1 && not4.kDenyOptions.cDenyPersonalTrade == 1 &&
+          not4.kDenyOptions.cDenyRequestCouple == 1 && not4.kDenyOptions.cDenyInvitePracticePVP == 1,
+          "not4 builder: deny options from GDenyOption defaults (1 = DOS_OFF)");
+    // 顯式值
+    db::DenyOptionValues deny2; deny2 = { 0, 2, 1, 0, 0, 2 };
+    SelectUnitNot4 not4b;
+    BuildSelectUnitNot4(not4b, deny2);
+    CHECK(not4b.kDenyOptions.cDenyFriendShip == 0 && not4b.kDenyOptions.cDenyInviteGuild == 2 &&
+          not4b.kDenyOptions.cDenyParty == 1 && not4b.kDenyOptions.cDenyPersonalTrade == 0 &&
+          not4b.kDenyOptions.cDenyRequestCouple == 0 && not4b.kDenyOptions.cDenyInvitePracticePVP == 2,
+          "not4 builder: deny options passed through verbatim");
 }
 
 static void TestSelectUnitNot5Codec()

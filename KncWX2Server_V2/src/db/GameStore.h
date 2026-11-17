@@ -40,7 +40,7 @@
 
 namespace x2 { namespace db {
 
-inline constexpr int kGameSchemaVersion = 3;
+inline constexpr int kGameSchemaVersion = 4;
 
 // game DB 遷移：v0→v1 建立 guser / gunit / gunit_nickname / gdeleted_nickname_history；冪等
 bool ApplyGameMigrations(Database& db, std::string& err);
@@ -88,6 +88,22 @@ struct SpiritValues
 struct ResurrectionStoneValues
 {
     int quantity = 0;
+};
+
+// GDenyOption 讀回 → SELECT_UNIT_4_NOT kDenyOptions（原 gup_select_unit 的 DBE ACK 一併回傳；V2 §0a9）。
+// 缺列（如舊庫未補建角衛星列）→ 1（DOS_OFF），鏡像原 gup_get_community_opt_unituid 的 missing→1 慣例
+//   （DOS_ON=0 / DOS_OFF=1 / DOS_ONLY_FRIEND=2）。QuestionNo 1..6 ↔ FriendShip/InviteGuild/Party/PersonalTrade/
+//   RequestCouple/InvitePracticePVP；7+ 未知 QuestionNo 忽略。
+// 注意：原 JP INT_INTERNAL 走 SERV_RELATIONSHIP_SYSTEM → P_GDenyOption_SEL（6 欄），該 proc **不隨倉庫提供**；
+//   V2 以 gdenyoption（§0a5 建角寫入 1..4）＋缺列→1 之慣例近似。
+struct DenyOptionValues
+{
+    int friendShip = 1;
+    int inviteGuild = 1;
+    int party = 1;
+    int personalTrade = 1;
+    int requestCouple = 1;        // SERV_RELATIONSHIP_SYSTEM（gup_create_unit 不建 QN=5 列 → 恆預設 1，誠實缺口）
+    int invitePracticePVP = 1;    // 同上（QN=6）
 };
 
 enum class NicknameCheckResult
@@ -175,6 +191,9 @@ public:
 
     // 讀取 GSpirit（缺列 → {0,0}，非錯誤）
     bool GetSpiritValues(int64_t unitUID, SpiritValues& out, std::string& err);
+
+    // 讀取 GDenyOption（缺列 → 全 1（DOS_OFF），非錯誤；不存在檢查——原 proc 亦不檢查）
+    bool GetDenyOptions(int64_t unitUID, DenyOptionValues& out, std::string& err);
 
     // 讀取 GResurrectionStone（缺列 → false，非錯誤；供測試/除錯）
     bool GetResurrectionStone(int64_t unitUID, ResurrectionStoneValues& out, std::string& err);

@@ -68,7 +68,7 @@ static const char* kCreateGDenyOptionV2 = R"SQL(
 CREATE TABLE gdenyoption (
     UnitUID    INTEGER NOT NULL REFERENCES gunit(UnitUID),
     QuestionNo INTEGER NOT NULL CHECK (QuestionNo BETWEEN 1 AND 255),
-    CodeNo     INTEGER NOT NULL CHECK (CodeNo BETWEEN 1 AND 255),
+    CodeNo     INTEGER NOT NULL CHECK (CodeNo BETWEEN 0 AND 255),
     PRIMARY KEY (UnitUID, QuestionNo)
 );
 )SQL";
@@ -131,6 +131,22 @@ CREATE TABLE gresurrectionstonecnt (
 );
 )SQL";
 
+// --- v4（§0a9）：gdenyoption 重建 —— CodeNo 允許 0（= DOS_ON）。
+// v2 建表時 CodeNo CHECK 為 1..255，擋掉原 tinyint 合法值 DOS_ON=0；
+// 原 dbo.GDenyOption 為 tinyint 且無範圍限制（KDenyOptions DOS_ON=0/DOS_OFF=1/DOS_ONLY_FRIEND=2）。
+// SQLite 無法在原位改 CHECK → 整表重建（migrate 於單一 transaction，失敗整體 ROLLBACK）。
+static const char* kMigrateGDenyOptionV4 = R"SQL(
+CREATE TABLE gdenyoption_v4 (
+    UnitUID    INTEGER NOT NULL REFERENCES gunit(UnitUID),
+    QuestionNo INTEGER NOT NULL CHECK (QuestionNo BETWEEN 1 AND 255),
+    CodeNo     INTEGER NOT NULL CHECK (CodeNo BETWEEN 0 AND 255),
+    PRIMARY KEY (UnitUID, QuestionNo)
+);
+INSERT INTO gdenyoption_v4 (UnitUID, QuestionNo, CodeNo) SELECT UnitUID, QuestionNo, CodeNo FROM gdenyoption;
+DROP TABLE gdenyoption;
+ALTER TABLE gdenyoption_v4 RENAME TO gdenyoption;
+)SQL";
+
 bool ApplyGameMigrations(Database& db, std::string& err)
 {
     if (!db.IsOpen()) { err = "database not open"; return false; }
@@ -168,6 +184,14 @@ bool ApplyGameMigrations(Database& db, std::string& err)
             std::string unused;
             db.Rollback(unused);
             err = std::string("game migration v3 failed: ") + err;
+            return false;
+        }
+    }
+    if (v < 4) {
+        if (!db.Exec(kMigrateGDenyOptionV4, err)) {
+            std::string unused;
+            db.Rollback(unused);
+            err = std::string("game migration v4 failed: ") + err;
             return false;
         }
     }
@@ -693,6 +717,35 @@ bool GameStore::GetSpiritValues(int64_t unitUID, SpiritValues& out, std::string&
     }
     if (!stepErr.empty()) { err = stepErr; return false; }
     // 缺列 → {0,0}（原 proc 讀到 NULL，呼叫端以 0/false 使用）
+    err.clear();
+    return true;
+}
+
+bool GameStore::GetDenyOptions(int64_t unitUID, DenyOptionValues& out, std::string& err)
+{
+    out = DenyOptionValues{};   // 全 1（DOS_OFF 預設；缺列慣例，見標頭）
+    Statement st;
+    if (!st.Prepare(m_db, "SELECT QuestionNo, CodeNo FROM gdenyoption WHERE UnitUID = ?;", err)) return false;
+    if (!st.BindInt(1, unitUID, err)) return false;
+    std::string stepErr;
+    while (true) {
+        std::string rowErr;
+        if (!st.StepRow(rowErr)) {
+            if (!rowErr.empty()) { err = rowErr; return false; }
+            break;   // 無更多列
+        }
+        const int qn = static_cast<int>(st.ColumnInt64(0));
+        const int cn = static_cast<int>(st.ColumnInt64(1));
+        switch (qn) {
+            case 1: out.friendShip = cn; break;
+            case 2: out.inviteGuild = cn; break;
+            case 3: out.party = cn; break;
+            case 4: out.personalTrade = cn; break;
+            case 5: out.requestCouple = cn; break;
+            case 6: out.invitePracticePVP = cn; break;
+            default: break;   // 未知 QuestionNo 忽略
+        }
+    }
     err.clear();
     return true;
 }

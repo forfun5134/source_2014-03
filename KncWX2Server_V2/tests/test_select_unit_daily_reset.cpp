@@ -4,6 +4,7 @@
 //   2) 復活石每日補充（LastDate 同法 06:00 KST 已過 → 無列 INSERT StartCnt；有列 Quantity<SupplyCnt → 補至 SupplyCnt）
 //   3) PlayDayCnt+1（日期不同時）、LoginCount+1、LastDate=now
 //   4) SELECT_UNIT_1_NOT 的 UnitInfo.spirit ← GSpirit 讀回；CREATE_UNIT_ACK 的 spirit=StartSpirit（§0a5 寫入值）
+//   4.1) SELECT_UNIT_4_NOT 的 kDenyOptions ← gdenyoption 讀回（§0a9；缺列→1=DOS_OFF；QN=5/6 建角未建列 → 恆預設 1）
 //   5) CHARACTER_LIST/MY_UNIT_LIST 路徑不帶 spirit（原 P_GUnit_Userinfo_GET_20131212 不回傳 Spirit）→ 0
 // ⚠ Statistics DB 的 StatsStoneCnt 統計、SERV_ACCUMULATION_SPIRIT_SYSTEM 變體、GAME01 跨庫寫法未建模（§12）。
 // ⚠ StartCnt/SupplyCnt/StartSpirit 倉庫無 seed 資料；V2 以 gresurrectionstonecnt 注入值為準（缺值→0，誠實偏差）。
@@ -83,6 +84,96 @@ static bool SelectOk(GameStore& store, int64_t userUID, int64_t unitUID, SelectU
     int rc = HandleSelectUnitReq(store, userUID, req, ack, err, /*secondSecurityOk=*/true,
                                  /*outUnit=*/nullptr, not1, /*authLevel=*/5);
     return rc == NET_OK && ack.iOK == NET_OK;
+}
+
+static bool SelectOk4(GameStore& store, int64_t userUID, int64_t unitUID, SelectUnitNot4* not4)
+{
+    SelectUnitReq req; req.unitUID = unitUID;
+    SelectUnitAck ack;
+    std::string err;
+    int rc = HandleSelectUnitReq(store, userUID, req, ack, err, /*secondSecurityOk=*/true,
+                                 /*outUnit=*/nullptr, /*outNot1=*/nullptr, /*authLevel=*/5,
+                                 /*outNot2=*/nullptr, /*outNot3=*/nullptr, not4, /*outNot5=*/nullptr);
+    return rc == NET_OK && ack.iOK == NET_OK;
+}
+
+static void TestDenyOptionReadback()
+{
+    Fixture fx(true);
+    Database& db = fx.db;
+    GameStore store(db);
+    GUserRecord gu;
+    std::string err;
+    CHECK(store.GetOrCreateGUser(777, "rst_deny", gu, err), "guser ok");
+    const int64_t uid = CreateUnitOk(store, 777, L"denyread", 1);
+    CHECK(uid > 0, "unit created");
+
+    // 1) 建角 → QN 1..4 = 1（DOS_OFF），QN 5/6 缺列 → 預設 1
+    {
+        DenyOptionValues dv;
+        CHECK(store.GetDenyOptions(uid, dv, err), "deny options readable after create");
+        CHECK(dv.friendShip == 1 && dv.inviteGuild == 1 && dv.party == 1 && dv.personalTrade == 1 &&
+              dv.requestCouple == 1 && dv.invitePracticePVP == 1,
+              "deny options all DOS_OFF after create (QN1-4 from gdenyoption, 5/6 default)");
+    }
+    // 2) SELECT_UNIT_4_NOT 同步讀回
+    {
+        SelectUnitNot4 not4{};
+        CHECK(SelectOk4(store, 777, uid, &not4), "select ok");
+        CHECK(not4.kDenyOptions.cDenyFriendShip == 1 && not4.kDenyOptions.cDenyInviteGuild == 1 &&
+              not4.kDenyOptions.cDenyParty == 1 && not4.kDenyOptions.cDenyPersonalTrade == 1 &&
+              not4.kDenyOptions.cDenyRequestCouple == 1 && not4.kDenyOptions.cDenyInvitePracticePVP == 1,
+              "not4 kDenyOptions = 1/1/1/1/1/1 after create");
+    }
+    // 3) 直接改庫（模擬客戶端已用 EGS_UPDATE_COMMUNITY_OPT 更新；V2 尚無該封包處理器）
+    CHECK(ExecF(db, "UPDATE gdenyoption SET CodeNo = 0 WHERE UnitUID = " + std::to_string(uid) + " AND QuestionNo = 1;"), "set QN1 DOS_ON");
+    CHECK(ExecF(db, "UPDATE gdenyoption SET CodeNo = 2 WHERE UnitUID = " + std::to_string(uid) + " AND QuestionNo = 3;"), "set QN3 DOS_ONLY_FRIEND");
+    {
+        SelectUnitNot4 not4{};
+        CHECK(SelectOk4(store, 777, uid, &not4), "select ok 2");
+        CHECK(not4.kDenyOptions.cDenyFriendShip == 0 && not4.kDenyOptions.cDenyParty == 2 &&
+              not4.kDenyOptions.cDenyInviteGuild == 1 && not4.kDenyOptions.cDenyPersonalTrade == 1,
+              "not4 kDenyOptions reflects DB (0/1/1/1 + 2)");
+    }
+    // 4) QN 5/6 補列（模擬 relationship 6 欄資料）
+    CHECK(ExecF(db, "INSERT INTO gdenyoption (UnitUID, QuestionNo, CodeNo) VALUES (" + std::to_string(uid) + ", 5, 2);"), "insert QN5");
+    CHECK(ExecF(db, "INSERT INTO gdenyoption (UnitUID, QuestionNo, CodeNo) VALUES (" + std::to_string(uid) + ", 6, 0);"), "insert QN6");
+    {
+        DenyOptionValues dv;
+        CHECK(store.GetDenyOptions(uid, dv, err), "deny options re-readable");
+        CHECK(dv.requestCouple == 2 && dv.invitePracticePVP == 0, "QN5/6 read from DB when present");
+        SelectUnitNot4 not4{};
+        CHECK(SelectOk4(store, 777, uid, &not4), "select ok 3");
+        CHECK(not4.kDenyOptions.cDenyRequestCouple == 2 && not4.kDenyOptions.cDenyInvitePracticePVP == 0,
+              "not4 kDenyOptions QN5/6 from DB");
+    }
+    // 5) 未知 QuestionNo → 忽略，不影響已知欄位
+    CHECK(ExecF(db, "INSERT INTO gdenyoption (UnitUID, QuestionNo, CodeNo) VALUES (" + std::to_string(uid) + ", 99, 0);"), "insert unknown QN");
+    {
+        DenyOptionValues dv;
+        CHECK(store.GetDenyOptions(uid, dv, err), "deny options readable with unknown QN");
+        CHECK(dv.friendShip == 0 && dv.party == 2 && dv.requestCouple == 2 && dv.invitePracticePVP == 0,
+              "unknown QuestionNo ignored");
+    }
+    // 6) 缺列（新角色將所有 gdenyoption 列刪掉）→ 全 1，非錯誤
+    CHECK(ExecF(db, "DELETE FROM gdenyoption WHERE UnitUID = " + std::to_string(uid) + ";"), "delete all deny rows");
+    {
+        DenyOptionValues dv;
+        CHECK(store.GetDenyOptions(uid, dv, err), "deny options missing rows returns true");
+        CHECK(dv.friendShip == 1 && dv.inviteGuild == 1 && dv.party == 1 && dv.personalTrade == 1 &&
+              dv.requestCouple == 1 && dv.invitePracticePVP == 1,
+              "missing rows -> all DOS_OFF(1)");
+        SelectUnitNot4 not4{};
+        CHECK(SelectOk4(store, 777, uid, &not4), "select ok with no deny rows");
+        CHECK(not4.kDenyOptions.cDenyFriendShip == 1 && not4.kDenyOptions.cDenyInvitePracticePVP == 1,
+              "not4 kDenyOptions all 1 when rows missing");
+    }
+    // 7) GetDenyOptions 對不存在 unitUID → true（原 proc 不檢查 unit 存在與否）
+    {
+        DenyOptionValues dv;
+        CHECK(store.GetDenyOptions(0x7FFFFFFF00000002LL, dv, err), "GetDenyOptions nonexistent unit returns true");
+        CHECK(dv.friendShip == 1 && dv.invitePracticePVP == 1, "nonexistent unit -> all defaults");
+    }
 }
 
 static void TestCreateAckSpirit(bool seed)
@@ -287,6 +378,7 @@ void RunSelectUnitDailyResetTestsByRef(int& pass, int& fail)
     TestStoneDailyRefillNoSeed();
     TestPlayDayCntAndLoginCount();
     TestSelectResetEdgeCases();
+    TestDenyOptionReadback();
     pass += g_pass_rst;
     fail += g_fail_rst;
 }

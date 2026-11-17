@@ -195,8 +195,9 @@ size_t HandleGetMyInventoryReq(const std::map<int64_t, unit::InventoryItemInfo>&
 
 // 組裝 SELECT_UNIT_4_NOT（成功路徑的社交/教學/Henir排行/Messenger/戰場狀態分片）。
 // 誠實說明：V2 game DB 無黑名單/拒絕選項/教學/連線時間/Henir排行/好友/戰場狀態表，
-// 容器一律空、旗標全 false/0（kDenyOptions 全 0；不代表角色真實狀態）。iOK=NET_OK。
-void BuildSelectUnitNot4(SelectUnitNot4& out);
+// kDenyOptions ← gdenyoption 讀回（§0a9；缺列 → 1/DOS_OFF，鏡像原 proc missing→1）；其餘容器一律空、旗標全 false/0
+// （items/tutor/henir/messenger 等無資料來源；不代表角色真實狀態）。iOK=NET_OK。
+void BuildSelectUnitNot4(SelectUnitNot4& out, const db::DenyOptionValues& denyOptions);
 
 // 組裝 SELECT_UNIT_3_NOT（成功路徑的使命/稱號/寵物分片）。
 // 誠實說明：V2 game DB 無 mission/title/pet/petItem 表，這些容器一律空、iSummonedPetUID=0——

@@ -85,11 +85,18 @@ void BuildSelectUnitNot5(SelectUnitNot5& out)
     // 無資料來源 → 全 false/0/空容器（誠實佔位）
 }
 
-void BuildSelectUnitNot4(SelectUnitNot4& out)
+void BuildSelectUnitNot4(SelectUnitNot4& out, const db::DenyOptionValues& denyOptions)
 {
     out = SelectUnitNot4{};
     out.iOK = NET_OK;
-    // vecChatBlackList / kDenyOptions / vecTutorialDBUnitInfo / …：無資料來源 → 全預設（誠實佔位）
+    // vecChatBlackList / vecTutorialDBUnitInfo / …：無資料來源 → 全預設（誠實佔位）
+    // kDenyOptions ← GDenyOption（§0a9；question 1..6 → friendShip/inviteGuild/party/personalTrade/requestCouple/invitePracticePVP）
+    out.kDenyOptions.cDenyFriendShip      = static_cast<int8_t>(denyOptions.friendShip);
+    out.kDenyOptions.cDenyInviteGuild     = static_cast<int8_t>(denyOptions.inviteGuild);
+    out.kDenyOptions.cDenyParty           = static_cast<int8_t>(denyOptions.party);
+    out.kDenyOptions.cDenyPersonalTrade   = static_cast<int8_t>(denyOptions.personalTrade);
+    out.kDenyOptions.cDenyRequestCouple   = static_cast<int8_t>(denyOptions.requestCouple);
+    out.kDenyOptions.cDenyInvitePracticePVP = static_cast<int8_t>(denyOptions.invitePracticePVP);
 }
 
 void BuildSelectUnitNot3(SelectUnitNot3& out)
@@ -582,7 +589,15 @@ int32_t HandleSelectUnitReq(db::GameStore& gameDb, int64_t userUID, const Select
     }
     if (outNot2) BuildSelectUnitNot2(*outNot2);
     if (outNot3) BuildSelectUnitNot3(*outNot3);
-    if (outNot4) BuildSelectUnitNot4(*outNot4);
+    if (outNot4) {
+        db::DenyOptionValues deny;
+        if (!gameDb.GetDenyOptions(req.unitUID, deny, err)) {
+            err = std::string("get deny options: ") + err;
+            ack.iOK = ERR_SELECT_UNIT_05;
+            return ack.iOK;
+        }
+        BuildSelectUnitNot4(*outNot4, deny);
+    }
     if (outNot5) BuildSelectUnitNot5(*outNot5);
 
     ack.iOK = NET_OK;

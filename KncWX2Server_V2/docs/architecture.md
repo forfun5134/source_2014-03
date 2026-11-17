@@ -16,7 +16,7 @@
 
 ## 0b. 2026-11-17 快照（game DB Phase 2a）
 
-`src/db/GameStore.{h,cpp}`、`tests/test_game_store.cpp` 新增：game DB（對應原 Database2）的 `guser`／`gunit`／`gunit_nickname`／`gdeleted_nickname_history` 四表 schema（v1，`Deleted` 生成欄、partial index）+ 存取層：`GetOrCreateGUser`（對應 gup_get_user_info，USSize=50）、`CreateUnit`（對應 gup_create_unit：usSize 上限／暱稱唯一／14 天刪除冷卻／事務化插入 gunit+gunit_nickname，LastPosition=20000、SPoint=1；衛星副作用已於 §0a5 補齊：gquests/gskill/gskillslot/gspirit/gdenyoption，GameDB schema v2）、`ListUnitsByUserUID`／`GetUnitByUID`（JOIN 暱稱）、`SoftDeleteUnit`（DelDate=now + 釋放暱稱 NULL + 寫入冷卻歷史，事務化、冪等）、`RecordUnitLogin`（SELECT_UNIT 的登入副作用自 §0a8 起改為 `ApplyUnitLoginReset`）。
+`src/db/GameStore.{h,cpp}`、`tests/test_game_store.cpp` 新增：game DB（對應原 Database2）的 `guser`／`gunit`／`gunit_nickname`／`gdeleted_nickname_history` 四表 schema（v1，`Deleted` 生成欄、partial index）+ 存取層：`GetOrCreateGUser`（對應 gup_get_user_info，USSize=50）、`CreateUnit`（對應 gup_create_unit：usSize 上限／暱稱唯一／14 天刪除冷卻／事務化插入 gunit+gunit_nickname，LastPosition=20000、SPoint=1；衛星副作用已於 §0a5 補齊：gquests/gskill/gskillslot/gspirit/gdenyoption，GameDB schema v2；GDenyOption CodeNo CHECK 於 schema v4 放寬為 0..255，§0a9）、`ListUnitsByUserUID`／`GetUnitByUID`（JOIN 暱稱）、`SoftDeleteUnit`（DelDate=now + 釋放暱稱 NULL + 寫入冷卻歷史，事務化、冪等）、`RecordUnitLogin`（SELECT_UNIT 的登入副作用自 §0a8 起改為 `ApplyUnitLoginReset`）。
 
 ⚠ 範圍誠實聲明：GDenyOption／GResurrectionStoneCnt／GSkill／GQuests／GItem 等衛星表**未實作**；SoftDeleteUnit 只處理 gunit 本身（原 proc 還會級聯 GTutor/GItem）；LastPosition 寫死 20000 為原 proc 預設；game DB 與 account DB 是兩個獨立 SQLite 檔，跨庫 UserUID↔LoginUID 無 FK（與原版一致）。
 ⚠ wire 層尚未消費此 store（SELECT_UNIT_ACK 未動）。
@@ -73,7 +73,7 @@
 
 **SelectUnitNot4**（`SelectUnitProtocol.{h,cpp}`，事件 ID 45）：`int32 iOK → vecChatBlackList → kDenyOptions → bool bIsRecommend → int64 iRecommendUnitUID → vecTutorialDBUnitInfo → vecConnectTimeEvent → vecCumulativeTimeEvent → vecHenirRanking → kMessengerInfo → kGamePlayStatus`。JP 巨集核對（寬鬆樣式）：SERV_RELATIONSHIP_SYSTEM:3643、SERV_ACC_TIME_EVENT:288、CUMULATIVE_TIME_EVENT:101、SERV_BATTLE_FIELD_SYSTEM:2768、SERV_RIDING_PET_SYSTM:2523 已定義；SERV_RECRUIT_EVENT_BASE、SERV_ARCHUANGEL_S_COIN_EVENT_GUIDE、SERV_HENIR_RENEWAL_2013 未定義。
 
-**組裝**：`BuildSelectUnitNot4(out)`——V2 無黑名單/拒絕選項/教學/連線時間/Henir/好友/戰場狀態表，全預設/空（誠實佔位；不代表角色真實狀態）。迴路：server **1_NOT → 2_NOT → 3_NOT → 4_NOT → 收尾 ACK**；client 按序斷言。測試自 590 → **610 passed / 0 failed**。
+**組裝**：`BuildSelectUnitNot4(out)`——V2 無黑名單/教學/連線時間/Henir/好友/戰場狀態表，全預設/空（誠實佔位；不代表角色真實狀態）。**kDenyOptions 自 §0a9 起 ← gdenyoption 讀回**（不再是佔位）。迴路：server **1_NOT → 2_NOT → 3_NOT → 4_NOT → 收尾 ACK**；client 按序斷言。測試自 590 → **610 passed / 0 failed**。
 
 ⚠ 誠實聲明：golden bytes 為自洽佈局，**未對原 SDK 實機驗證**；SELECT_UNIT **5_NOT 未移植**；4_NOT 各欄位為佔位（見上）。
 
@@ -356,7 +356,25 @@ tests/test_string_filter.cpp 的字元集閘門斷言改為依 `X2_REGION_*` 分
 - **⚠ StartSpirit 起始值**：原 production DB 的 `GResurrectionStoneCnt` 有列（值不在倉庫）；原 stored proc 空表時 `@iStartSpirit` 保持 NULL → Spirit NULL → -21 → 建角整體失敗。**V2 以 0 續建**（誠實偏差；倉庫無 seed 資料，無法重現任何原值）。測試以 `INSERT INTO gresurrectionstonecnt … (StartSpirit=100)` 覆蓋「有列」路徑；「空表」路徑斷言 Spirit=0。
 - **測試** `tests/test_create_unit_satellite.cpp`（41 項）：class 1..4 SkillID 對應／class 5 無 gskill・gskillslot（忠實）／GQuests 所有職業 QuestID=13・SubQuest0=1／GDenyOption 4 列 CodeNo=1／GSpirit（空表→0、Flag=0；有列→100）／**副作用失敗 → 整體 ROLLBACK**（`DROP TABLE gskillslot` 後 create → ack=ERR_CREATE_UNIT_02、gunit/gunit_nickname/gquests 皆 0 列）。
 - **測試數**：**JP = 1297、TW = 1295、EU = 1293、CN = 1295 passed / 0 failed**。
-- 剩餘未移植：gmo_*_skill（技能 slot 更新）／gup_get_community_opt_unituid（社群選項查詢）／class 5..9 技能列（原 proc 不存在）／LogDB；gspirit 的 Flag 完整語意與復活石補充/精力重置已於 §0a8 移植；Flag 並列槽位 UI 亦未建模。
+- 剩餘未移植：gmo_*_skill（技能 slot 更新）／gup_get_community_opt_unituid（社群選項查詢——V2 改以 gdenyoption 直接讀回近似，§0a9；relationship 6 欄寫入 EGS_UPDATE_COMMUNITY_OPT 未實作）／class 5..9 技能列（原 proc 不存在）／LogDB；gspirit 的 Flag 完整語意與復活石補充/精力重置已於 §0a8 移植；Flag 並列槽位 UI 亦未建模。
+
+## 0a9. 2026-11-17 附記（SELECT_UNIT_4_NOT kDenyOptions ← GDenyOption 讀回；schema v4）
+
+原路徑（2014 JP；`SERV_RELATIONSHIP_SYSTEM`:3643 已定義）：
+
+- `GSUserFunction::SendSelectUnitACK`（GSUserFunction.cpp:18085–18117）把 DBE ACK 的 `m_kDenyOptions` 放進 `EGS_SELECT_UNIT_4_NOT`；ACK 的 deny options 來自 `DBE_GAME_SELECT_UNIT_REQ → Query_SelectUnit` 流程（GSGameDBThread.cpp）中的 `P_GDenyOption_SEL`——**`P_GDenyOption_SEL`／`P_GDenyOption_UPD`／`P_GDenyOption_MER` 均不隨倉庫提供**（find/grep 皆無）。6 欄（`KDenyOptions`：cDenyFriendShip／cDenyInviteGuild／cDenyParty／cDenyPersonalTrade／cDenyRequestCouple／cDenyInvitePracticePVP；`DenyOptionState`：**DOS_ON=0／DOS_OFF=1／DOS_ONLY_FRIEND=2**，CommonPacket.h）。
+- relationship 之前的舊路徑 `gup_get_community_opt_unituid.proc.sql`（4 值、QuestionNo 1–4 各查一次、**缺列 → CodeNo=1**、`SELECT 1,2,3,4`、NOLOCK）**隨倉庫提供**，但非本建置啟用路徑——V2 僅借用它的「缺列→1」慣例與欄序語意。
+- `gup_update_community_opt.proc.sql`（4 參數 @iInsertFriendDeny_/@iManToManChatDeny_/@iPartyDeny_/@iPrivateDealDeny_；unit 不存在→-1；無列→INSERT 4 列／有列→CASE UPDATE；`@@ROWCOUNT<>4`→-2/-3）**隨倉庫提供**（舊版 `EGS_UPDATE_COMMUNITY_OPT` 路徑）。V2 **目前無 `EGS_UPDATE_COMMUNITY_OPT` 處理器**——客戶端該請求無法改變 V2 的這些值（QN5/6 恆為預設 1，見下）。
+
+**V2 實作**：
+
+- **Schema v4 migration**（`kGameSchemaVersion` 3→4）：`gdenyoption.CodeNo` CHECK 由 1..255 放寬為 **0..255**（SQLite 無法在原位改 CHECK，故整表重建於單一 transaction，失敗整體 ROLLBACK）。原 `dbo.GDenyOption` 為 tinyint 且**無範圍限制**；v2 建表時 1..255 會擋掉合法值 DOS_ON=0。v2 CREATE TABLE 一併放寬（新庫直建即正確）。
+- **`GameStore::GetDenyOptions(unitUID)`**：`SELECT QuestionNo, CodeNo FROM gdenyoption WHERE UnitUID = ?`；**缺列 → 全 1（DOS_OFF），非錯誤**（鏡像 `gup_get_community_opt_unituid` 的 missing→1 慣例）；unit 不存在/已刪除 → true（原 proc 不檢查 unit 存在）；未知 QuestionNo 忽略；QN1..6 → friendShip/inviteGuild/party/personalTrade/requestCouple/invitePracticePVP。
+- **`BuildSelectUnitNot4(out, denyOptions)`**：kDenyOptions ← QN1..6 原樣；其餘欄位（黑名單/教學/連線時間/Henir/好友/戰場狀態…）仍全預設/空（誠實佔位）。`HandleSelectUnitReq`：outNot4 非空時查詢 gdenyoption；失敗 → `ERR_SELECT_UNIT_05`（DBE 流程失敗慣例，與 §0a8 spirit/re-read 一致）。
+- **QN=5（RequestCouple）／QN=6（InvitePracticePVP）**：V2 建角副作用（§0a5）鏡像原 `gup_create_unit` 只 INSERT QN1..4 → 缺列 → **恆預設 1**；relationship 路徑才會寫 5/6（客戶端 `EGS_UPDATE_COMMUNITY_OPT`）——V2 無該封包處理器 → 5/6 恆為預設 1，**誠實缺口**（與 P_GDenyOption_* 缺 proc 的不可移植面一致）。
+- **測試** `tests/test_select_unit_daily_reset.cpp` 新增 `TestDenyOptionReadback`（8 個子情境：建角預設 1×6、Not4 同步讀回、UPDATE 庫→Not4 反映（0/2/1）、QN5/6 補列→讀回、未知 QN 忽略、全刪→全 1 非錯誤、unitUID 不存在→true＋預設值、v4 migration 覆蓋）；`tests/test_select_unit.cpp` `TestBuildSelectUnitNot4Defaults` 同步更新（預設 1、顯式值傳入）。
+- **測試數**：**JP = 1455、TW = 1453、EU = 1451、CN = 1453、US = 1452 passed / 0 failed**。
+- **偏差聲明**：NOT 逐欄忠實 relationship 啟用路徑（`P_GDenyOption_SEL` 缺 proc）；以「gdenyoption 直接讀回＋缺列→1 舊版慣例」近似；QN5/6 無資料來源恆為 1。
 
 ## 0a8. 2026-11-17 附記（SELECT_UNIT 登入副作用：gup_select_unit 的 DB 部分＋GSpirit 讀回）
 
@@ -695,8 +713,8 @@ V2 目前**原樣保留**協議所需的密碼學直譯，這些本身**不符�
 6. 效能與容量測試；記憶體/句柄洩漏基線（原版以 VLD 除錯，V2 無對應）。
 7. `LoadINIFile`、設定檔格式與部署工具（原 `ReleaseTool`/`.bat` 流程）。
 8. EventIDs 以外的大型表（道具/技能/副本資料）從 `X2/dat/Script` 的轉換管道。
-9. `SELECT_UNIT` 的 REQ/收尾 ACK + 決策層已完成（§0c）；`SELECT_UNIT_1_NOT` codec + 組裝（gunit 表 → Not1，缺資料項佔位）已完成（§0e）；`SELECT_UNIT_2_NOT` codec + 組裝（任務無資料源→空容器佔位）已完成（§0f）；`SELECT_UNIT_3_NOT` codec + 組裝（mission/title/pet 無資料源→空容器佔位）已完成（§0g）；`SELECT_UNIT_4_NOT` codec + 組裝（社交/Henir/Messenger/戰場狀態無資料源→空容器/零值佔位）已完成（§0h）；`SELECT_UNIT_5_NOT` codec + 組裝（spirit/pshop/henir-reward/cashshop 無資料源→false/0 佔位）已完成（§0i），1_NOT…5_NOT 全數落地；1_NOT…5_NOT 分片 codec 全數移植（§0e…0i）；完整角色資料載入管線未開始。Login 切片打通到 SELECT_UNIT_1_NOT 為止（items/任務/寵物/ED/rating 等無資料來源，值為佔位；spirit 自 GSpirit 讀回，§0a8）。
-11. GDenyOption／GResurrectionStoneCnt／GSkill／GSkillSlot／GSpirit／GQuests——**建立流程副作用已移植（§0a5）；GSpirit 讀回與 gup_select_unit 每日重置／GResurrectionStone 每日補充／PlayDayCnt／LoginCount 登入副作用已移植（§0a8）**；其餘查詢/更新路徑（gup_get_community_opt_unituid、gup_*_skill、gspirit Flag 語意變體）未實作；建角道具發放（gup_create_unit_set_promotion／P_GItemPeriod_INS，**不隨倉庫提供**）不可移植。
+9. `SELECT_UNIT` 的 REQ/收尾 ACK + 決策層已完成（§0c）；`SELECT_UNIT_1_NOT` codec + 組裝（gunit 表 → Not1，缺資料項佔位）已完成（§0e）；`SELECT_UNIT_2_NOT` codec + 組裝（任務無資料源→空容器佔位）已完成（§0f）；`SELECT_UNIT_3_NOT` codec + 組裝（mission/title/pet 無資料源→空容器佔位）已完成（§0g）；`SELECT_UNIT_4_NOT` codec + 組裝（Henir/Messenger/戰場狀態無資料源→空容器/零值佔位；kDenyOptions 自 §0a9 起 ← gdenyoption 讀回）已完成（§0h）；`SELECT_UNIT_5_NOT` codec + 組裝（spirit/pshop/henir-reward/cashshop 無資料源→false/0 佔位）已完成（§0i），1_NOT…5_NOT 全數落地；1_NOT…5_NOT 分片 codec 全數移植（§0e…0i）；完整角色資料載入管線未開始。Login 切片打通到 SELECT_UNIT_1_NOT 為止（items/任務/寵物/ED/rating 等無資料來源，值為佔位；spirit 自 GSpirit 讀回，§0a8）。
+11. GDenyOption／GResurrectionStoneCnt／GSkill／GSkillSlot／GSpirit／GQuests——**建立流程副作用已移植（§0a5）；GSpirit 讀回與 gup_select_unit 每日重置／GResurrectionStone 每日補充／PlayDayCnt／LoginCount 登入副作用已移植（§0a8）**；其餘查詢/更新路徑（gup_get_community_opt_unituid——V2 改以 gdenyoption 直接讀回近似，§0a9；EGS_UPDATE_COMMUNITY_OPT 6 欄寫入未實作；gup_*_skill、gspirit Flag 語意變體）未實作；建角道具發放（gup_create_unit_set_promotion／P_GItemPeriod_INS，**不隨倉庫提供**）不可移植。
 10. Wire 相容：Login 切片 codec 只有自洽 golden bytes，**缺原 SDK 實機對照向量**（見 §13）。
 
 ## 13. 風險
