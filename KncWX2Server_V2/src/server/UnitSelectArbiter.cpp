@@ -106,11 +106,37 @@ void BuildSelectUnitNot3(SelectUnitNot3& out)
     // vecMission / vecTitle / vecPetList / …：無資料來源 → 空容器、iSummonedPetUID=0（誠實佔位）
 }
 
-void BuildSelectUnitNot2(SelectUnitNot2& out)
+void BuildSelectUnitNot2(SelectUnitNot2& out,
+                         int64_t ownerUnitUID,
+                         const std::vector<db::QuestRecord>& quests,
+                         const std::vector<db::QuestCompleteRecord>& completed)
 {
     out = SelectUnitNot2{};
     out.iOK = NET_OK;
-    // vecQuest / vecCompletQuest / mapRandomQuestList：無資料來源 → 空容器（誠實佔位）
+    // vecQuest ← gquests（原 gup_get_quest_list）：5 個 SubQuestInstance，m_iID=0、m_bIsSuccess=false（原 call site 僅填 m_ucClearData）
+    out.vecQuest.reserve(quests.size());
+    for (const auto& q : quests) {
+        unit::QuestInstance qi;
+        qi.iID = q.questID;
+        qi.ownerUnitUID = ownerUnitUID;   // 原 kQuest.m_OwnorUnitUID = kReq.m_iUnitUID
+        qi.subQuests.reserve(5);
+        for (int i = 0; i < 5; ++i) {
+            unit::SubQuestInstance sq;
+            sq.iID = 0; sq.ucClearData = q.sub[i]; sq.bIsSuccess = false;
+            qi.subQuests.push_back(sq);
+        }
+        out.vecQuest.push_back(std::move(qi));
+    }
+    // vecCompletQuest ← gquests_complete（先）∪ gquests_repeat（後）；completeCount=1（原 call site 固定值）
+    out.vecCompletQuest.reserve(completed.size());
+    for (const auto& c : completed) {
+        unit::CompleteQuestInfo ci;
+        ci.questID = c.questID;
+        ci.completeCount = 1;
+        ci.completeDate = c.completeDateEpoch;
+        out.vecCompletQuest.push_back(ci);
+    }
+    // mapRandomQuestList：SERV_RANDOM_DAY_QUEST 已定義，但原資料源為 SiCXSLQuestManager（script）——無資料源 → 空 map（誠實佔位）
 }
 
 void PopulateUnitInfoFromGUnit(int64_t userUID, int authLevel, const db::GUnitRecord& unit,
@@ -587,7 +613,21 @@ int32_t HandleSelectUnitReq(db::GameStore& gameDb, int64_t userUID, const Select
         }
         if (outNot1) BuildSelectUnitNot1(userUID, authLevel, uRef, *outNot1, &sv);
     }
-    if (outNot2) BuildSelectUnitNot2(*outNot2);
+    if (outNot2) {
+        std::vector<db::QuestRecord> quests;
+        std::vector<db::QuestCompleteRecord> completed;
+        if (!gameDb.GetQuestList(req.unitUID, quests, err)) {
+            err = std::string("get quest list: ") + err;
+            ack.iOK = ERR_SELECT_UNIT_05;
+            return ack.iOK;
+        }
+        if (!gameDb.GetQuestCompleteList(req.unitUID, completed, err)) {
+            err = std::string("get quest complete list: ") + err;
+            ack.iOK = ERR_SELECT_UNIT_05;
+            return ack.iOK;
+        }
+        BuildSelectUnitNot2(*outNot2, req.unitUID, quests, completed);
+    }
     if (outNot3) BuildSelectUnitNot3(*outNot3);
     if (outNot4) {
         db::DenyOptionValues deny;

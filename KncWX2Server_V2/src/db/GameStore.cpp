@@ -147,6 +147,55 @@ DROP TABLE gdenyoption;
 ALTER TABLE gdenyoption_v4 RENAME TO gdenyoption;
 )SQL";
 
+// --- v5（§0a11）：原 dbo.GQuests_Complete／dbo.GQuests_Repeat（SERV_DAILY_QUEST 的已完成任務表）。
+// 原表：UnitUID bigint NOT NULL（FK→GUnit ON DELETE CASCADE）、QuestID int NOT NULL、RegDate／CompleteDate smalldatetime NOT NULL；
+// GQuests_Complete 有 PK(UnitUID, QuestID)；GQuests_Repeat 無 PK（忠實保留）。V2 時間一律 UTC TEXT。
+static const char* kCreateGQuestsCompleteV5 = R"SQL(
+CREATE TABLE gquests_complete (
+    UnitUID      INTEGER NOT NULL REFERENCES gunit(UnitUID) ON DELETE CASCADE,
+    QuestID      INTEGER NOT NULL,
+    RegDate      TEXT NOT NULL DEFAULT (datetime('now')),
+    CompleteDate TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (UnitUID, QuestID)
+);
+)SQL";
+static const char* kCreateGQuestsRepeatV5 = R"SQL(
+CREATE TABLE gquests_repeat (
+    UnitUID      INTEGER NOT NULL REFERENCES gunit(UnitUID) ON DELETE CASCADE,
+    QuestID      INTEGER NOT NULL,
+    RegDate      TEXT NOT NULL DEFAULT (datetime('now')),
+    CompleteDate TEXT NOT NULL DEFAULT (datetime('now'))
+);
+)SQL";
+
+// 'YYYY-MM-DD HH:MM:SS'（SQLite datetime('now') 格式）以 UTC 解析為 epoch 秒（days_from_civil 演算法，平台無關）。
+static bool ParseUtcDatetime(const std::string& s, int64_t& epochOut)
+{
+    if (s.size() < 19) return false;
+    auto dig = [&s](size_t i) -> int { return s[i] - '0'; };
+    for (size_t i : { 0,1,2,3,5,6,8,9,11,12,14,15,17,18 }) {
+        const char c = s[i];
+        if (c < '0' || c > '9') return false;
+    }
+    const int64_t y = dig(0)*1000 + dig(1)*100 + dig(2)*10 + dig(3);
+    const unsigned mo = static_cast<unsigned>(dig(5)*10 + dig(6));
+    const unsigned d  = static_cast<unsigned>(dig(8)*10 + dig(9));
+    const unsigned H  = static_cast<unsigned>(dig(11)*10 + dig(12));
+    const unsigned M  = static_cast<unsigned>(dig(14)*10 + dig(15));
+    const unsigned S  = static_cast<unsigned>(dig(17)*10 + dig(18));
+    if (mo < 1 || mo > 12 || d < 1 || d > 31 || H > 23 || M > 59 || S > 60) return false;
+    // days_from_civil（Howard Hinnant, public domain）
+    const int64_t yy = (mo <= 2) ? y - 1 : y;
+    const int64_t era = (yy >= 0 ? yy : yy - 399) / 400;
+    const unsigned yoe = static_cast<unsigned>(yy - era * 400);
+    const unsigned mp = (mo + 9) % 12;
+    const unsigned doy = (153 * mp + 2) / 5 + d - 1;
+    const unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    const int64_t days = era * 146097 + static_cast<int64_t>(doe) - 719468;
+    epochOut = days * 86400 + static_cast<int64_t>(H) * 3600 + static_cast<int64_t>(M) * 60 + static_cast<int64_t>(S);
+    return true;
+}
+
 bool ApplyGameMigrations(Database& db, std::string& err)
 {
     if (!db.IsOpen()) { err = "database not open"; return false; }
@@ -192,6 +241,14 @@ bool ApplyGameMigrations(Database& db, std::string& err)
             std::string unused;
             db.Rollback(unused);
             err = std::string("game migration v4 failed: ") + err;
+            return false;
+        }
+    }
+    if (v < 5) {
+        if (!db.Exec(kCreateGQuestsCompleteV5, err) || !db.Exec(kCreateGQuestsRepeatV5, err)) {
+            std::string unused;
+            db.Rollback(unused);
+            err = std::string("game migration v5 failed: ") + err;
             return false;
         }
     }
@@ -798,6 +855,62 @@ bool GameStore::UpdateDenyOptions(int64_t unitUID, const DenyOptionValues& v, st
         std::string unused;
         m_db.Rollback(unused);
         return false;
+    }
+    err.clear();
+    return true;
+}
+
+bool GameStore::GetQuestList(int64_t unitUID, std::vector<QuestRecord>& out, std::string& err)
+{
+    out.clear();
+    Statement st;
+    if (!st.Prepare(m_db,
+            "SELECT QuestID, SubQuest0, SubQuest1, SubQuest2, SubQuest3, SubQuest4 FROM gquests WHERE UnitUID = ? ORDER BY QuestID ASC;", err)) return false;
+    if (!st.BindInt(1, unitUID, err)) return false;
+    std::string stepErr;
+    while (true) {
+        stepErr.clear();
+        if (st.StepRow(stepErr)) {
+            QuestRecord rec;
+            rec.questID = static_cast<int32_t>(st.ColumnInt64(0));
+            for (int i = 0; i < 5; ++i) rec.sub[i] = static_cast<uint8_t>(st.ColumnInt64(1 + i));
+            out.push_back(rec);
+        } else {
+            if (!stepErr.empty()) { err = stepErr; return false; }
+            break;
+        }
+    }
+    err.clear();
+    return true;
+}
+
+bool GameStore::GetQuestCompleteList(int64_t unitUID, std::vector<QuestCompleteRecord>& out, std::string& err)
+{
+    out.clear();
+    // 先 GQuests_Complete，後 GQuests_Repeat（鏡像原 call site 的查詢順序）
+    static const char* kTables[2] = { "gquests_complete", "gquests_repeat" };
+    for (const char* table : kTables) {
+        Statement st;
+        const std::string sql = std::string("SELECT QuestID, CompleteDate FROM ") + table + " WHERE UnitUID = ? ORDER BY QuestID ASC;";
+        if (!st.Prepare(m_db, sql.c_str(), err)) return false;
+        if (!st.BindInt(1, unitUID, err)) return false;
+        std::string stepErr;
+        while (true) {
+            stepErr.clear();
+            if (st.StepRow(stepErr)) {
+                QuestCompleteRecord rec;
+                rec.questID = static_cast<int32_t>(st.ColumnInt64(0));
+                const std::string cd = st.ColumnText(1);
+                if (!ParseUtcDatetime(cd, rec.completeDateEpoch)) {
+                    err = std::string("bad CompleteDate in ") + table + ": " + cd;
+                    return false;
+                }
+                out.push_back(rec);
+            } else {
+                if (!stepErr.empty()) { err = stepErr; return false; }
+                break;
+            }
+        }
     }
     err.clear();
     return true;

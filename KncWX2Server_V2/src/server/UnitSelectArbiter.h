@@ -41,7 +41,7 @@ namespace x2 { namespace select_unit {
 // 成功時回傳 NET_OK；失敗回傳對應 NetError；DB 錯誤訊息寫入 err（僅伺服器側用）。
 // outUnit（可為 nullptr）：成功時帶出已執行登入副作用（§0a8 ApplyUnitLoginReset：重置/補充/計數）後的角色記錄。
 // outNot1（可為 nullptr）：成功時填入 SELECT_UNIT_1_NOT 的最小合法內容（見 BuildSelectUnitNot1）；
-// outNot2（可為 nullptr）：成功時填入 SELECT_UNIT_2_NOT 的最小合法內容（見 BuildSelectUnitNot2）；
+// outNot2（可為 nullptr）：成功時填入 SELECT_UNIT_2_NOT（見 BuildSelectUnitNot2；vecQuest/vecCompletQuest ← gquests/gquests_complete/gquests_repeat，§0a11；mapRandomQuestList 恆空——SiCXSLQuestManager 無資料源）；
 // outNot3（可為 nullptr）：成功時填入 SELECT_UNIT_3_NOT 的最小合法內容（見 BuildSelectUnitNot3）；
 // outNot4（可為 nullptr）：成功時填入 SELECT_UNIT_4_NOT 的最小合法內容（見 BuildSelectUnitNot4）；
 // outNot5（可為 nullptr）：成功時填入 SELECT_UNIT_5_NOT 的最小合法內容（見 BuildSelectUnitNot5）；
@@ -207,7 +207,10 @@ void BuildSelectUnitNot3(SelectUnitNot3& out);
 // 組裝 SELECT_UNIT_2_NOT（成功路徑的任務進度分片）。
 // 誠實說明：V2 game DB 無任務/日常任務/隨機日常任務表，vecQuest/vecCompletQuest/mapRandomQuestList
 // 一律空容器——不代表角色真實任務狀態。iOK=NET_OK。
-void BuildSelectUnitNot2(SelectUnitNot2& out);
+void BuildSelectUnitNot2(SelectUnitNot2& out,
+                         int64_t ownerUnitUID,
+                         const std::vector<db::QuestRecord>& quests,
+                         const std::vector<db::QuestCompleteRecord>& completed);
 
 // 由 GUnitRecord 填出 KUnitInfo（LoginCount/IP/port/exp→level 換算等原版衍生欄位無 V2 對應表，沿用儲存值）。
 // 供 BuildSelectUnitNot1 與 MY_UNIT_AND_INVENTORY_INFO_LIST_ACK 共用。

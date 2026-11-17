@@ -323,10 +323,25 @@ static void TestSelectUnitNot2Codec()
 static void TestBuildSelectUnitNot2Defaults()
 {
     SelectUnitNot2 not2;
-    BuildSelectUnitNot2(not2);
+    BuildSelectUnitNot2(not2, /*ownerUnitUID=*/12345, {}, {});
     CHECK(not2.iOK == NET_OK, "not2 builder iOK");
     CHECK(not2.vecQuest.empty() && not2.vecCompletQuest.empty() && not2.mapRandomQuestList.empty(),
           "not2 builder: no fabricated quest data (empty placeholders)");
+    // 餵入資料 → 正確映射（§0a11）
+    std::vector<db::QuestRecord> quests(1);
+    quests[0].questID = 13; quests[0].sub[0] = 1;
+    std::vector<db::QuestCompleteRecord> completed(2);
+    completed[0].questID = 13; completed[0].completeDateEpoch = 946684800;   // 2000-01-01 00:00:00 UTC
+    completed[1].questID = 17; completed[1].completeDateEpoch = 946684800;
+    BuildSelectUnitNot2(not2, /*ownerUnitUID=*/12345, quests, completed);
+    CHECK(not2.vecQuest.size() == 1 && not2.vecQuest[0].iID == 13 && not2.vecQuest[0].ownerUnitUID == 12345,
+          "not2 builder: quest mapped from gquests");
+    CHECK(not2.vecQuest[0].subQuests.size() == 5 && not2.vecQuest[0].subQuests[0].ucClearData == 1 &&
+          not2.vecQuest[0].subQuests[0].iID == 0 && not2.vecQuest[0].subQuests[0].bIsSuccess == false,
+          "not2 builder: 5 subquests (ucClearData only; iID=0/bIsSuccess=false like original fetch)");
+    CHECK(not2.vecCompletQuest.size() == 2 && not2.vecCompletQuest[0].questID == 13 &&
+          not2.vecCompletQuest[0].completeCount == 1 && not2.vecCompletQuest[0].completeDate == 946684800,
+          "not2 builder: complete quest mapped (completeCount=1)");
 }
 
 static void TestSelectUnitNot3Codec()

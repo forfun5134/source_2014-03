@@ -55,6 +55,7 @@ void RunPvpNpcNamesTestsByRef(int& pass, int& fail);
 void RunCreateUnitSatelliteTestsByRef(int& pass, int& fail);
 void RunSelectUnitDailyResetTestsByRef(int& pass, int& fail);
 void RunCommunityOptionTestsByRef(int& pass, int& fail);
+void RunQuestReadbackTestsByRef(int& pass, int& fail);
 
 static int g_fail = 0, g_pass = 0;
 #define CHECK(cond, name) do { \
@@ -430,6 +431,7 @@ int main() {
     RunCreateUnitSatelliteTestsByRef(g_pass, g_fail);
     RunSelectUnitDailyResetTestsByRef(g_pass, g_fail);
     RunCommunityOptionTestsByRef(g_pass, g_fail);
+    RunQuestReadbackTestsByRef(g_pass, g_fail);
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

@@ -40,7 +40,7 @@
 
 namespace x2 { namespace db {
 
-inline constexpr int kGameSchemaVersion = 4;
+inline constexpr int kGameSchemaVersion = 5;
 
 // game DB 遷移：v0→v1 建立 guser / gunit / gunit_nickname / gdeleted_nickname_history；冪等
 bool ApplyGameMigrations(Database& db, std::string& err);
@@ -88,6 +88,23 @@ struct SpiritValues
 struct ResurrectionStoneValues
 {
     int quantity = 0;
+};
+
+// 任務讀回（SELECT_UNIT_2_NOT 的資料源，§0a11）。db 層不依賴 server 層型別 → 以自有記錄型別帶出，讀取端轉換。
+//   QuestRecord：原 gup_get_quest_list（SERV_ALL_RENEWAL_SP 未定義 → 本建置實際路徑）：SELECT QuestID, SubQuest0..4 FROM GQuests
+//   QuestCompleteRecord：原 SERV_DAILY_QUEST 分支——gup_get_quest_complete_list＋gup_get_quest_Repeat_complete_list
+//     （原 call site 以 FETCH_DATA 取 QuestID + wstrCompleteDate；倉庫內 gup_get_quest_complete_list 僅 SELECT QuestID——
+//      與 call site 不一致，倉庫 proc 疑似過期；V2 以表結構＋call site 為準：SELECT QuestID, CompleteDate FROM gquests_complete / gquests_repeat）
+//   completeDate 以 UTC 解析（原 ConvertStringToCTime 以伺服器本地時區解析 smalldatetime → V2 一律 UTC，見 docs §0a11 偏差聲明）
+struct QuestRecord
+{
+    int32_t  questID = 0;
+    uint8_t  sub[5]  = { 0, 0, 0, 0, 0 };
+};
+struct QuestCompleteRecord
+{
+    int32_t  questID = 0;
+    int64_t  completeDateEpoch = 0;    // UTC epoch seconds
 };
 
 // GDenyOption 讀回 → SELECT_UNIT_4_NOT kDenyOptions（原 gup_select_unit 的 DBE ACK 一併回傳；V2 §0a9）。
@@ -194,6 +211,13 @@ public:
 
     // 讀取 GDenyOption（缺列 → 全 1（DOS_OFF），非錯誤；不存在檢查——原 proc 亦不檢查）
     bool GetDenyOptions(int64_t unitUID, DenyOptionValues& out, std::string& err);
+
+    // 讀取進行中的任務（原 gup_get_quest_list；unit 不存在/已刪除也回空列表（原 proc 不檢查）；DB 錯誤 → false）
+    bool GetQuestList(int64_t unitUID, std::vector<QuestRecord>& out, std::string& err);
+
+    // 讀取已完成任務（SERV_DAILY_QUEST：GQuests_Complete（先）∪ GQuests_Repeat（後）；非 Repeat 表忠實保留無 PK）
+    // completeDate 解析失敗 → false＋err（整個讀回視為 DB 錯誤，不回傳部分資料）
+    bool GetQuestCompleteList(int64_t unitUID, std::vector<QuestCompleteRecord>& out, std::string& err);
 
     // Upsert GDenyOption QN1..6（EGS_UPDATE_COMMUNITY_OPTION_REQ 的 write-through，§0a10）。
     // unit 不存在/已刪除 → false＋err（鏡像 gup_update_community_opt 的 -1「該 Unit 不存在」）；

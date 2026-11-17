@@ -53,7 +53,7 @@
 
 **SelectUnitNot2**（`SelectUnitProtocol.{h,cpp}`，事件 ID 43）：`int32 iOK → vector<QuestInstance> vecQuest → (SERV_DAILY_QUEST) vector<CompleteQuestInfo> vecCompletQuest → (SERV_RANDOM_DAY_QUEST) map<int32,int32> mapRandomQuestList`。Put 順序機讀自 CommonPacket.cpp `KEGS_SELECT_UNIT_2_NOT`。JP 巨集核對（寬鬆樣式）：SERV_DAILY_QUEST:236、SERV_RANDOM_DAY_QUEST:1291 已定義。
 
-**組裝**：`BuildSelectUnitNot2(out)`——V2 game DB 無任務/日常任務/隨機日常任務表，容器一律空（不代表角色真實任務狀態）。迴路：server 成功時**先 1_NOT、再 2_NOT、再收尾 ACK**（對齊原 `SendSelectUnitACK` 次序）；client 按序收取斷言。測試自 557 → **572 passed / 0 failed**。
+**組裝**：`BuildSelectUnitNot2(out)`——V2 game DB 無任務/日常任務/隨機日常任務表，容器一律空（不代表角色真實任務狀態。**§0a11 已改為 gquests／gquests_complete／gquests_repeat 讀回；mapRandomQuestList 恆空（script 無資料源）**）。迴路：server 成功時**先 1_NOT、再 2_NOT、再收尾 ACK**（對齊原 `SendSelectUnitACK` 次序）；client 按序收取斷言。測試自 557 → **572 passed / 0 failed**。
 
 ⚠ 誠實聲明：golden bytes 為自洽佈局，**未對原 SDK 實機驗證**；SELECT_UNIT **3_NOT…5_NOT 未移植**；2_NOT 容器為空佔位（見上）。
 
@@ -357,6 +357,30 @@ tests/test_string_filter.cpp 的字元集閘門斷言改為依 `X2_REGION_*` 分
 - **測試** `tests/test_create_unit_satellite.cpp`（41 項）：class 1..4 SkillID 對應／class 5 無 gskill・gskillslot（忠實）／GQuests 所有職業 QuestID=13・SubQuest0=1／GDenyOption 4 列 CodeNo=1／GSpirit（空表→0、Flag=0；有列→100）／**副作用失敗 → 整體 ROLLBACK**（`DROP TABLE gskillslot` 後 create → ack=ERR_CREATE_UNIT_02、gunit/gunit_nickname/gquests 皆 0 列）。
 - **測試數**：**JP = 1297、TW = 1295、EU = 1293、CN = 1295 passed / 0 failed**。
 - 剩餘未移植：gmo_*_skill（技能 slot 更新）／gup_get_community_opt_unituid（社群選項查詢——V2 改以 gdenyoption 直接讀回近似，§0a9；relationship 6 欄寫入 EGS_UPDATE_COMMUNITY_OPT 已於 §0a10 以 write-through upsert 移植；P_GDenyOption_UPD 仍缺 proc）／class 5..9 技能列（原 proc 不存在）／LogDB；gspirit 的 Flag 完整語意與復活石補充/精力重置已於 §0a8 移植；Flag 並列槽位 UI 亦未建模。
+
+## 0a11. 2026-11-17 附記（SELECT_UNIT_2_NOT 任務資料讀回：gquests／gquests_complete ∪ gquests_repeat；schema v5）
+
+§0f 落地 Not2 時，V2 game DB 尚無任務完成表，vecQuest／vecCompletQuest 一律空容器佔位。本切片補上真實資料源。
+
+原版（JP INT_INTERNAL；SERV_ALL_RENEWAL_SP 已註解→legacy 路徑為本建置實際路徑；SERV_DAILY_QUEST:236、SERV_RANDOM_DAY_QUEST:1291 已定義）：
+
+- **vecQuest**（GSGameDBThread.cpp:1716–1739）：`gup_get_quest_list` → `KQuestInstance{ m_iID=QuestID, m_OwnorUnitUID=req.m_iUnitUID, 5×KSubQuestInstance{ m_iID=0（fetch 不填）, m_bIsSuccess=false（fetch 不填）, m_ucClearData=SubQuest0..4 } }`。`gup_get_quest_list.proc.sql` **隨倉庫提供**，語意與 V2 gquests 表（§0a5）完全對應——**原樣可移植**。
+- **vecCompletQuest**（SERV_DAILY_QUEST 分支，GSGameDBThread.cpp:1744–1788）：`gup_get_quest_complete_list`（GQuests_Complete；QuestID＋wstrCompleteDate）先 ∪ `gup_get_quest_Repeat_complete_list`（GQuests_Repeat；`SELECT DISTINCT QuestID FROM GQUESTS_REPEAT`——同樣回兩欄）後，各 `KCompleteQuestInfo{ m_iCompleteCount=1, m_tCompleteDate ← ConvertStringToCTime(wstrCompleteDate) }`。
+  - **倉庫內 `gup_get_quest_complete_list.proc.sql` 僅 SELECT QuestID**（與 call site 的 `FETCH_DATA( QuestID >> wstrCompleteDate )` 不一致——倉庫 proc 疑似過期）；V2 以**表結構**（GQuests_Complete／GQuests_Repeat：UnitUID／QuestID／RegDate／CompleteDate smalldatetime NOT NULL；Complete 有 PK(UnitUID,QuestID)、FK→GUnit CASCADE；Repeat 無 PK——忠實保留）＋ **call site** 為準：`SELECT QuestID, CompleteDate`。
+- **mapRandomQuestList**：資料源為 `SiCXSLQuestManager()->GetRandomQuestGroupList(...)`（GSUserFunction.cpp:5125，script/QuestTemplet 態）——無資料源 → 空 map（誠實佔位）。
+
+**V2 實作**：
+
+- **Schema v5**（`kGameSchemaVersion` 4→5）：新增 `gquests_complete`（PK(UnitUID,QuestID)）／`gquests_repeat`（無 PK），FK→gunit ON DELETE CASCADE，RegDate/CompleteDate TEXT UTC（`datetime('now')`）。
+- **GameStore**：`GetQuestList(unitUID)`（`SELECT QuestID, SubQuest0..4 FROM gquests ORDER BY QuestID`；unit 不存在 → 空列表 true（原 proc 不檢查））；`GetQuestCompleteList(unitUID)`（先 complete 後 repeat，回 QuestCompleteRecord{questID, completeDateEpoch}；CompleteDate 以內置 **days_from_civil** 演算法按 **UTC** 解析為 epoch（平台無關，避免 timegm/_mkgmtime 差異）；**解析失敗 → false＋err**（不回傳部分資料））。
+- **BuildSelectUnitNot2(out, ownerUnitUID, quests, completed)**（簽名變更）：QuestInstance（ownerUnitUID←參數）／5×SubQuestInstance（僅 ucClearData，iID=0/bIsSuccess=false）／CompleteQuestInfo（completeCount=1）。`HandleSelectUnitReq`：outNot2 非空時查詢；任一失敗 → `ERR_SELECT_UNIT_05`。`mapRandomQuestList` 恆空。
+- **測試** `tests/test_quest_readback.cpp`（schema v5／gquests_complete PK／GetQuestList（含建角副作用 QN=13/SubQuest0=1、ORDER BY、unit 不存在→true、缺表→false）／GetQuestCompleteList（complete 先 repeat 後、重複 QuestID 各一筆、epoch 946684800=2000-01-01／959904000=2000-06-02／981173106=2001-02-03 04:05:06、CompleteDate 損壞→false）／Not2 整合（建角→Not2 帶 1 任務、種入完成表→vecCompletQuest 反映）／歸屬錯誤路徑）；`tests/test_select_unit.cpp` TestBuildSelectUnitNot2Defaults 同步更新（新簽名＋映射斷言）。
+- **測試數**：**JP = 1562、TW = 1560、EU = 1558、CN = 1560、US = 1559 passed / 0 failed**。
+- **偏差聲明（逐條）**：
+  1. `gup_get_quest_complete_list` 倉庫 proc 與 call site 不符（缺 CompleteDate 欄）——以表結構＋call site 為準（CompleteDate 保留）；若將來發現更新版 proc，應以其為準。
+  2. `m_tCompleteDate`：原以**伺服器本地時區**將 smalldatetime 字串解析為 time_t（CTime）；V2 一律 **UTC**（V2 時間為 UTC ISO8601），跨時區部署時 CompleteDate 會與原版差一個時區偏移。
+  3. `GQuests_Repeat` 無 PK（原表即如此）。原 Repeat proc 用 `SELECT DISTINCT(QUESTID)`（僅一欄）——但 SERV_DAILY_QUEST call site 卻 FETCH 兩欄（QuestID + CompleteDate），兩者不相容，倉庫 proc 與 call site 必有一方過期。V2 選擇**以 call site 的兩欄輸出為準**：`SELECT QuestID, CompleteDate`、**不做 DISTINCT**（repeat 表重複列全部輸出，completeCount=1 各一筆）。若將來核對到原 SERV_DAILY_QUEST 實機行為（或補上更新版 proc），應回頭對齊 DISTINCT 與否。
+  4. `mapRandomQuestList` 空（SiCXSLQuestManager/script 無資料源）；QuestInstance.m_iID/bIsSuccess 恆 0/false（原 fetch 不填）；Quest 寫路徑（gup_create_quest／gup_update_quest／gup_complete_quest／P_GQuests_*，寫入者）**未移植**——Not2 目前只能讀。
 
 ## 0a10. 2026-11-17 附記（EGS_UPDATE_COMMUNITY_OPTION_REQ/ACK：社群選項寫路徑；write-through）
 
@@ -739,7 +763,7 @@ V2 目前**原樣保留**協議所需的密碼學直譯，這些本身**不符�
 6. 效能與容量測試；記憶體/句柄洩漏基線（原版以 VLD 除錯，V2 無對應）。
 7. `LoadINIFile`、設定檔格式與部署工具（原 `ReleaseTool`/`.bat` 流程）。
 8. EventIDs 以外的大型表（道具/技能/副本資料）從 `X2/dat/Script` 的轉換管道。
-9. `SELECT_UNIT` 的 REQ/收尾 ACK + 決策層已完成（§0c）；`SELECT_UNIT_1_NOT` codec + 組裝（gunit 表 → Not1，缺資料項佔位）已完成（§0e）；`SELECT_UNIT_2_NOT` codec + 組裝（任務無資料源→空容器佔位）已完成（§0f）；`SELECT_UNIT_3_NOT` codec + 組裝（mission/title/pet 無資料源→空容器佔位）已完成（§0g）；`SELECT_UNIT_4_NOT` codec + 組裝（Henir/Messenger/戰場狀態無資料源→空容器/零值佔位；kDenyOptions 自 §0a9 起 ← gdenyoption 讀回）已完成（§0h）；`SELECT_UNIT_5_NOT` codec + 組裝（spirit/pshop/henir-reward/cashshop 無資料源→false/0 佔位）已完成（§0i），1_NOT…5_NOT 全數落地；1_NOT…5_NOT 分片 codec 全數移植（§0e…0i）；完整角色資料載入管線未開始。Login 切片打通到 SELECT_UNIT_1_NOT 為止（items/任務/寵物/ED/rating 等無資料來源，值為佔位；spirit 自 GSpirit 讀回，§0a8）。
+9. `SELECT_UNIT` 的 REQ/收尾 ACK + 決策層已完成（§0c）；`SELECT_UNIT_1_NOT` codec + 組裝（gunit 表 → Not1，缺資料項佔位）已完成（§0e）；`SELECT_UNIT_2_NOT` codec + 組裝（§0f；任務讀回自 §0a11 ← gquests/gquests_complete/gquests_repeat）已完成（§0f）；`SELECT_UNIT_3_NOT` codec + 組裝（mission/title/pet 無資料源→空容器佔位）已完成（§0g）；`SELECT_UNIT_4_NOT` codec + 組裝（Henir/Messenger/戰場狀態無資料源→空容器/零值佔位；kDenyOptions 自 §0a9 起 ← gdenyoption 讀回）已完成（§0h）；`SELECT_UNIT_5_NOT` codec + 組裝（spirit/pshop/henir-reward/cashshop 無資料源→false/0 佔位）已完成（§0i），1_NOT…5_NOT 全數落地；1_NOT…5_NOT 分片 codec 全數移植（§0e…0i）；完整角色資料載入管線未開始。Login 切片打通到 SELECT_UNIT_1_NOT 為止（items/寵物/ED/rating 等無資料來源，值為佔位；spirit 自 GSpirit 讀回，§0a8；任務自 §0a11 起讀 gquests/gquests_complete/gquests_repeat）。
 11. GDenyOption／GResurrectionStoneCnt／GSkill／GSkillSlot／GSpirit／GQuests——**建立流程副作用已移植（§0a5）；GSpirit 讀回與 gup_select_unit 每日重置／GResurrectionStone 每日補充／PlayDayCnt／LoginCount 登入副作用已移植（§0a8）**；其餘查詢/更新路徑（gup_get_community_opt_unituid——V2 改以 gdenyoption 直接讀回近似，§0a9；EGS_UPDATE_COMMUNITY_OPT 6 欄寫入（§0a10 write-through；P_GDenyOption_UPD 缺 proc，以 upsert 近似）已移植；gup_*_skill、gspirit Flag 語意變體）未實作；建角道具發放（gup_create_unit_set_promotion／P_GItemPeriod_INS，**不隨倉庫提供**）不可移植。
 10. Wire 相容：Login 切片 codec 只有自洽 golden bytes，**缺原 SDK 實機對照向量**（見 §13）。
 
