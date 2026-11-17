@@ -29,6 +29,7 @@
 #include "SelectUnitProtocol.h"
 #include "UnitListProtocol.h"
 #include "CreateUnitProtocol.h"
+#include "DeleteUnitProtocol.h"
 
 namespace x2 { namespace select_unit {
 
@@ -64,6 +65,17 @@ int32_t HandleSelectUnitReq(db::GameStore& gameDb, int64_t userUID, const Select
 bool HandleCreateUnitReq(db::GameStore& gameDb, int64_t userUID, int authLevel,
                          const create_unit::CreateUnitReq& req,
                          create_unit::CreateUnitAck& ack, std::string& err);
+
+// EGS_DELETE_UNIT_REQ 決策（原 IMPL_ON_FUNC(EGS_DELETE_UNIT_REQ) + DBE_GAME_DELETE_UNIT_REQ 分支）：
+//   1) 先 GetUnitByUID(unitUID)：不存在/已刪除/不屬於自己 → ERR_DELETE_UNIT_00(986)（原 gup_delete_unit/P_GUnit_UPD_Delete 回 -1 → ERR_DELETE_UNIT_00）
+//   2) GameStore::SoftDeleteUnit 失敗 → ERR_DELETE_UNIT_05(987)
+//   3) 成功：m_iUnitUID=iUnitUID、m_uiKNMSerialNum=0（原由 AccountDB GetMessengerSN 填寫；JP VF_INTERNAL 跳過、V2 無 AccountDB，誠實佔位）、
+//      m_iGuildUID=0（GUILD_TEST 欄位保留以對齊 wire；V2 無公會踢出）、wstrNickName/ucLevel/cUnitClass=刪除前角色資料（SERV_CHAR_LOG）
+// 誠實偏差：無 SERV_UNIT_WAIT_DELETE（未定義 → 無 P_GUnitWaitDelete_INS/m_tDelAbleDate）、無公會踢出/公會廣告/關係系統刪除閘門、
+//   S_SERVER_SELECT 狀態閘門未建模、DBE_ACCOUNT_DELETE_UNIT_REQ 兩段式未建模（V2 單段 game DB；不含 GetMessengerSN）。
+bool HandleDeleteUnitReq(db::GameStore& gameDb, int64_t userUID, int authLevel,
+                         const delete_unit::DeleteUnitReq& req,
+                         delete_unit::DeleteUnitAck& ack, std::string& err);
 
 // EGS_MY_UNIT_AND_INVENTORY_INFO_LIST_REQ（無參數）決策：
 //   guser（GetOrCreateGUser，缺則建，USSize=50）取 nUnitSlot；ListUnitsByUserUID（Deleted=0，UnitUID 升序）

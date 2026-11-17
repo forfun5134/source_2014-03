@@ -110,6 +110,7 @@
     <ClCompile Include="src\server\UnitSelectArbiter.cpp" />
     <ClCompile Include="src\server\UnitListProtocol.cpp" />
     <ClCompile Include="src\server\CreateUnitProtocol.cpp" />
+    <ClCompile Include="src\server\DeleteUnitProtocol.cpp" />
     <ClCompile Include="src\server\UnitData.cpp" />
     <ClCompile Include="src\core\SerBuffer.cpp" />
     <ClCompile Include="src\core\UidType.cpp" />
@@ -157,6 +158,7 @@
     <ClInclude Include="src\server\UnitSelectArbiter.h" />
     <ClInclude Include="src\server\UnitListProtocol.h" />
     <ClInclude Include="src\server\CreateUnitProtocol.h" />
+    <ClInclude Include="src\server\DeleteUnitProtocol.h" />
     <ClInclude Include="src\server\UnitData.h" />
     <ClInclude Include="src\server\WireHelpers.h" />
     <ClInclude Include="src\core\NetError.h" />

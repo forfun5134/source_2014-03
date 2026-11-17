@@ -195,6 +195,42 @@ size_t HandleGetMyInventoryReq(const std::map<int64_t, unit::InventoryItemInfo>&
     return outNots.size();
 }
 
+bool HandleDeleteUnitReq(db::GameStore& gameDb, int64_t userUID, int authLevel,
+                         const delete_unit::DeleteUnitReq& req,
+                         delete_unit::DeleteUnitAck& ack, std::string& err)
+{
+    (void)authLevel;  // 原用於 LogDB 分流（SEnum::UAL_NORMAL/UAL_BLOCKED_1）；V2 無 LogDB
+    ack = delete_unit::DeleteUnitAck{};
+    ack.iUnitUID = req.iUnitUID;
+
+    db::GUnitRecord rec;
+    bool found = false;
+    if (!gameDb.GetUnitByUID(req.iUnitUID, rec, found, err)) return false;   // 基礎設施錯誤
+    if (!found || rec.deleted || rec.userUID != userUID) {
+        ack.iOK = ERR_DELETE_UNIT_00;   // 無法找到要刪除的角色（含非本人；原 -1 → ERR_DELETE_UNIT_00）
+        err.clear();
+        return true;
+    }
+    // 在刪除前捕捉 SERV_CHAR_LOG 欄位（原碼於刪除前 SELECT，同語意）
+    const std::wstring wstrNickName = Utf8ToWide(rec.nickname);
+    const uint8_t ucLevel = static_cast<uint8_t>(rec.level);
+    const int8_t cUnitClass = static_cast<int8_t>(rec.unitClass);
+
+    if (!gameDb.SoftDeleteUnit(req.iUnitUID, err)) {
+        // 已在上方排除「不存在」與「已刪除」；此處僅剩基礎設施錯誤
+        ack.iOK = ERR_DELETE_UNIT_05;
+        return true;
+    }
+    ack.iOK = NET_OK;
+    ack.uiKNMSerialNum = 0;               // AccountDB GetMessengerSN 未建模；JP VF_INTERNAL 原碼亦跳過 → 0
+    ack.iGuildUID = 0;                    // GUILD_TEST 欄位保留；無公會踢出 → 0
+    ack.wstrNickName = wstrNickName;
+    ack.ucLevel = ucLevel;
+    ack.cUnitClass = cUnitClass;
+    err.clear();
+    return true;
+}
+
 bool HandleCreateUnitReq(db::GameStore& gameDb, int64_t userUID, int authLevel,
                          const create_unit::CreateUnitReq& req,
                          create_unit::CreateUnitAck& ack, std::string& err)

@@ -119,6 +119,18 @@
 
 **測試**（tests/test_create_unit.cpp）：codec roundtrip（含 CJK 暱稱/skillSlot/enableDate）、空暱稱→04、13+ bytes→04（UTF-8 CJK 3B/字邊界）、恰好 12 bytes→成功、重複暱稱→01、注入標記→08、guser 不存在→00、建立後 ListUnitsByUserUID 可見。測試自 685 → **713 passed / 0 failed**。vcxproj 登記 CreateUnitProtocol.{h,cpp}。**Loopback 未擴充 CREATE_UNIT**（會牽動 MY_UNIT_LIST/ghost 斷言鏈；codec roundtrip + 記憶體內決策層已覆蓋，create→list 副作用以 ListUnitsByUserUID 斷言替代）。
 
+## 0m. 2026-11-17 快照（DELETE_UNIT 流程移植）
+
+**NetError**（均為 NetError_def.h **enum 機讀計數核對值**，而非推算；解析器已重現 CREATE_UNIT_00=25/SELECT_UNIT_05=39/SELECT_UNIT_07=1081 顯式值等既有信任常數）：補 `ERR_DELETE_UNIT_00=986`（無法找到要刪除的角色）、`ERR_DELETE_UNIT_05=987`（刪除失敗）。`ERR_DELETE_UNIT_01..04=979..982`（[CN] SERV_UNIT_WAIT_DELETE 路徑，該巨集未定義）、`ERR_DELETE_UNIT_06=1258`（인연 상태，V2 無 Relationship 系統）→ **不添加**。
+
+**新增模組** `src/server/DeleteUnitProtocol.{h,cpp}`（命名空間 `x2::delete_unit`）：`DeleteUnitReq`（EGS_DELETE_UNIT_REQ=38；`{int64 iUnitUID, int64 iUserUID}`——UidType=int64（KncUidType.h），iUserUID 僅在 SERV_UNIT_DELETE_EXCEPTION_MODIFY 下存在，該巨集已定義 ServerDefine.h:1786）、`DeleteUnitAck`（EGS_DELETE_UNIT_ACK=39；`{int32 iOK, int64 iUnitUID, uint32 uiKNMSerialNum, int32 iGuildUID（GUILD_TEST 已定義 ServerDefine.h:73）, wstring wstrNickName, uint8 ucLevel, int8 cUnitClass（SERV_CHAR_LOG 已定義 :754）}`）；SERV_UNIT_WAIT_DELETE **未定義**（:4594 註解）→ 無 m_tReDelAbleDate/m_tDelAbleDate。PUT/GET 順序機讀自原 ClientPacket.cpp:112–175。
+
+**決策層** `HandleDeleteUnitReq(gameDb, userUID, authLevel, req, ack, err)`（UnitSelectArbiter）：`GetUnitByUID(unitUID)` → 不存在/`deleted`/`rec.userUID != userUID` → `ERR_DELETE_UNIT_00`（原 gup_delete_unit / P_GUnit_UPD_Delete 對不存在或非本人回 -1 → ERR_DELETE_UNIT_00）；`GameStore::SoftDeleteUnit` 失敗 → `ERR_DELETE_UNIT_05`；成功時 ACK：`uiKNMSerialNum=0`（原由 AccountDB `GetMessengerSN` 填寫；JP/VF_INTERNAL 原碼亦跳過、V2 無 AccountDB → 誠實佔位）、`iGuildUID=0`（GUILD_TEST 欄位保留對齊 wire；V2 無公會踢出）、`wstrNickName/ucLevel/cUnitClass`=刪除前角色資料（SERV_CHAR_LOG，同原碼刪除前 SELECT 語意）。
+
+⚠ 誠實偏差：無 SERV_UNIT_WAIT_DELETE（無 P_GUnitWaitDelete_INS/m_tDelAbleDate/wstrReDelAbleDate）、無公會踢出（GUILD_TEST 僅保留欄位）、無公會廣告（SERV_GUILD_AD）、無 Relationship 系統刪除閘門（SERV_RELATIONSHIP_SYSTEM 雖定義，V2 未建模 → ERR_DELETE_UNIT_06 不映射）、`DBE_ACCOUNT_DELETE_UNIT_REQ` 兩段式未建模（V2 單段 game DB，無 GetMessengerSN）、S_SERVER_SELECT 狀態閘門未建模；wire 佈局為自洽 golden bytes，**未對原 SDK 實機驗證**。
+
+**測試**（tests/test_delete_unit.cpp，15 項）：codec roundtrip（含 SERV_CHAR_LOG 欄位）、成功刪除→NET_OK 且 ListUnitsByUserUID 不再可見、重複刪除→00、幽靈角色→00、擁有者 888 合法刪除→NET_OK、非本人（userUID 不符）→00 且受害角色仍在。測試自 713 → **744 passed / 0 failed**。vcxproj 登記 DeleteUnitProtocol.{h,cpp}；EventIDs 38/39 既有。**Loopback 未擴充**（同 CREATE_UNIT 理由；以 list 副作用斷言替代）。
+
 ## 0. 一句話現況
 
 V2 是原 Elsword 韓服伺服器（`X2Project`）的 **C++ 重寫地基**：平台無關的線路格式核心、安全模組已完成並以 golden bytes 測試驗證；最短網路路徑（同步 TCP + 原版 TCP 訊框 + 迴路 echo 整合測試）與 Session 層（SPI 握手換發、驗證失敗踢除、E_HEART_BEAT 丟棄、殭屍檢測、SERV_KEVENT_FROM 標記）已完成並 238 項測試全綠；**遊戲邏輯、非同步網路層未完成；資料庫層已完成 Phase 1（users 表 + 帳號存取層）**。V2 不是可運行的伺服器，不要部署它。
