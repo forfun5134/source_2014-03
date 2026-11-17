@@ -250,6 +250,15 @@ CREATE TABLE giteminventorysize (
 CREATE INDEX ix_giteminventorysize_unituid ON giteminventorysize(UnitUID);
 )SQL";
 
+static const char* kCreateGRecommendV9 = R"SQL(
+CREATE TABLE grecommend (
+    OldUID        INTEGER NOT NULL,
+    NewUID        INTEGER NOT NULL,
+    RegDate       TEXT NULL
+);
+CREATE INDEX ix_grecommend_newuid ON grecommend(NewUID);
+)SQL";
+
 // 'YYYY-MM-DD HH:MM:SS'（SQLite datetime('now') 格式）以 UTC 解析為 epoch 秒（days_from_civil 演算法，平台無關）。
 static bool ParseUtcDatetime(const std::string& s, int64_t& epochOut)
 {
@@ -355,6 +364,14 @@ bool ApplyGameMigrations(Database& db, std::string& err)
             std::string unused;
             db.Rollback(unused);
             err = std::string("game migration v8 failed: ") + err;
+            return false;
+        }
+    }
+    if (v < 9) {
+        if (!db.Exec(kCreateGRecommendV9, err)) {
+            std::string unused;
+            db.Rollback(unused);
+            err = std::string("game migration v9 failed: ") + err;
             return false;
         }
     }
@@ -1222,6 +1239,28 @@ bool GameStore::GetResurrectionStone(int64_t unitUID, ResurrectionStoneValues& o
     if (!stepErr.empty()) { err = stepErr; return false; }
     err.clear();
     return false;   // 缺列（非錯誤）：以回傳值區分
+}
+
+bool GameStore::GetRecommendOldUID(int64_t newUID, int64_t& outOldUID, bool& found, std::string& err)
+{
+    outOldUID = 0;
+    found = false;
+    Statement st;
+    // 原 gup_get_unit_info_by_unituid：`SELECT @iOldUID = OldUID FROM GRecommend WHERE NewUID = @iUnitUID_`
+    // （標量賦值，多列時取「最後讀到的那列」——未定義順序）；V2 以 ORDER BY RegDate ASC LIMIT 1 固定為最早一列，
+    // 並於 docs §0a15 偏差聲明。
+    if (!st.Prepare(m_db, "SELECT OldUID FROM grecommend WHERE NewUID = ? ORDER BY RegDate ASC, OldUID ASC LIMIT 1;", err)) return false;
+    if (!st.BindInt(1, newUID, err)) return false;
+    std::string stepErr;
+    if (st.StepRow(stepErr)) {
+        outOldUID = st.ColumnInt64(0);
+        found = true;
+        err.clear();
+        return true;
+    }
+    if (!stepErr.empty()) { err = stepErr; return false; }
+    err.clear();
+    return true;
 }
 
 bool GameStore::ApplyUnitLoginReset(int64_t unitUID, std::string& err)

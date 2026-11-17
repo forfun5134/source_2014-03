@@ -70,7 +70,7 @@ static void TestSchemaV7()
 {
     Fixture fx;
     int v = fx.db.UserVersion(fx.err);
-    CHECK(v == kGameSchemaVersion && kGameSchemaVersion == 8, "schema v8 (user_version == 8)");
+    CHECK(v == kGameSchemaVersion && kGameSchemaVersion == 9, "schema v9 (user_version == 9)");
     CHECK(fx.db.Exec("SELECT 1 FROM gblacklist LIMIT 0;", fx.err), "gblacklist exists");
     CHECK(fx.db.Exec("SELECT 1 FROM gtutor LIMIT 0;", fx.err), "gtutor exists");
     CHECK(fx.db.Exec("SELECT 1 FROM gis30min LIMIT 0;", fx.err), "gis30min exists");

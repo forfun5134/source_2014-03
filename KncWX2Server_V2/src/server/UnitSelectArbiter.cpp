@@ -77,21 +77,31 @@ std::string WideToUtf8(const std::wstring& in)
 
 namespace x2 { namespace select_unit {
 
-void BuildSelectUnitNot5(SelectUnitNot5& out)
+void BuildSelectUnitNot5(SelectUnitNot5& out, const db::SpiritValues* spiritValues)
 {
     out = SelectUnitNot5{};
     out.iOK = NET_OK;
-    // bIsSpiritUpdated / mapCharGameCount / kPShopAgencyInfo / packetHenirRewardCount / …：
-    // 無資料來源 → 全 false/0/空容器（誠實佔位）
+    // bIsSpiritUpdated ← GSpirit.Flag（原 gup_get_unit_info_by_unituid 以 `@iAllSpirit = Flag` 讀出、
+    //   經 KDBE_SELECT_UNIT_ACK 原樣轉發；Flag != 0 → true）。spiritValues == nullptr → false（list 路徑/未讀回）。
+    out.bIsSpiritUpdated = spiritValues ? (spiritValues->flag != 0) : false;
+    // mapCharGameCount（gup_get_Character_Count / P_GCharacter_Count_SEL——proc 不在倉庫，GCharacterLog 表亦無）
+    // kPShopAgencyInfo（P_GPShopInfo_SEL_ShopCheck——proc/表不在倉庫）
+    // packetHenirRewardCount（gup_get_henir_reward_cnt / P_GHenirRewardCnt_SEL——proc/表不在倉庫）
+    // bCashShopOpen / bFirstSelect / bLocalRankingUser：runtime／帳號級（V2 無帳號 DB）→ false（誠實佔位）
 }
 
 void BuildSelectUnitNot4(SelectUnitNot4& out, const db::DenyOptionValues& denyOptions,
                          const std::vector<db::BlacklistRecord>& blacklist,
                          const std::vector<db::TutorRecord>& tutor,
-                         const std::vector<db::ConnectTimeEventRecord>& connectTimeEvents)
+                         const std::vector<db::ConnectTimeEventRecord>& connectTimeEvents,
+                         int64_t recommendUnitUID)
 {
     out = SelectUnitNot4{};
     out.iOK = NET_OK;
+    // iRecommendUnitUID ← GRecommend.OldUID（原 gup_get_unit_info_by_unituid：`SELECT @iOldUID = OldUID
+    //   FROM GRecommend WHERE NewUID = @iUnitUID_`；缺列 → 0）。
+    // bIsRecommend：原碼 ← 帳號級 IsRecommend()（KUserRecommendManager；帳號 DB 源）——V2 無帳號 DB → false（誠實佔位，見 docs §0a15）
+    out.iRecommendUnitUID = recommendUnitUID;
     // vecChatBlackList ← gblacklist（原 gup_select_blacklist；NickName NULL → 空字串；kUnitInfo 對手方實際等級等未建模）
     out.vecChatBlackList.reserve(blacklist.size());
     for (const auto& b : blacklist) {
@@ -721,6 +731,8 @@ int32_t HandleSelectUnitReq(db::GameStore& gameDb, int64_t userUID, const Select
             }
         }
     }
+    db::SpiritValues sv;   // hoisted：Not1（PopulateUnitInfo）與 Not5（bIsSpiritUpdated）共用
+    bool svRead = false;
     if (outUnit || outNot1 || outNot2 || outNot3 || outNot4 || outNot5) {
         db::GUnitRecord tmp;
         db::GUnitRecord& uRef = outUnit ? *outUnit : tmp;
@@ -731,12 +743,12 @@ int32_t HandleSelectUnitReq(db::GameStore& gameDb, int64_t userUID, const Select
             ack.iOK = ERR_SELECT_UNIT_05;
             return ack.iOK;
         }
-        db::SpiritValues sv;
         if (!gameDb.GetSpiritValues(req.unitUID, sv, err)) {
             err = std::string("get spirit after login reset: ") + err;
             ack.iOK = ERR_SELECT_UNIT_05;
             return ack.iOK;
         }
+        svRead = true;
         SelectUnit1Supplemental sup;
         if (outNot1) {
             if (!gameDb.GetInventorySlotSize(req.unitUID, sup.inventorySlotSize, err)) {
@@ -808,9 +820,16 @@ int32_t HandleSelectUnitReq(db::GameStore& gameDb, int64_t userUID, const Select
             ack.iOK = ERR_SELECT_UNIT_05;
             return ack.iOK;
         }
-        BuildSelectUnitNot4(*outNot4, deny, blacklist, tutor, timeEvents);
+        int64_t recommendOldUID = 0;
+        bool recommendFound = false;
+        if (!gameDb.GetRecommendOldUID(req.unitUID, recommendOldUID, recommendFound, err)) {
+            err = std::string("get recommend old uid: ") + err;
+            ack.iOK = ERR_SELECT_UNIT_05;
+            return ack.iOK;
+        }
+        BuildSelectUnitNot4(*outNot4, deny, blacklist, tutor, timeEvents, recommendFound ? recommendOldUID : 0);
     }
-    if (outNot5) BuildSelectUnitNot5(*outNot5);
+    if (outNot5) BuildSelectUnitNot5(*outNot5, svRead ? &sv : nullptr);
 
     ack.iOK = NET_OK;
     err.clear();

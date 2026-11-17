@@ -41,7 +41,7 @@
 
 namespace x2 { namespace db {
 
-inline constexpr int kGameSchemaVersion = 8;
+inline constexpr int kGameSchemaVersion = 9;
 
 // game DB 遷移：v0→v1 建立 guser / gunit / gunit_nickname / gdeleted_nickname_history；冪等
 bool ApplyGameMigrations(Database& db, std::string& err);
@@ -300,6 +300,9 @@ public:
 
     // 讀取 GResurrectionStone（缺列 → false，非錯誤；供測試/除錯）
     bool GetResurrectionStone(int64_t unitUID, ResurrectionStoneValues& out, std::string& err);
+    // GRecommend（§0a15）：SELECT OldUID FROM grecommend WHERE NewUID = ? ORDER BY RegDate ASC LIMIT 1。
+    // found=false → 缺列（= 原 @iOldUID 預設 0，非錯誤）；DB 錯誤 → false。
+    bool GetRecommendOldUID(int64_t newUID, int64_t& outOldUID, bool& found, std::string& err);
 
 private:
     Database& m_db;

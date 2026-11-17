@@ -358,6 +358,32 @@ tests/test_string_filter.cpp 的字元集閘門斷言改為依 `X2_REGION_*` 分
 - **測試數**：**JP = 1297、TW = 1295、EU = 1293、CN = 1295 passed / 0 failed**。
 - 剩餘未移植：gmo_*_skill（技能 slot 更新）／gup_get_community_opt_unituid（社群選項查詢——V2 改以 gdenyoption 直接讀回近似，§0a9；relationship 6 欄寫入 EGS_UPDATE_COMMUNITY_OPT 已於 §0a10 以 write-through upsert 移植；P_GDenyOption_UPD 仍缺 proc）／class 5..9 技能列（原 proc 不存在）／LogDB；gspirit 的 Flag 完整語意與復活石補充/精力重置已於 §0a8 移植；Flag 並列槽位 UI 亦未建模。
 
+## 0a15. 2026-11-17 附記（SELECT_UNIT_4_NOT：iRecommendUnitUID 讀回；SELECT_UNIT_5_NOT：bIsSpiritUpdated 讀回；schema v9）
+
+§0a9/§0a13 落地 Not4、§0e 落地 Not5 時，`iRecommendUnitUID`/`bIsSpiritUpdated` 皆為 0/false 佔位。本切片接上兩個**資料源在倉庫內**的項目。
+
+原版：
+
+- **`kAck.m_iRecommendUnitUID`**（GSGameDBThread.cpp:789–838，`gup_get_unit_info_by_unituid`）：`SELECT @iOldUID = OldUID FROM GRecommend WHERE NewUID = @iUnitUID_`（缺列 → @iOldUID 保持 0；標量賦值多列時取「最後讀到的那列」，順序未定義）→ SendSelectUnitACK：`kNot_4.m_iRecommendUnitUID`（GSUserFunction.cpp:18093）。GRecommend 表（Database2）**在倉庫內**（OldUID/NewUID bigint、RegDate smalldatetime NULL；IX_GRecommend_NewUID 非叢集索引）。
+- **`Not4.m_bIsRecommend`**：← `m_kUserRecommendManager.IsRecommend()`，其值源自**帳號級** `KAccountManager`（KIntroduceServer/DBE_ACCOUNT_*；Database1 的 RSGRecommendSystem 等）——**V2 無帳號 DB** → 恆 false（誠實佔位）。
+- **`Not5.m_bIsSpiritUpdated`**（GSGameDBThread.cpp:814/836，同 proc）：`@iAllSpirit = Flag`（`SELECT Spirit, Flag FROM GSpirit WHERE UnitUID`）→ SendSelectUnitACK：`kNot_5.m_bIsSpiritUpdated`（GSUserFunction.cpp:18117）。Flag bit 直接轉 bool。
+- **Not5 其餘**：`mapCharGameCount` ← `gup_get_Character_Count`／`P_GCharacter_Count_SEL`（**proc 不在倉庫**；對應計數表（GCharacterLog 等）亦未見於 Tables 樹）；`kPShopAgencyInfo` ← `P_GPShopInfo_SEL_ShopCheck`（**proc/GPShopInfo 表不在倉庫**）；`packetHenirRewardCount` ← `gup_get_henir_reward_cnt`／`P_GHenirRewardCnt_SEL`（**proc/表不在倉庫**）；`bCashShopOpen`（SERV_CONTENT_MANAGER，runtime `SiKGSContentManager()->IsEnableCashShop()`）、`bFirstSelect`（SERV_ARA_FIRST_SELECT_TUTORIAL，`GetCharacterCount(CGCT_SELECT_CHAR) == 0`）、`bLocalRankingUser`（SERV_LOCAL_RANKING_SYSTEM，runtime）——**均無資料源** → false/0/空。
+
+**V2 實作**：
+
+- **Schema v9**：`grecommend`（OldUID/NewUID INTEGER NOT NULL；RegDate TEXT NULL；IX NewUID）。原 heap/無 PK 保留。
+- **GameStore**：`GetRecommendOldUID`（`SELECT OldUID FROM grecommend WHERE NewUID = ? ORDER BY RegDate ASC, OldUID ASC LIMIT 1`；found=false → 缺列非錯誤）。
+- **`BuildSelectUnitNot4(..., recommendUnitUID=0)`**（尾參預設 0）；HandleSelectUnitReq 於 Not4 段讀 GRecommend（缺表 → ERR_SELECT_UNIT_05）。
+- **`BuildSelectUnitNot5(out, spiritValues=nullptr)`**：`out.bIsSpiritUpdated = spiritValues ? (spiritValues->flag != 0) : false`。HandleSelectUnitReq hoist `db::SpiritValues`（Not1 與 Not5 共用同一次讀回）。
+- **測試** `tests/test_select_not45_readback.cpp`（grecommend 缺列/多列 determinism/不存在、Not4 iRecommendUnitUID 接線＋bIsRecommend 恆 false、Not5 flag=0/1/nullptr、缺表 → ERR_SELECT_UNIT_05、歸屬錯誤）。TestSelectNot4 defaults / Not5 defaults 路徑不變（尾參預設）。
+- **測試數**：**JP = 1734、TW = 1732、EU = 1730、CN = 1732、US = 1731 passed / 0 failed**。
+- **偏差聲明（逐條）**：
+  1. **多列 determinism**：原標量賦值取「最後讀到的列」（未定義順序）；V2 固定 `ORDER BY RegDate ASC, OldUID ASC LIMIT 1`（取最早一列）。正常情況每 GRecommend 應僅一列（GUnit 級別唯一入會），差異僅見資料損壞時。
+  2. **bIsRecommend 恆 false**：源為帳號 DB（V2 無）；文件化佔位。
+  3. **bIsSpiritUpdated = (GSpirit.Flag != 0)**：原碼 bit→bool 直轉，一致；Flag 語意（DF_GSpirit_Flag）由原碼管理，V2 如實保存（§0a8 政策）。
+  4. **mapCharGameCount / PShopAgencyInfo / HenirRewardCount / bCashShopOpen / bFirstSelect / bLocalRankingUser 恆空/false**：proc/表缺失或屬 runtime/帳號級。若日後補 proc 與表，改配接線即可。
+  5. **缺表 → ERR_SELECT_UNIT_05**（與 §0a9/§0a13/§0a14 慣例一致）。
+
 ## 0a14. 2026-11-17 附記（SELECT_UNIT_1_NOT：背包格數／物品／裝備映射／復活石量讀回；schema v8）
 
 §0e 落地 Not1 時，`mapInventorySlotSize`/`mapItem`/`iNumResurrectionStone`/`equippedItem` 皆為空/0 佔位。本切片接上**可移植的部分**；衛星表缺失部分恆為 proc 預設值（見偏差聲明）。

@@ -181,7 +181,7 @@ bool HandleMyUnitAndInventoryInfoListReq(db::GameStore& gameDb, int64_t userUID,
 // 組裝 SELECT_UNIT_5_NOT（成功路徑的首次選擇/ETC 分片）。
 // 誠實說明：V2 無 spirit/CHAR_LOG/pshop-agency/henir-reward/cashshop 狀態表，
 // 全 false/0/空容器（誠實佔位；不代表角色真實狀態）。iOK=NET_OK。
-void BuildSelectUnitNot5(SelectUnitNot5& out);
+void BuildSelectUnitNot5(SelectUnitNot5& out, const db::SpiritValues* spiritValues = nullptr);
 
 // EGS_GET_MY_INVENTORY_REQ 決策（原 IMPL_ON_FUNC_NOPARAM(EGS_GET_MY_INVENTORY_REQ)）：
 // 依槽位分類把 items 分組成 SELECT_UNIT_INVENTORY_INFO_NOT 分片（空 category 不送，
@@ -202,7 +202,8 @@ size_t HandleGetMyInventoryReq(const std::map<int64_t, unit::InventoryItemInfo>&
 void BuildSelectUnitNot4(SelectUnitNot4& out, const db::DenyOptionValues& denyOptions,
                          const std::vector<db::BlacklistRecord>& blacklist,
                          const std::vector<db::TutorRecord>& tutor,
-                         const std::vector<db::ConnectTimeEventRecord>& connectTimeEvents);
+                         const std::vector<db::ConnectTimeEventRecord>& connectTimeEvents,
+                         int64_t recommendUnitUID = 0);
 
 // 組裝 SELECT_UNIT_3_NOT（成功路徑的使命/稱號/寵物分片）。
 // 誠實說明：V2 game DB 無 mission/title/pet/petItem 表，這些容器一律空、iSummonedPetUID=0——
