@@ -42,7 +42,7 @@
 
 namespace x2 { namespace db {
 
-inline constexpr int kGameSchemaVersion = 11;
+inline constexpr int kGameSchemaVersion = 12;
 
 // game DB 遷移：v0→v1 建立 guser / gunit / gunit_nickname / gdeleted_nickname_history；冪等
 bool ApplyGameMigrations(Database& db, std::string& err);
@@ -132,6 +132,20 @@ struct TutorRecord
     std::string nickname;                // gunit_nickname.NickName；NULL → 空字串
     std::string lastDate;                // GTutor.LastDate（'YYYY-MM-DD HH:MM:SS' UTC）；NULL → 空字串
 };
+struct DungeonClearRecord
+{
+    int32_t dungeonID = 0;       // GDungeonClear.GameMode
+    int32_t maxScore = 0;
+    int8_t  maxTotalRank = 0;    // tinyint
+    std::string clearTime;       // CAST(RegDate AS nvarchar(19)) 原樣
+};
+
+struct TCClearRecord
+{
+    int32_t tcid = 0;            // GTrainingCenter.TCID
+    std::string clearTime;
+};
+
 struct InventoryItemRecord
 {
     int64_t itemUID = 0;
@@ -305,6 +319,9 @@ public:
 
     // 讀取 GResurrectionStone（缺列 → false，非錯誤；供測試/除錯）
     bool GetResurrectionStone(int64_t unitUID, ResurrectionStoneValues& out, std::string& err);
+    // GDungeonClear / GTrainingCenter（§0a18；原 gup_get_dungeon_clear / gup_get_tc_clear）
+    bool GetDungeonClears(int64_t unitUID, std::vector<struct DungeonClearRecord>& out, std::string& err);
+    bool GetTCClears(int64_t unitUID, std::vector<struct TCClearRecord>& out, std::string& err);
     // GRecommend（§0a15）：SELECT OldUID FROM grecommend WHERE NewUID = ? ORDER BY RegDate ASC LIMIT 1。
     // found=false → 缺列（= 原 @iOldUID 預設 0，非錯誤）；DB 錯誤 → false。
     bool GetRecommendOldUID(int64_t newUID, int64_t& outOldUID, bool& found, std::string& err);

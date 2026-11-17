@@ -66,7 +66,7 @@ static void TestSchemaV8()
 {
     Fixture fx;
     int v = fx.db.UserVersion(fx.err);
-    CHECK(v == kGameSchemaVersion && kGameSchemaVersion == 11, "schema v11 (user_version == 11)");
+    CHECK(v == kGameSchemaVersion && kGameSchemaVersion == 12, "schema v12 (user_version == 12)");
     CHECK(fx.db.Exec("SELECT 1 FROM gitem LIMIT 0;", fx.err), "gitem exists");
     CHECK(fx.db.Exec("SELECT 1 FROM giteminventorysize LIMIT 0;", fx.err), "giteminventorysize exists");
     CHECK(fx.db.Exec("SELECT 1 FROM gitemquantity LIMIT 0;", fx.err), "gitemquantity exists");
@@ -75,6 +75,8 @@ static void TestSchemaV8()
     CHECK(fx.db.Exec("SELECT 1 FROM gitemperiod LIMIT 0;", fx.err), "gitemperiod exists");
     CHECK(fx.db.Exec("SELECT 1 FROM gitemsocket LIMIT 0;", fx.err), "gitemsocket exists");
     CHECK(fx.db.Exec("SELECT 1 FROM gitemattribute LIMIT 0;", fx.err), "gitemattribute exists");
+    CHECK(fx.db.Exec("SELECT 1 FROM gdungeonclear LIMIT 0;", fx.err), "gdungeonclear exists");
+    CHECK(fx.db.Exec("SELECT 1 FROM gtrainingcenter LIMIT 0;", fx.err), "gtrainingcenter exists");
     const int64_t uid = fx.MakeUnit(777, L"inv.schema");
     CHECK(uid > 0, "unit created");
     CHECK(fx.db.Exec("INSERT INTO gitem (UnitUID, ItemID, InventoryCategory, SlotID) VALUES (" + std::to_string(uid) + ", 1001, 1, 0);", fx.err), "seed item");
@@ -197,6 +199,7 @@ static void TestSelectIntegration()
 
 static void TestSatellites();
 static void TestAttributes();
+static void TestDungeonClears();
 
 void RunInventoryReadbackTestsByRef(int& pass, int& fail)
 {
@@ -206,6 +209,7 @@ void RunInventoryReadbackTestsByRef(int& pass, int& fail)
     TestSelectIntegration();
     TestSatellites();
     TestAttributes();
+    TestDungeonClears();
     pass += g_pass_inv;
     fail += g_fail_inv;
 }
@@ -352,5 +356,63 @@ static void TestAttributes()
         std::vector<std::tuple<int64_t, int32_t, int32_t>> attrs;
         CHECK(fx.store.GetItemAttributes(uid, attrs, fx.err), "attribute raw readable");
         CHECK(attrs.size() == 5, "raw rows include out-of-range SlotNo (proc semantics)");
+    }
+}
+
+// ── §0a18：UnitInfo.dungeonClear / tcClear 讀回（gup_get_dungeon_clear / gup_get_tc_clear 語義）──
+static void TestDungeonClears()
+{
+    Fixture fx;
+    const int64_t uid = fx.MakeUnit(777, L"inv.clear");
+    CHECK(uid > 0, "unit created");
+    {
+        std::vector<DungeonClearRecord> dc;
+        std::vector<TCClearRecord> tc;
+        CHECK(fx.store.GetDungeonClears(uid, dc, fx.err), "dungeon clear readable (empty)");
+        CHECK(fx.store.GetTCClears(uid, tc, fx.err), "tc clear readable (empty)");
+        CHECK(dc.empty() && tc.empty(), "empty initially");
+    }
+    CHECK(fx.db.Exec("INSERT INTO gdungeonclear (UnitUID, GameMode, MaxScore, MaxTotalRank, RegDate) VALUES "
+                     "(" + std::to_string(uid) + ", 100, 99999, 3, '2000-01-02 03:04:05'),"
+                     "(" + std::to_string(uid) + ", 200, 12345, 2, '2001-05-06 07:08:09');", fx.err), "seed dungeon clears");
+    CHECK(fx.db.Exec("INSERT INTO gtrainingcenter (UnitUID, TCID, RegDate) VALUES "
+                     "(" + std::to_string(uid) + ", 11, '2000-02-03 04:05:06');", fx.err), "seed tc clears");
+    {
+        std::vector<DungeonClearRecord> dc;
+        CHECK(fx.store.GetDungeonClears(uid, dc, fx.err), "dungeon clears readable");
+        CHECK(dc.size() == 2, "two dungeon clear rows");
+        std::map<int32_t, DungeonClearRecord> byMode;
+        for (const auto& d : dc) byMode[d.dungeonID] = d;
+        CHECK(byMode[100].maxScore == 99999 && byMode[100].maxTotalRank == 3 &&
+              byMode[100].clearTime == "2000-01-02 03:04:05", "dungeon clear mapped");
+        CHECK(byMode[200].maxTotalRank == 2, "second row mapped");
+        std::vector<TCClearRecord> tc;
+        CHECK(fx.store.GetTCClears(uid, tc, fx.err), "tc clears readable");
+        CHECK(tc.size() == 1 && tc[0].tcid == 11 && tc[0].clearTime == "2000-02-03 04:05:06", "tc clear mapped");
+    }
+    // Not1 端到端：UnitInfo.dungeonClear / tcClear 填充、isNew=false
+    {
+        SelectUnitNot1 not1{};
+        CHECK(SelectNot1(fx.store, 777, uid, &not1), "select ok");
+        auto it = not1.unitInfo.dungeonClear.find(100);
+        CHECK(it != not1.unitInfo.dungeonClear.end() && it->second.maxScore == 99999 &&
+              it->second.maxTotalRank == 3 && it->second.isNew == false &&
+              it->second.clearTime == std::wstring(L"2000-01-02 03:04:05"), "Not1 dungeonClear wired");
+        auto it2 = not1.unitInfo.tcClear.find(11);
+        CHECK(it2 != not1.unitInfo.tcClear.end() && it2->second.isNew == false &&
+              it2->second.clearTime == std::wstring(L"2000-02-03 04:05:06"), "Not1 tcClear wired");
+    }
+    // 缺表 → ERR_SELECT_UNIT_05
+    {
+        std::string err2;
+        CHECK(fx.db.Exec("ALTER TABLE gdungeonclear RENAME TO gdungeonclear_bak;", err2), "rename dungeonclear");
+        SelectUnitReq req; req.unitUID = uid;
+        SelectUnitAck ack2;
+        SelectUnitNot1 not1{};
+        std::string err3;
+        int rc = HandleSelectUnitReq(fx.store, 777, req, ack2, err3, true,
+                                     nullptr, &not1, 5, nullptr, nullptr, nullptr, nullptr);
+        CHECK(rc == ERR_SELECT_UNIT_05, "missing gdungeonclear -> ERR_SELECT_UNIT_05");
+        CHECK(fx.db.Exec("ALTER TABLE gdungeonclear_bak RENAME TO gdungeonclear;", err2), "restore");
     }
 }

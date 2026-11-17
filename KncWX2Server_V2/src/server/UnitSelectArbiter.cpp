@@ -251,7 +251,7 @@ void PopulateUnitInfoFromGUnit(int64_t userUID, int authLevel, const db::GUnitRe
                unit.defMagic + sZero.defMagic };
     u.gameStat = u.stat;                            // 無獨立 GameStat 來源，鏡射 Stat（誠實佔位）
     u.lastPos = { unit.lastPosition, 0, 0, false }; // lastPos.mapID ← GUnit.LastPosition
-    // buffInfo / dungeonClear / tcClear / equippedItem：無對應表，保持空容器
+    // buffInfo：無資料源 → 空容器；equippedItem ← §0a14；dungeonClear / tcClear 於 BuildSelectUnitNot1 supplemental 段（§0a18）
     u.win = unit.win;
     u.lose = unit.lose;
     u.unitSkillData = unit::UnitSkillData{};        // 全預設（pages 1/1、槽位 0）
@@ -317,6 +317,23 @@ void BuildSelectUnitNot1(int64_t userUID, int authLevel, const db::GUnitRecord& 
         }
         // numResurrectionStone ← gresurrectionstone.Quantity（缺列 → §0a8 政策 0；§0a14）
         out.numResurrectionStone = supplemental->numResurrectionStone;
+        // dungeonClear / tcClear ← gdungeonclear / gtrainingcenter（§0a18；isNew=false；map::insert 保留首筆——原碼同）
+        for (const auto& d : supplemental->dungeonClear) {
+            unit::DungeonClearInfo e;
+            e.dungeonID = d.dungeonID;
+            e.maxScore = d.maxScore;
+            e.maxTotalRank = d.maxTotalRank;
+            e.clearTime = Utf8ToWide(d.clearTime);
+            e.isNew = false;   // 原 m_bNew = false
+            out.unitInfo.dungeonClear.insert({ d.dungeonID, e });
+        }
+        for (const auto& t : supplemental->tcClear) {
+            unit::TCClearInfo e;
+            e.tcid = t.tcid;
+            e.clearTime = Utf8ToWide(t.clearTime);
+            e.isNew = false;
+            out.unitInfo.tcClear.insert({ t.tcid, e });
+        }
     }
     // inventorySlotSize / items / resStone：supplemental 為空（list 路徑等）→ 沿用空/0 佔位
     out.vecUserSkillPageData.push_back(unit::UserSkillPageData{});  // 一頁全預設（pages 1/1 一致；技能 proc 缺）
@@ -776,6 +793,16 @@ int32_t HandleSelectUnitReq(db::GameStore& gameDb, int64_t userUID, const Select
                 }
             } else {
                 sup.numResurrectionStone = rs.quantity;
+            }
+            if (!gameDb.GetDungeonClears(req.unitUID, sup.dungeonClear, err)) {
+                err = std::string("get dungeon clear: ") + err;
+                ack.iOK = ERR_SELECT_UNIT_05;
+                return ack.iOK;
+            }
+            if (!gameDb.GetTCClears(req.unitUID, sup.tcClear, err)) {
+                err = std::string("get training center clear: ") + err;
+                ack.iOK = ERR_SELECT_UNIT_05;
+                return ack.iOK;
             }
         }
         if (outNot1) BuildSelectUnitNot1(userUID, authLevel, uRef, *outNot1, &sv, equippedTitleID, &sup);

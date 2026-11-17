@@ -286,6 +286,25 @@ CREATE TABLE gitemattribute (
 CREATE INDEX ix_gitemattribute_itemuid ON gitemattribute(ItemUID);
 )SQL";
 
+static const char* kCreateGDungeonClearV12 = R"SQL(
+CREATE TABLE gdungeonclear (
+    UnitUID      INTEGER NOT NULL REFERENCES gunit(UnitUID) ON DELETE CASCADE,
+    GameMode     INTEGER NOT NULL,
+    MaxScore     INTEGER NOT NULL,
+    MaxTotalRank INTEGER NOT NULL CHECK (MaxTotalRank BETWEEN 0 AND 255),
+    RegDate      TEXT NOT NULL,
+    PRIMARY KEY (UnitUID, GameMode)
+);
+)SQL";
+static const char* kCreateGTrainingCenterV12 = R"SQL(
+CREATE TABLE gtrainingcenter (
+    UnitUID INTEGER NOT NULL REFERENCES gunit(UnitUID) ON DELETE CASCADE,
+    TCID    INTEGER NOT NULL,
+    RegDate TEXT NOT NULL,
+    PRIMARY KEY (UnitUID, TCID)
+);
+)SQL";
+
 static const char* kCreateGRecommendV9 = R"SQL(
 CREATE TABLE grecommend (
     OldUID        INTEGER NOT NULL,
@@ -424,6 +443,14 @@ bool ApplyGameMigrations(Database& db, std::string& err)
             std::string unused;
             db.Rollback(unused);
             err = std::string("game migration v11 failed: ") + err;
+            return false;
+        }
+    }
+    if (v < 12) {
+        if (!db.Exec(kCreateGDungeonClearV12, err) || !db.Exec(kCreateGTrainingCenterV12, err)) {
+            std::string unused;
+            db.Rollback(unused);
+            err = std::string("game migration v12 failed: ") + err;
             return false;
         }
     }
@@ -1356,6 +1383,59 @@ bool GameStore::GetResurrectionStone(int64_t unitUID, ResurrectionStoneValues& o
     if (!stepErr.empty()) { err = stepErr; return false; }
     err.clear();
     return false;   // 缺列（非錯誤）：以回傳值區分
+}
+
+bool GameStore::GetDungeonClears(int64_t unitUID, std::vector<DungeonClearRecord>& out, std::string& err)
+{
+    out.clear();
+    Statement st;
+    // 原 gup_get_dungeon_clear：SELECT GameMode, MaxScore, MaxTotalRank, CAST(RegDate AS nvarchar(19))
+    //   FROM GDungeonClear WHERE UnitUID = @iUnitUID_（CAST → V2 存字串，原樣輸出）
+    if (!st.Prepare(m_db,
+            "SELECT GameMode, MaxScore, MaxTotalRank, RegDate FROM gdungeonclear WHERE UnitUID = ?;", err)) return false;
+    if (!st.BindInt(1, unitUID, err)) return false;
+    std::string stepErr;
+    while (true) {
+        stepErr.clear();
+        if (st.StepRow(stepErr)) {
+            DungeonClearRecord rec;
+            rec.dungeonID = static_cast<int32_t>(st.ColumnInt64(0));
+            rec.maxScore = static_cast<int32_t>(st.ColumnInt64(1));
+            rec.maxTotalRank = static_cast<int8_t>(st.ColumnInt64(2));
+            rec.clearTime = st.ColumnText(3);
+            out.push_back(rec);
+        } else {
+            if (!stepErr.empty()) { err = stepErr; return false; }
+            break;
+        }
+    }
+    err.clear();
+    return true;
+}
+
+bool GameStore::GetTCClears(int64_t unitUID, std::vector<TCClearRecord>& out, std::string& err)
+{
+    out.clear();
+    Statement st;
+    // 原 gup_get_tc_clear：SELECT TCID, CAST(RegDate AS nvarchar(19)) FROM GTrainingCenter WHERE UnitUID = @iUnitUID_
+    if (!st.Prepare(m_db,
+            "SELECT TCID, RegDate FROM gtrainingcenter WHERE UnitUID = ?;", err)) return false;
+    if (!st.BindInt(1, unitUID, err)) return false;
+    std::string stepErr;
+    while (true) {
+        stepErr.clear();
+        if (st.StepRow(stepErr)) {
+            TCClearRecord rec;
+            rec.tcid = static_cast<int32_t>(st.ColumnInt64(0));
+            rec.clearTime = st.ColumnText(1);
+            out.push_back(rec);
+        } else {
+            if (!stepErr.empty()) { err = stepErr; return false; }
+            break;
+        }
+    }
+    err.clear();
+    return true;
 }
 
 bool GameStore::GetRecommendOldUID(int64_t newUID, int64_t& outOldUID, bool& found, std::string& err)

@@ -358,6 +358,28 @@ tests/test_string_filter.cpp 的字元集閘門斷言改為依 `X2_REGION_*` 分
 - **測試數**：**JP = 1297、TW = 1295、EU = 1293、CN = 1295 passed / 0 failed**。
 - 剩餘未移植：gmo_*_skill（技能 slot 更新）／gup_get_community_opt_unituid（社群選項查詢——V2 改以 gdenyoption 直接讀回近似，§0a9；relationship 6 欄寫入 EGS_UPDATE_COMMUNITY_OPT 已於 §0a10 以 write-through upsert 移植；P_GDenyOption_UPD 仍缺 proc）／class 5..9 技能列（原 proc 不存在）／LogDB；gspirit 的 Flag 完整語意與復活石補充/精力重置已於 §0a8 移植；Flag 並列槽位 UI 亦未建模。
 
+## 0a18. 2026-11-17 附記（SELECT_UNIT_1_NOT：UnitInfo.dungeonClear / tcClear 讀回；schema v12）
+
+Not1 的 `UnitInfo.mapDungeonClear`／`UnitInfo.mapTCClear`（原版寫法：`m_mapDungeonClear` ← `gup_get_dungeon_clear`；`m_mapTCClear` ← `gup_get_tc_clear`）原為空容器佔位。兩 proc 均**在倉庫內**（legacy 分支生效——SERV_ALL_RENEWAL_SP 未定義），兩表（GDungeonClear / GTrainingCenter，含 PK (UnitUID, GameMode) / (UnitUID, TCID)）同樣存在。
+
+原版：
+
+- **gup_get_dungeon_clear**：`SELECT GameMode, MaxScore, MaxTotalRank, CAST(RegDate AS nvarchar(19)) FROM GDungeonClear WHERE UnitUID=@iUnitUID_`；FETCH → `KDungeonClearInfo{ m_iDungeonID←GameMode, m_iMaxScore, m_cMaxTotalRank, m_wstrClearTime, m_bNew=false }`；`map::insert`（重複 GameMode 保留首筆）。
+- **gup_get_tc_clear**：`SELECT TCID, CAST(RegDate AS nvarchar(19)) FROM GTrainingCenter WHERE UnitUID=@iUnitUID_`；同法填 `KTCClearInfo`。
+- FETCH 於 Title 段之後、技能段之前；失敗 → 整體選角失敗（V2 同：ERR_SELECT_UNIT_05）。
+
+**V2 實作**：
+
+- **Schema v12**：`gdungeonclear`／`gtrainingcenter`（UnitUID FK→gunit CASCADE；複合 PK (UnitUID, GameMode|TCID) 對應原 CLUSTERED PK；MaxTotalRank CHECK 0..255；RegDate TEXT NOT NULL 保留 CAST 字串格式 `YYYY-MM-DD HH:MM:SS`）。
+- **GameStore**：`GetDungeonClears`／`GetTCClears`。`SelectUnit1Supplemental` 新增 `dungeonClear`／`tcClear`；HandleSelectUnitReq 於復活石讀取後取得（缺表 → ERR_SELECT_UNIT_05）；`BuildSelectUnitNot1` supplemental 段填 `unitInfo.dungeonClear/tcClear`（`isNew=false`；map::insert 保留首筆）。
+- **測試**：TestDungeonClears（空/填充/Not1 端到端/缺表 → ERR_SELECT_UNIT_05）。
+- **測試數**：**JP = 1806、TW = 1804、EU = 1802、CN = 1804、US = 1803 passed / 0 failed**。
+- **偏差聲明**：
+  1. RegDate 存字串原樣（CAST(RegDate AS nvarchar(19)) 對應 SQLite datetime 預設格式；V2 以 TEXT 保存，輸出逐字）。
+  2. `m_bNew` 恆 false（原 insert 時設為 false；無續作語意）。
+  3. map::insert 保留首筆（原碼同；PK 保證不重複，無實質差異）。
+  4. buffInfo 無資料源（Buff 系統表不在本倉庫分支的選角 DB 範圍）→ 空容器。
+
 ## 0a17. 2026-11-17 附記（SELECT_UNIT_1_NOT：GItemAttribute 合併＋socket 尾端 0 裁剪；schema v11）
 
 **勘誤（續）**：§0a16 稱「`gup_get_attribute` 不在倉庫、attrib 恆預設」——**同樣錯誤**。`gup_get_attribute.proc.sql` 實際存在於 `Database2/Database2/Schema Objects/Stored Procedures/`（Database2/…）。本節將其接上，並回溯修正 §0a16「仍未接」清單。

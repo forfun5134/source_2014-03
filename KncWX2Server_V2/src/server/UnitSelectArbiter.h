@@ -242,6 +242,8 @@ struct SelectUnit1Supplemental
     std::vector<db::InventoryItemRecord> items;    // gitem（Deleted=0，已排序）
     std::map<int32_t, int32_t> inventorySlotSize;  // giteminventorysize per-category SUM(NumSlot)
     int32_t numResurrectionStone = 0;              // gresurrectionstone.Quantity（缺列 → 0）
+    std::vector<db::DungeonClearRecord> dungeonClear;  // gdungeonclear（§0a18）
+    std::vector<db::TCClearRecord> tcClear;            // gtrainingcenter（§0a18）
 };
 
 void BuildSelectUnitNot1(int64_t userUID, int authLevel, const db::GUnitRecord& unit,
