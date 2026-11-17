@@ -212,6 +212,16 @@
 
 **SERV_ENTRY_POINT 事件狀態**：EGS_CHARACTER_LIST(1155–1158 折疊)、EAGLE CREATE_NEW_UNIT(1159)、ENTRY_POINT_DELETE_UNIT(1160)、CHECK_NICK_NAME(1161/1162)、GET_CREATE_UNIT_TODAY_COUNT(1163–1165)、GET_CHANNEL_LIST(1166/1167)、ENTRY_POINT_CHANGE_NICK_NAME(1168)——**SERV_ENTRY_POINT 家族已全部覆蓋**（REQ/ACK 成對；1157 2ND_REQ 無 2nd DB 未實作；1164–1165 1ST_ACK 折疊）。
 
+## 0t. 2026-11-17 快照（CREATE→LIST→DELETE 迴路整合測試）
+
+**新增** `tests/test_create_delete_flow.cpp`（`RunCreateDeleteFlowTestsByRef`）：以真實 mkstemp account/game 庫 + TCP loopback 跑完整閉環——CONNECT → VERIFY（"flowtester"）→ MY_UNIT_AND_INVENTORY_INFO_LIST_REQ（初始 0 角色）→ **CREATE_UNIT_REQ（36）**（ACK：NET_OK、kUnitInfo、nickName L"迴路角色"、iClass=5）→ MY_UNIT_LIST（1 角色，unitUID 與 CREATE 一致）→ **DELETE_UNIT_REQ（38）**（ACK：NET_OK、iUnitUID 回顯、SERV_CHAR_LOG 欄位 wstrNickName=L"迴路角色"／ucLevel=1／cUnitClass=5）→ MY_UNIT_LIST（0 角色）。伺服器端 7 個事件依序（`for i<7`）全部走真實決策層 + 真實 DBs；客戶端逐一斷言。
+
+意義：之前各 REQ/ACK 僅有 codec roundtrip + 記憶體內決策層單元測試；本測試首次**以真實 socket + 真實雙庫驗證 create→visible→delete→gone 閉環**（不經記憶體模擬）。
+
+測試自 889 → **929 passed / 0 failed**。無新模組 → vcxproj 無需登記。
+
+**目前 wire 事件覆蓋總覽**（全部成對，自洽 golden bytes，未對 SDK 實機驗證）：CONNECT/VERIFY、SELECT_UNIT(40/41)、SELECT_UNIT_1..5_NOT(42–46)、GET_MY_INVENTORY(47/48/49)、MY_UNIT_AND_INVENTORY_INFO_LIST(34/35)、CREATE_UNIT(36/37)、DELETE_UNIT(38/39)、CHECK_NICK_NAME(1161/1162)、CHANGE_NICK_NAME(431/432，含 ENTRY_POINT 1168)、ENTRY_POINT_CREATE_NEW_UNIT(1159)/ENTRY_POINT_DELETE_UNIT(1160)、CHARACTER_LIST(1155→1158 折疊）、GET_CREATE_UNIT_TODAY_COUNT(1163→1165 折疊）、GET_CHANNEL_LIST(1166/1167，空表佔位）。
+
 ## 0. 一句話現況
 
 V2 是原 Elsword 韓服伺服器（`X2Project`）的 **C++ 重寫地基**：平台無關的線路格式核心、安全模組已完成並以 golden bytes 測試驗證；最短網路路徑（同步 TCP + 原版 TCP 訊框 + 迴路 echo 整合測試）與 Session 層（SPI 握手換發、驗證失敗踢除、E_HEART_BEAT 丟棄、殭屍檢測、SERV_KEVENT_FROM 標記）已完成並 238 項測試全綠；**遊戲邏輯、非同步網路層未完成；資料庫層已完成 Phase 1（users 表 + 帳號存取層）**。V2 不是可運行的伺服器，不要部署它。
