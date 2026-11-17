@@ -1438,6 +1438,29 @@ bool GameStore::GetTCClears(int64_t unitUID, std::vector<TCClearRecord>& out, st
     return true;
 }
 
+bool GameStore::RepairDuplicateEquippedTitle(int64_t unitUID, int32_t equippedTitleID, std::string& err)
+{
+    if (!m_db.Begin(err)) return false;
+    {
+        Statement st;
+        if (!st.Prepare(m_db, "UPDATE gtitle_complete SET IsHang = 0 WHERE UnitUID = ?;", err)) { std::string u; m_db.Rollback(u); return false; }
+        if (!st.BindInt(1, unitUID, err)) { std::string u; m_db.Rollback(u); return false; }
+        std::string stepErr;
+        if (st.StepRow(stepErr)) { std::string u; m_db.Rollback(u); err = "unexpected row from UPDATE"; return false; }
+        if (!stepErr.empty()) { err = stepErr; std::string u; m_db.Rollback(u); return false; }
+    }
+    {
+        Statement st;
+        if (!st.Prepare(m_db, "UPDATE gtitle_complete SET IsHang = 1 WHERE UnitUID = ? AND TitleID = ?;", err)) { std::string u; m_db.Rollback(u); return false; }
+        if (!st.BindInt(1, unitUID, err)) { std::string u; m_db.Rollback(u); return false; }
+        if (!st.BindInt(2, equippedTitleID, err)) { std::string u; m_db.Rollback(u); return false; }
+        std::string stepErr;
+        if (st.StepRow(stepErr)) { std::string u; m_db.Rollback(u); err = "unexpected row from UPDATE"; return false; }
+        if (!stepErr.empty()) { err = stepErr; std::string u; m_db.Rollback(u); return false; }
+    }
+    return m_db.Commit(err);
+}
+
 bool GameStore::GetRecommendOldUID(int64_t newUID, int64_t& outOldUID, bool& found, std::string& err)
 {
     outOldUID = 0;

@@ -200,6 +200,7 @@ static void TestSelectIntegration()
 static void TestSatellites();
 static void TestAttributes();
 static void TestDungeonClears();
+static void TestTitleRepair();
 
 void RunInventoryReadbackTestsByRef(int& pass, int& fail)
 {
@@ -210,6 +211,7 @@ void RunInventoryReadbackTestsByRef(int& pass, int& fail)
     TestSatellites();
     TestAttributes();
     TestDungeonClears();
+    TestTitleRepair();
     pass += g_pass_inv;
     fail += g_fail_inv;
 }
@@ -414,5 +416,63 @@ static void TestDungeonClears()
                                      nullptr, &not1, 5, nullptr, nullptr, nullptr, nullptr);
         CHECK(rc == ERR_SELECT_UNIT_05, "missing gdungeonclear -> ERR_SELECT_UNIT_05");
         CHECK(fx.db.Exec("ALTER TABLE gdungeonclear_bak RENAME TO gdungeonclear;", err2), "restore");
+    }
+}
+
+// ── §0a19：重複 IsHang=1 修復（原 bResetTitle 路徑）──────────────────────────
+static void TestTitleRepair()
+{
+    Fixture fx;
+    const int64_t uid = fx.MakeUnit(777, L"inv.repair");
+    CHECK(uid > 0, "unit created");
+    // 直接種入重複 IsHang=1：TitleID 100 與 200 皆 IsHang=1
+    CHECK(fx.db.Exec("INSERT INTO gtitle_complete (UnitUID, TitleID, EndDate, IsHang) VALUES "
+                     "(" + std::to_string(uid) + ", 100, NULL, 1),(" + std::to_string(uid) + ", 200, NULL, 1);", fx.err),
+          "seed duplicate equipped titles");
+    {
+        SelectUnitNot1 not1{};
+        SelectUnitNot3 not3{};
+        CHECK(SelectNot1(fx.store, 777, uid, &not1), "select ok");
+        CHECK(not1.unitInfo.titleID == 100, "first (smallest TitleID) IsHang=1 chosen for UnitInfo");
+    }
+    // 修復：gtitle_complete 內恰一列 IsHang=1（TitleID=100），另一列歸零
+    {
+        std::vector<TitleCompleteRecord> titles;
+        CHECK(fx.store.GetTitleCompleteList(uid, titles, fx.err), "titles readable after repair");
+        int hang = 0;
+        int hungID = 0;
+        for (const auto& t : titles) { if (t.isHang) { ++hang; hungID = t.titleID; } }
+        CHECK(hang == 1 && hungID == 100, "repair: exactly one IsHang=1 (smallest TitleID)");
+    }
+    // 單一 IsHang=1 → 不觸發修復（寫入不發生：行為與 §0a12 一致）
+    {
+        Fixture fx2;
+        const int64_t uid2 = fx2.MakeUnit(777, L"inv.norepair");
+        CHECK(uid2 > 0, "unit created (2)");
+        CHECK(fx2.db.Exec("INSERT INTO gtitle_complete (UnitUID, TitleID, EndDate, IsHang) VALUES (" + std::to_string(uid2) + ", 300, NULL, 1);", fx2.err), "seed single equipped title");
+        SelectUnitNot1 not1{};
+        CHECK(SelectNot1(fx2.store, 777, uid2, &not1), "select ok (single)");
+        CHECK(not1.unitInfo.titleID == 300, "single equipped title respected");
+        std::vector<TitleCompleteRecord> titles;
+        CHECK(fx2.store.GetTitleCompleteList(uid2, titles, fx2.err), "titles readable (2)");
+        CHECK(titles.size() == 1 && titles[0].isHang, "no-op: single row unchanged");
+    }
+    // RepairDuplicateEquippedTitle 直接測試：缺表 → false + rollback（IsHang 不被清空）
+    {
+        Fixture fx3;
+        const int64_t uid3 = fx3.MakeUnit(777, L"inv.repfail");
+        CHECK(uid3 > 0, "unit created (3)");
+        CHECK(fx3.db.Exec("INSERT INTO gtitle_complete (UnitUID, TitleID, EndDate, IsHang) VALUES (" + std::to_string(uid3) + ", 100, NULL, 1),(" + std::to_string(uid3) + ", 200, NULL, 1);", fx3.err), "seed duplicates (3)");
+        std::string err2;
+        CHECK(fx3.db.Exec("ALTER TABLE gtitle_complete RENAME TO gtitle_complete_bak;", err2), "rename gtitle_complete");
+        std::string rerr;
+        const bool ok = fx3.store.RepairDuplicateEquippedTitle(uid3, 100, rerr);
+        CHECK(!ok, "repair fails on missing table");
+        CHECK(fx3.db.Exec("ALTER TABLE gtitle_complete_bak RENAME TO gtitle_complete;", err2), "restore gtitle_complete");
+        std::vector<TitleCompleteRecord> titles;
+        CHECK(fx3.store.GetTitleCompleteList(uid3, titles, fx3.err), "titles readable after failed repair");
+        int hang = 0;
+        for (const auto& t : titles) if (t.isHang) ++hang;
+        CHECK(hang == 2, "rollback: duplicates untouched after failed repair");
     }
 }

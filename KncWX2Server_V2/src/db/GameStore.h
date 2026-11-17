@@ -325,6 +325,11 @@ public:
     // GRecommend（§0a15）：SELECT OldUID FROM grecommend WHERE NewUID = ? ORDER BY RegDate ASC LIMIT 1。
     // found=false → 缺列（= 原 @iOldUID 預設 0，非錯誤）；DB 錯誤 → false。
     bool GetRecommendOldUID(int64_t newUID, int64_t& outOldUID, bool& found, std::string& err);
+    // 重複配裝修復（§0a19；原 Query_SelectUnit 的 bResetTitle 路徑）：
+    //   UPDATE gtitle_complete SET IsHang = 0 WHERE UnitUID = ?；
+    //   UPDATE gtitle_complete SET IsHang = 1 WHERE UnitUID = ? AND TitleID = ?；
+    // 單一 transaction；失敗整體 rollback、回傳 false（呼叫端可記錄後續行，原碼僅 log 不中斷選角）。
+    bool RepairDuplicateEquippedTitle(int64_t unitUID, int32_t equippedTitleID, std::string& err);
 
 private:
     Database& m_db;

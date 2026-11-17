@@ -6,6 +6,7 @@
 #include "UnitTemplet.h"
 #include "PvpNpcNames.h"
 #include "../core/NetError.h"
+#include "../core/Logger.h"
 
 #include <string>
 
@@ -743,8 +744,20 @@ int32_t HandleSelectUnitReq(db::GameStore& gameDb, int64_t userUID, const Select
             ack.iOK = ERR_SELECT_UNIT_05;
             return ack.iOK;
         }
+        int32_t equippedCount = 0;
         for (const auto& t : titleComplete) {
-            if (t.isHang) { equippedTitleID = t.titleID; break; }   // 原碼：第一個 IsHang=1 生效（多筆 → 視為損壞；V2 唯讀不改寫，見 docs §0a12 偏差聲明）
+            if (t.isHang) { ++equippedCount; if (equippedTitleID == 0) equippedTitleID = t.titleID; }
+        }
+        // §0a19：重複 IsHang=1（資料損壞）→ 原 Query_SelectUnit 的 bResetTitle 修復路徑：
+        //   全部 IsHang=0，再僅 equippedTitleID 設為 1（gup_update_title_hang(...,0,0) ＋ (...,0,@titleID)，SERV_TITLE_DATA_SIZE）。
+        // ORDER BY TitleID ASC ⇒ equippedTitleID 為最小 TitleID（原碼 fetch 序未定義；V2 固定，見 docs §0a19 偏差聲明）。
+        // 原碼對修復失敗僅 log、不中斷選角 → V2 同（Logger::Warn）。
+        if (equippedCount > 1) {
+            std::string repairErr;
+            if (!gameDb.RepairDuplicateEquippedTitle(req.unitUID, equippedTitleID, repairErr)) {
+                x2::Logger::Instance().Write(x2::LogLevel::Warn, "UnitSelectArbiter",
+                    std::string("duplicate IsHang=1 title repair failed (continuing select): ") + repairErr);
+            }
         }
         if (outNot3) {
             if (!gameDb.GetTitleMissionList(req.unitUID, titleMission, err)) {

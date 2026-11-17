@@ -358,6 +358,29 @@ tests/test_string_filter.cpp 的字元集閘門斷言改為依 `X2_REGION_*` 分
 - **測試數**：**JP = 1297、TW = 1295、EU = 1293、CN = 1295 passed / 0 failed**。
 - 剩餘未移植：gmo_*_skill（技能 slot 更新）／gup_get_community_opt_unituid（社群選項查詢——V2 改以 gdenyoption 直接讀回近似，§0a9；relationship 6 欄寫入 EGS_UPDATE_COMMUNITY_OPT 已於 §0a10 以 write-through upsert 移植；P_GDenyOption_UPD 仍缺 proc）／class 5..9 技能列（原 proc 不存在）／LogDB；gspirit 的 Flag 完整語意與復活石補充/精力重置已於 §0a8 移植；Flag 並列槽位 UI 亦未建模。
 
+## 0a19. 2026-11-17 附記（SELECT_UNIT_1_NOT：重複 IsHang 修復寫路徑——原 bResetTitle 路徑）
+
+§0a12 將「bResetTitle 寫路徑」列為待辦；本節落地。
+
+原版（Query_SelectUnit，GSGameDBThread.cpp:1829–1879、1883–1934；SERV_ALL_RENEWAL_SP 未定義 → legacy `gup_update_title_hang`）：
+
+- fetch `gup_get_title_list` 逐列 `FETCH_DATA(TitleID >> EndDate >> bIsEquippedTitle)`；
+- `m_kUnitInfo.m_iTitleID` 尚為 0 時：首個 `bIsEquippedTitle==1` 列生效；
+- 已有 m_iTitleID 卻又來一列 `bIsEquippedTitle==1` → 記錄 duplicate、`bResetTitle = true`、`continue`；
+- `if (bResetTitle)`：呼叫兩次 `gup_update_title_hang(UnitUID, 0, 0)`（**全部脫下**：`UPDATE GTitle_Complete SET IsHang = 0 WHERE UnitUID = …`）＋ `gup_update_title_hang(UnitUID, 0, m_iTitleID)`（**重新裝回首個**：`UPDATE … IsHang = 1 WHERE UnitUID = … AND TitleID = m_iTitleID`）；兩次皆只 FETCH RETURN iOK、**錯誤僅 log，不中斷選角**。
+
+**V2 實作**：
+
+- **GameStore::RepairDuplicateEquippedTitle(unitUID, equippedTitleID)**：單一 transaction 內兩條 UPDATE（IsHang→0 全清；IsHang→1 僅首個 TitleID）；失敗 → rollback、false。`gup_update_title_hang` proc 存在但 V2 一律以等價 SQL 執行（與全局慣例一致）。
+- **HandleSelectUnitReq**：title 段統計 `IsHang==1` 列數；>1 → 呼叫修復；修復失敗 → `x2::Logger::Instance().Write(Warn, …)` 並繼續選角（與原碼「僅 log 不中斷」一致）；修復成功 → DB 與 wire（m_iTitleID＝首個 TitleID）一致。
+- **測試**：tests/test_inventory_readback.cpp `TestTitleRepair`（重複 100/200 → select 後僅 100 IsHang=1；單一 IsHang=1 → 不寫路徑；重命名 gtitle_complete → RepairDuplicateEquippedTitle false＋rollback、原樣保留兩筆 IsHang=1）。
+- **測試數**：**JP = 1825、TW = 1823、EU = 1821、CN = 1823、US = 1822 passed / 0 failed**。
+- **偏差聲明**：
+  1. **首列的定義**：V2 `GetTitleCompleteList ORDER BY TitleID ASC` ⇒ equippedTitleID 為最小 TitleID；原 fetch 順序由 `gup_get_title_list` 的排序決定（其 proc 未指定 ORDER BY → 表順序未定義）——V2 固定 TitleID 序，偏差明示。
+  2. **repair 的 TitleID**：原用 `m_iTitleID`（首個 fetch 到的 IsHang=1 列之 TitleID）——V2 同（最小 TitleID）。
+  3. **修復失敗不中斷選角**（原碼同；V2 經 Logger::Warn 記錄——V2 無原 START_LOG 系統）。
+  4. **write 路徑**：本切片是 V2 選角流程中第一處「讀路徑內隱含修復寫入」；模式為單 transaction、無跨請求副作用。
+
 ## 0a18. 2026-11-17 附記（SELECT_UNIT_1_NOT：UnitInfo.dungeonClear / tcClear 讀回；schema v12）
 
 Not1 的 `UnitInfo.mapDungeonClear`／`UnitInfo.mapTCClear`（原版寫法：`m_mapDungeonClear` ← `gup_get_dungeon_clear`；`m_mapTCClear` ← `gup_get_tc_clear`）原為空容器佔位。兩 proc 均**在倉庫內**（legacy 分支生效——SERV_ALL_RENEWAL_SP 未定義），兩表（GDungeonClear / GTrainingCenter，含 PK (UnitUID, GameMode) / (UnitUID, TCID)）同樣存在。
