@@ -36,7 +36,8 @@ namespace x2 { namespace select_unit {
 // outNot2（可為 nullptr）：成功時填入 SELECT_UNIT_2_NOT 的最小合法內容（見 BuildSelectUnitNot2）；
 // outNot3（可為 nullptr）：成功時填入 SELECT_UNIT_3_NOT 的最小合法內容（見 BuildSelectUnitNot3）；
 // outNot4（可為 nullptr）：成功時填入 SELECT_UNIT_4_NOT 的最小合法內容（見 BuildSelectUnitNot4）；
-//   失敗時不動。呼叫端應「先送 1_NOT、2_NOT…，再送收尾 ACK」（對照原版 SendSelectUnitACK 的次序）。
+// outNot5（可為 nullptr）：成功時填入 SELECT_UNIT_5_NOT 的最小合法內容（見 BuildSelectUnitNot5）；
+//   失敗時不動。呼叫端應「先送 1_NOT…5_NOT，再送收尾 ACK」（對照原版 SendSelectUnitACK 的次序）。
 int32_t HandleSelectUnitReq(db::GameStore& gameDb, int64_t userUID, const SelectUnitReq& req,
                             SelectUnitAck& ack, std::string& err,
                             bool secondSecurityOk = true,
@@ -45,7 +46,13 @@ int32_t HandleSelectUnitReq(db::GameStore& gameDb, int64_t userUID, const Select
                             int authLevel = 0,
                             SelectUnitNot2* outNot2 = nullptr,
                             SelectUnitNot3* outNot3 = nullptr,
-                            SelectUnitNot4* outNot4 = nullptr);
+                            SelectUnitNot4* outNot4 = nullptr,
+                            SelectUnitNot5* outNot5 = nullptr);
+
+// 組裝 SELECT_UNIT_5_NOT（成功路徑的首次選擇/ETC 分片）。
+// 誠實說明：V2 無 spirit/CHAR_LOG/pshop-agency/henir-reward/cashshop 狀態表，
+// 全 false/0/空容器（誠實佔位；不代表角色真實狀態）。iOK=NET_OK。
+void BuildSelectUnitNot5(SelectUnitNot5& out);
 
 // 組裝 SELECT_UNIT_4_NOT（成功路徑的社交/教學/Henir排行/Messenger/戰場狀態分片）。
 // 誠實說明：V2 game DB 無黑名單/拒絕選項/教學/連線時間/Henir排行/好友/戰場狀態表，

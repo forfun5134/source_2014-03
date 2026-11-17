@@ -171,6 +171,62 @@ bool GetQuestInstance(Serializer& ks, QuestInstance& v)
                [](Serializer& s2, SubQuestInstance& e) { return GetSubQuestInstance(s2, e); });
 }
 
+bool PutSellPersonalShopItemInfo(Serializer& ks, const SellPersonalShopItemInfo& v)
+{
+    if (!PutInventoryItemInfo(ks, v.kInventoryItemInfo)) return false;
+    if (!ks.Put(v.iPricePerOne) || !ks.Put(v.iFeePerOne)) return false;
+    if (!ks.Put(v.cPShopItemType) || !ks.Put(v.iTotalSellEDIn) || !ks.Put(v.iTotalSoldItemQuantity)) return false;
+    return ks.Put(v.iInventoryItemUID);
+}
+bool GetSellPersonalShopItemInfo(Serializer& ks, SellPersonalShopItemInfo& v)
+{
+    if (!GetInventoryItemInfo(ks, v.kInventoryItemInfo)) return false;
+    if (!ks.Get(v.iPricePerOne) || !ks.Get(v.iFeePerOne)) return false;
+    if (!ks.Get(v.cPShopItemType) || !ks.Get(v.iTotalSellEDIn) || !ks.Get(v.iTotalSoldItemQuantity)) return false;
+    return ks.Get(v.iInventoryItemUID);
+}
+
+bool PutSellPShopItemBackupData(Serializer& ks, const SellPShopItemBackupData& v)
+{
+    return PutSellPersonalShopItemInfo(ks, v.kSellPShopItemInfo) &&
+           ks.Put(v.iTotalSoldItemQuantity) && ks.Put(v.iTotalSellCommissionED);
+}
+bool GetSellPShopItemBackupData(Serializer& ks, SellPShopItemBackupData& v)
+{
+    return GetSellPersonalShopItemInfo(ks, v.kSellPShopItemInfo) &&
+           ks.Get(v.iTotalSoldItemQuantity) && ks.Get(v.iTotalSellCommissionED);
+}
+
+bool PutUserPShopAgencyInfo(Serializer& ks, const UserPShopAgencyInfo& v)
+{
+    if (!ks.Put(v.bIsPShopOpen) || !ks.Put(v.wstrAgencyExpirationDate) || !ks.Put(v.cShopType)) return false;
+    if (!x2::detail::PutCountPrefixVec(ks, v.vecSellItemInfo,
+            [](Serializer& s2, const SellPShopItemBackupData& e) { return PutSellPShopItemBackupData(s2, e); })) return false;
+    if (!ks.Put(v.iUserUID) || !ks.Put(v.iUnitUID)) return false;
+    if (!ks.Put(v.wstrNickName) || !ks.Put(v.wstrAgencyOpenDate) || !ks.Put(v.wstrPersonalShopName)) return false;
+    return ks.Put(v.bOnSale);
+}
+bool GetUserPShopAgencyInfo(Serializer& ks, UserPShopAgencyInfo& v)
+{
+    if (!ks.Get(v.bIsPShopOpen) || !ks.Get(v.wstrAgencyExpirationDate) || !ks.Get(v.cShopType)) return false;
+    if (!x2::detail::GetCountPrefixVec(ks, v.vecSellItemInfo,
+            [](Serializer& s2, SellPShopItemBackupData& e) { return GetSellPShopItemBackupData(s2, e); })) return false;
+    if (!ks.Get(v.iUserUID) || !ks.Get(v.iUnitUID)) return false;
+    if (!ks.Get(v.wstrNickName) || !ks.Get(v.wstrAgencyOpenDate) || !ks.Get(v.wstrPersonalShopName)) return false;
+    return ks.Get(v.bOnSale);
+}
+
+bool PutHenirRewardCountNot(Serializer& ks, const HenirRewardCountNot& v)
+{
+    return ks.Put(v.bUnLimited) && ks.Put(v.iNormal) && ks.Put(v.iPremium) &&
+           ks.Put(v.iEvent) && ks.Put(v.iPremiumMAX) && ks.Put(v.iEventMAX);
+}
+bool GetHenirRewardCountNot(Serializer& ks, HenirRewardCountNot& v)
+{
+    return ks.Get(v.bUnLimited) && ks.Get(v.iNormal) && ks.Get(v.iPremium) &&
+           ks.Get(v.iEvent) && ks.Get(v.iPremiumMAX) && ks.Get(v.iEventMAX);
+}
+
 bool PutChatBlackListUnit(Serializer& ks, const ChatBlackListUnit& v)
 {
     return ks.Put(v.iUnitUID) && ks.Put(v.wstrNickName);

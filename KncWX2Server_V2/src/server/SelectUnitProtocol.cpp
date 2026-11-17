@@ -183,4 +183,31 @@ bool GetSelectUnitNot4(Serializer& ks, SelectUnitNot4& v)
     return unit::GetGamePlayStatusContainer(ks, v.kGamePlayStatus);
 }
 
+bool PutSelectUnitNot5(Serializer& ks, const SelectUnitNot5& v)
+{
+    if (!ks.Put(v.iOK)) return false;
+    if (!ks.Put(v.bIsSpiritUpdated)) return false;
+    if (!x2::detail::PutCountPrefixMap(ks, v.mapCharGameCount,
+            [](Serializer& s2, const int32_t& e) { return s2.Put(e); },
+            [](Serializer& s2, const int32_t& e) { return s2.Put(e); })) return false;
+    if (!unit::PutUserPShopAgencyInfo(ks, v.kPShopAgencyInfo)) return false;
+    if (!unit::PutHenirRewardCountNot(ks, v.packetHenirRewardCount)) return false;
+    if (!ks.Put(v.bCashShopOpen)) return false;
+    if (!ks.Put(v.bFirstSelect)) return false;
+    return ks.Put(v.bLocalRankingUser);
+}
+bool GetSelectUnitNot5(Serializer& ks, SelectUnitNot5& v)
+{
+    if (!ks.Get(v.iOK)) return false;
+    if (!ks.Get(v.bIsSpiritUpdated)) return false;
+    if (!x2::detail::GetCountPrefixMap(ks, v.mapCharGameCount,
+            [](Serializer& s2, int32_t& e) { return s2.Get(e); },
+            [](Serializer& s2, int32_t& e) { return s2.Get(e); })) return false;
+    if (!unit::GetUserPShopAgencyInfo(ks, v.kPShopAgencyInfo)) return false;
+    if (!unit::GetHenirRewardCountNot(ks, v.packetHenirRewardCount)) return false;
+    if (!ks.Get(v.bCashShopOpen)) return false;
+    if (!ks.Get(v.bFirstSelect)) return false;
+    return ks.Get(v.bLocalRankingUser);
+}
+
 }} // namespace x2::select_unit

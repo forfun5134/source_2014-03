@@ -10,8 +10,7 @@
 //   事件 ID（V2 EventIDs.h 實測）：EGS_SELECT_UNIT_REQ=40, EGS_SELECT_UNIT_ACK=41,
 //                                    EGS_SELECT_UNIT_1_NOT..5_NOT = 42..46。
 //
-// ⚠ 本檔覆蓋 REQ、「收尾 ACK」、SELECT_UNIT_1_NOT…4_NOT。
-//   SELECT_UNIT_5_NOT（SERV_CHAR_LOG map / SERV_CONTENT_MANAGER / KUserPShopAgencyInfo …）**尚未移植**；
+// ⚠ 本檔覆蓋 REQ、「收尾 ACK」、SELECT_UNIT_1_NOT…5_NOT。
 //   在它們完成前，真實客戶端無法用 V2 完成角色選擇流程（見 docs/architecture.md §12）。
 //   線路佈局為自洽 golden bytes，未對原 SDK 實機驗證。
 #pragma once
@@ -139,8 +138,36 @@ struct SelectUnitNot4
 
 bool PutSelectUnitNot3(Serializer& ks, const SelectUnitNot3& v);
 bool GetSelectUnitNot3(Serializer& ks, SelectUnitNot3& v);
+// EGS_SELECT_UNIT_5_NOT（服務端 → 客戶端）：首次選擇/ETC 分片。
+// JP INT_INTERNAL（SERV_CHAR_LOG:754、SERV_PSHOP_AGENCY:971、SERV_NEW_HENIR_TEST:1267、
+// SERV_CONTENT_MANAGER:1399、SERV_LOCAL_RANKING_SYSTEM:2438、SERV_ARA_FIRST_SELECT_TUTORIAL:3440 已定義；
+// SERV_EVENT_MONEY、SERV_2012_PVP_SEASON2_EVENT、SERV_EVENT_BINGO、SERV_CUSTOM_CONNECT_EVENT、
+// SERV_EVENT_BOUNS_ITEM_AFTER_7DAYS_BY_LEVEL、SERV_GATE_OF_DARKNESS_SUPPORT_EVENT、SERV_RELATIONSHIP_EVENT_INT、
+// SERV_STEAM_USER_CONNECT_EVENT、SERV_ELESIS_UPDATE_EVENT、SERV_EVENT_CHUNG_GIVE_ITEM、
+// SERV_4TH_ANNIVERSARY_EVENT 未定義——2026-11-17 機讀核對）
+// PUT 順序機讀自 CommonPacket.cpp（2026-11-17）：
+//   iOK, bIsSpiritUpdated(bool), (CHAR_LOG) mapCharGameCount<int,int>,
+//   (PSHOP_AGENCY) kPShopAgencyInfo, (NEW_HENIR_TEST) packetHenirRewardCount,
+//   (CONTENT_MANAGER) bCashShopOpen(bool), (ARA_FIRST_SELECT_TUTORIAL) bFirstSelect(bool),
+//   (LOCAL_RANKING_SYSTEM) bLocalRankingUser(bool)
+// 事件 ID：EGS_SELECT_UNIT_5_NOT = 46。
+// ⚠ 自洽 golden bytes；未對原 SDK 實機驗證。
+struct SelectUnitNot5
+{
+    int32_t iOK = 0;
+    bool bIsSpiritUpdated = false;                           // 原 bool
+    std::map<int32_t, int32_t> mapCharGameCount;             // SERV_CHAR_LOG（map<int,int>）
+    unit::UserPShopAgencyInfo kPShopAgencyInfo;              // SERV_PSHOP_AGENCY
+    unit::HenirRewardCountNot packetHenirRewardCount;        // SERV_NEW_HENIR_TEST
+    bool bCashShopOpen = false;                              // SERV_CONTENT_MANAGER
+    bool bFirstSelect = false;                               // SERV_ARA_FIRST_SELECT_TUTORIAL
+    bool bLocalRankingUser = false;                          // SERV_LOCAL_RANKING_SYSTEM
+};
+
 bool PutSelectUnitNot4(Serializer& ks, const SelectUnitNot4& v);
 bool GetSelectUnitNot4(Serializer& ks, SelectUnitNot4& v);
+bool PutSelectUnitNot5(Serializer& ks, const SelectUnitNot5& v);
+bool GetSelectUnitNot5(Serializer& ks, SelectUnitNot5& v);
 
 } // namespace select_unit
 } // namespace x2

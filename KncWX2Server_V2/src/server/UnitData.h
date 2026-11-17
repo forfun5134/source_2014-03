@@ -347,6 +347,48 @@ struct GamePlayStatusContainer           // KGamePlayStatusContainer
     std::vector<GamePlayStatus> vecGamePlayStatus;
 };
 
+struct SellPersonalShopItemInfo          // KSellPersonalShopItemInfo（SERV_PSHOP_AGENCY + SERV_TRADE_LOGIC_CHANGE_AGENCY_SHOP）
+{
+    InventoryItemInfo kInventoryItemInfo;
+    int32_t iPricePerOne = 0;              // int
+    int32_t iFeePerOne = 0;                // int
+    int8_t  cPShopItemType = 0;            // char（0=SPIT_PERSONAL_SHOP, 1=SPIT_PSHOP_AGENCY）
+    int32_t iTotalSellEDIn = 0;            // int
+    int32_t iTotalSoldItemQuantity = 0;    // int
+    int64_t iInventoryItemUID = 0;         // UidType（SERV_TRADE_LOGIC_CHANGE_AGENCY_SHOP）
+};
+
+struct SellPShopItemBackupData           // KSellPShopItemBackupData（SERV_PSHOP_AGENCY）
+{
+    SellPersonalShopItemInfo kSellPShopItemInfo;
+    int32_t iTotalSoldItemQuantity = 0;      // int
+    int32_t iTotalSellCommissionED = 0;      // int
+};
+
+struct UserPShopAgencyInfo               // KUserPShopAgencyInfo（SERV_PSHOP_AGENCY）
+{
+    bool bIsPShopOpen = false;
+    std::wstring wstrAgencyExpirationDate;
+    int8_t cShopType = 0;                  // char
+    std::vector<SellPShopItemBackupData> vecSellItemInfo;
+    int64_t iUserUID = 0;                  // UidType
+    int64_t iUnitUID = 0;                  // UidType
+    std::wstring wstrNickName;
+    std::wstring wstrAgencyOpenDate;
+    std::wstring wstrPersonalShopName;
+    bool bOnSale = false;
+};
+
+struct HenirRewardCountNot               // KEGS_HENIR_REWARD_COUNT_NOT（SERV_NEW_HENIR_TEST；SERV_HENIR_RENEWAL_2013 未定義）
+{
+    bool    bUnLimited = false;
+    int32_t iNormal = 0;
+    int32_t iPremium = 0;
+    int32_t iEvent = 0;
+    int32_t iPremiumMAX = 0;
+    int32_t iEventMAX = 0;
+};
+
 struct RelationshipInfo               // SERV_RELATIONSHIP_SYSTEM（KRelationshipInfo）
 {
     int8_t  relationshipType = 0;         // char
@@ -434,6 +476,14 @@ bool PutSubQuestInstance(Serializer& ks, const SubQuestInstance& v);
 bool GetSubQuestInstance(Serializer& ks, SubQuestInstance& v);
 bool PutQuestInstance(Serializer& ks, const QuestInstance& v);
 bool GetQuestInstance(Serializer& ks, QuestInstance& v);
+bool PutSellPersonalShopItemInfo(Serializer& ks, const SellPersonalShopItemInfo& v);
+bool GetSellPersonalShopItemInfo(Serializer& ks, SellPersonalShopItemInfo& v);
+bool PutSellPShopItemBackupData(Serializer& ks, const SellPShopItemBackupData& v);
+bool GetSellPShopItemBackupData(Serializer& ks, SellPShopItemBackupData& v);
+bool PutUserPShopAgencyInfo(Serializer& ks, const UserPShopAgencyInfo& v);
+bool GetUserPShopAgencyInfo(Serializer& ks, UserPShopAgencyInfo& v);
+bool PutHenirRewardCountNot(Serializer& ks, const HenirRewardCountNot& v);
+bool GetHenirRewardCountNot(Serializer& ks, HenirRewardCountNot& v);
 bool PutChatBlackListUnit(Serializer& ks, const ChatBlackListUnit& v);
 bool GetChatBlackListUnit(Serializer& ks, ChatBlackListUnit& v);
 bool PutDenyOptions(Serializer& ks, const DenyOptions& v);

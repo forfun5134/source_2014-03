@@ -46,6 +46,7 @@ static const uint16_t kSelectUnit1NotID = static_cast<uint16_t>(EventID::EGS_SEL
 static const uint16_t kSelectUnit2NotID = static_cast<uint16_t>(EventID::EGS_SELECT_UNIT_2_NOT);
 static const uint16_t kSelectUnit3NotID = static_cast<uint16_t>(EventID::EGS_SELECT_UNIT_3_NOT);
 static const uint16_t kSelectUnit4NotID = static_cast<uint16_t>(EventID::EGS_SELECT_UNIT_4_NOT);
+static const uint16_t kSelectUnit5NotID = static_cast<uint16_t>(EventID::EGS_SELECT_UNIT_5_NOT);
 static const uint16_t kConnectReqID = static_cast<uint16_t>(EventID::EGS_CONNECT_REQ);
 static const uint16_t kConnectAckID = static_cast<uint16_t>(EventID::EGS_CONNECT_ACK);
 static const uint16_t kVerifyReqID  = static_cast<uint16_t>(EventID::EGS_VERIFY_ACCOUNT_REQ);
@@ -464,6 +465,79 @@ static void TestBuildSelectUnitNot4Defaults()
           "not4 builder: no fabricated social/tutorial data (zeroed/empty placeholders)");
 }
 
+static void TestSelectUnitNot5Codec()
+{
+    SelectUnitNot5 v;
+    v.iOK = NET_OK;
+    v.bIsSpiritUpdated = true;
+    v.mapCharGameCount[10001] = 5;
+    v.mapCharGameCount[10002] = 7;
+    {
+        unit::UserPShopAgencyInfo ps;
+        ps.bIsPShopOpen = true;
+        ps.wstrAgencyExpirationDate = L"2026-12-31 23:59:59";
+        ps.cShopType = 1;
+        unit::SellPersonalShopItemInfo sell;
+        sell.kInventoryItemInfo.itemUID = 0x0BADCAFE12345678LL;
+        sell.kInventoryItemInfo.itemInfo.itemID = 4321;
+        sell.iPricePerOne = 10000;
+        sell.iFeePerOne = 100;
+        sell.cPShopItemType = 1;
+        sell.iTotalSellEDIn = 50000;
+        sell.iTotalSoldItemQuantity = 5;
+        sell.iInventoryItemUID = 0x1122334455667788LL;
+        unit::SellPShopItemBackupData bak;
+        bak.kSellPShopItemInfo = sell;
+        bak.iTotalSoldItemQuantity = 5;
+        bak.iTotalSellCommissionED = 500;
+        ps.vecSellItemInfo.push_back(bak);
+        ps.iUserUID = 777;
+        ps.iUnitUID = 0x7766554433221100LL;
+        ps.wstrNickName = L"掌櫃";
+        ps.wstrAgencyOpenDate = L"2026-11-01 00:00:00";
+        ps.wstrPersonalShopName = L"寶物店";
+        ps.bOnSale = true;
+        v.kPShopAgencyInfo = ps;
+    }
+    v.packetHenirRewardCount = { true, 3, 2, 1, 10, 5 };
+    v.bCashShopOpen = true;
+    v.bFirstSelect = true;
+    v.bLocalRankingUser = true;
+
+    SerBuffer buf = PutPayload([&v](Serializer& s) { return PutSelectUnitNot5(s, v); });
+    CHECK(buf.GetLength() > 0, "not5 encodes");
+
+    Serializer ks2;
+    SerBuffer tmp = buf;
+    SelectUnitNot5 out;
+    CHECK(ks2.BeginReading(&tmp), "not5 begin read");
+    CHECK(GetSelectUnitNot5(ks2, out), "not5 decodes");
+    ks2.EndReading();
+    CHECK(out.iOK == NET_OK, "not5 iOK rt");
+    CHECK(out.bIsSpiritUpdated, "not5 spirit rt");
+    CHECK(out.mapCharGameCount.size() == 2 && out.mapCharGameCount[10001] == 5, "not5 charGameCount rt");
+    CHECK(out.kPShopAgencyInfo.bIsPShopOpen && out.kPShopAgencyInfo.cShopType == 1 &&
+          out.kPShopAgencyInfo.vecSellItemInfo.size() == 1 &&
+          out.kPShopAgencyInfo.vecSellItemInfo[0].kSellPShopItemInfo.kInventoryItemInfo.itemInfo.itemID == 4321 &&
+          out.kPShopAgencyInfo.vecSellItemInfo[0].kSellPShopItemInfo.iInventoryItemUID == 0x1122334455667788LL &&
+          out.kPShopAgencyInfo.wstrPersonalShopName == L"寶物店" && out.kPShopAgencyInfo.bOnSale, "not5 pshop rt");
+    CHECK(out.packetHenirRewardCount.bUnLimited && out.packetHenirRewardCount.iNormal == 3 &&
+          out.packetHenirRewardCount.iPremiumMAX == 10 && out.packetHenirRewardCount.iEventMAX == 5, "not5 henirReward rt");
+    CHECK(out.bCashShopOpen && out.bFirstSelect && out.bLocalRankingUser, "not5 bools rt");
+}
+
+static void TestBuildSelectUnitNot5Defaults()
+{
+    SelectUnitNot5 not5;
+    BuildSelectUnitNot5(not5);
+    CHECK(not5.iOK == NET_OK, "not5 builder iOK");
+    CHECK(!not5.bIsSpiritUpdated && not5.mapCharGameCount.empty() &&
+          !not5.kPShopAgencyInfo.bIsPShopOpen && not5.kPShopAgencyInfo.vecSellItemInfo.empty() &&
+          !not5.packetHenirRewardCount.bUnLimited && not5.packetHenirRewardCount.iNormal == 0 &&
+          !not5.bCashShopOpen && !not5.bFirstSelect && !not5.bLocalRankingUser,
+          "not5 builder: no fabricated state (false/0 placeholders)");
+}
+
 // ---- loopback：CONNECT → VERIFY → SELECT_UNIT（雙庫聯動）----
 static void TestSelectUnitLoopback()
 {
@@ -579,7 +653,8 @@ static void TestSelectUnitLoopback()
                 SelectUnitNot2 not2;
                 SelectUnitNot3 not3;
                 SelectUnitNot4 not4;
-                HandleSelectUnitReq(gameStore, seenUserUID.load(), req, ack, err, true, nullptr, &not1, 5, &not2, &not3, &not4);
+                SelectUnitNot5 not5;
+                HandleSelectUnitReq(gameStore, seenUserUID.load(), req, ack, err, true, nullptr, &not1, 5, &not2, &not3, &not4, &not5);
                 if (ack.iOK == NET_OK) {
                     SerBuffer p1 = PutPayload([&not1](Serializer& s2) { return PutSelectUnitNot1(s2, not1); });
                     if (!srv.SendEvent(MakeEvent(kSelectUnit1NotID, p1))) return;
@@ -589,6 +664,8 @@ static void TestSelectUnitLoopback()
                     if (!srv.SendEvent(MakeEvent(kSelectUnit3NotID, p3))) return;
                     SerBuffer p4 = PutPayload([&not4](Serializer& s2) { return PutSelectUnitNot4(s2, not4); });
                     if (!srv.SendEvent(MakeEvent(kSelectUnit4NotID, p4))) return;
+                    SerBuffer p5 = PutPayload([&not5](Serializer& s2) { return PutSelectUnitNot5(s2, not5); });
+                    if (!srv.SendEvent(MakeEvent(kSelectUnit5NotID, p5))) return;
                 }
                 SerBuffer payload = PutPayload([&ack](Serializer& s) { return PutSelectUnitAck(s, ack); });
                 if (!srv.SendEvent(MakeEvent(kSelectUnitAckID, payload))) return;
@@ -681,6 +758,15 @@ static void TestSelectUnitLoopback()
         CHECK(GetSelectUnitNot4(ksNot4, not4), "decode 4_NOT");
         ksNot4.EndReading();
         CHECK(not4.iOK == NET_OK, "4_NOT iOK");
+        Event not5Ev;
+        CHECK(client.RecvEvent(not5Ev, 5000) == Session::RecvResult::Event, "select 5_NOT received");
+        CHECK(not5Ev.eventID == kSelectUnit5NotID, "select 5_NOT id == 46");
+        SelectUnitNot5 not5;
+        Serializer ksNot5;
+        CHECK(ksNot5.BeginReading(&not5Ev.payload), "read 5_NOT");
+        CHECK(GetSelectUnitNot5(ksNot5, not5), "decode 5_NOT");
+        ksNot5.EndReading();
+        CHECK(not5.iOK == NET_OK, "5_NOT iOK");
         Event ackEv;
         CHECK(client.RecvEvent(ackEv, 5000) == Session::RecvResult::Event, "select ack (own) received");
         CHECK(ackEv.eventID == kSelectUnitAckID, "select ack (own) id");
@@ -755,6 +841,8 @@ void RunSelectUnitTestsByRef(int& pass, int& fail)
     TestBuildSelectUnitNot3Defaults();
     TestSelectUnitNot4Codec();
     TestBuildSelectUnitNot4Defaults();
+    TestSelectUnitNot5Codec();
+    TestBuildSelectUnitNot5Defaults();
     TestUnitSelectArbiterDecisions();
     TestSelectUnitLoopback();
     pass += g_pass_sel;
