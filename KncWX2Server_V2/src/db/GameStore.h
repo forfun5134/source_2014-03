@@ -22,8 +22,9 @@
 //     V2 以 CreateUnit 對應；回傳語意以 CreateUnitResult 表達（不回傳原負值碼，對照見 CreateUnitResult 註解）。
 //
 // ⚠ 範圍（刻意且誠實）：
-//   - 只含 GUser/GUnit/GUnitNickName/GDeletedNickNameHistory 四表；GDenyOption（社群黑名單/拒絕選項）、
-//     GResurrectionStoneCnt、GSkill/GQuests/GMission/GTitle、GItem 等皆未實作（見 docs/architecture.md §12）。
+//   - v2 起含 GDenyOption/GQuests/GSkill/GSkillSlot/GSpirit/GResurrectionStoneCnt（建角衛星表，§0a5）；
+//     v3 起含 GResurrectionStone（角色級復活石，§0a8——SELECT_UNIT 每日補充）。
+//     GSkill/GQuests 的查詢路徑、GMission/GTitle、GItem 等仍未實作（見 docs/architecture.md §12）。
 //   - 14 天暱稱冷卻規則已實作；GDeletedNickNameHistory 記錄於 SoftDeleteUnit。
 //   - game DB 與 account DB 是**兩個獨立 SQLite 檔**（對應原版兩個獨立 SQL Server 資料庫）；
 //     跨庫 UserUID↔LoginUID 無 FK 約束（與原版一致，由應用層保證）。
@@ -39,7 +40,7 @@
 
 namespace x2 { namespace db {
 
-inline constexpr int kGameSchemaVersion = 2;
+inline constexpr int kGameSchemaVersion = 3;
 
 // game DB 遷移：v0→v1 建立 guser / gunit / gunit_nickname / gdeleted_nickname_history；冪等
 bool ApplyGameMigrations(Database& db, std::string& err);
@@ -73,6 +74,20 @@ struct GUnitRecord
     int32_t     loginCount   = 0;
     bool        deleted = false;
     std::string nickname;             // JOIN gunit_nickname 帶出；軟刪除後 NickName 已被釋放（NULL），此列為空字串
+};
+
+// GSpirit 讀回（原 gup_get_unit_info_by_unituid 的 @iSpirit/@iAllSpirit 與 gup_select_unit 的 @iSpirit/@bSpiritFlag）。
+// 缺列 → {0, 0}（原 stored proc 讀到 NULL，FETCH 後呼叫端以 0/false 使用；非錯誤）。
+struct SpiritValues
+{
+    int spirit = 0;
+    int flag   = 0;   // 原 bit（DF_GSpirit_Flag：0=一般/1=當日已用？實際語意由原碼管理；V2 如實保存）
+};
+
+// GResurrectionStone（原 dbo.GResurrectionStone）讀回；缺列 → false（不視為錯誤）。
+struct ResurrectionStoneValues
+{
+    int quantity = 0;
 };
 
 enum class NicknameCheckResult
@@ -144,6 +159,25 @@ public:
 
     // 角色登入：LoginCount+1、LastDate=now（不修改 PlayDayCnt——原版對應邏輯分散於多個 proc，未移植）
     bool RecordUnitLogin(int64_t unitUID, std::string& err);
+
+    // SELECT_UNIT 登入副作用（原 gup_select_unit 的 DB 部分；不含 Statistics DB 的 StatsStoneCnt 統計、
+    //   SERV_ACCUMULATION_SPIRIT_SYSTEM 變體、GAME01/GAME02 跨庫寫法）：
+    //   1) GSpirit 每日重置：以 gspirit.RegDate（+9h 轉 KST、+18h、取日期、該日 06:00 KST） < now(KST) 為條件，
+    //      成立 → Spirit=IFNULL(gresurrectionstonecnt.StartSpirit,0)、Flag=0、RegDate=now。
+    //      （原 stored proc 每日 06:00 重置復活石/精力；V2 以 UTC 儲存時間，KST 邊界於 SQL 內換算）
+    //   2) 復活石每日補充：以 GUnit.LastDate（同法換算 06:00 KST） < now(KST) 為條件，成立 →
+    //      無 gresurrectionstone 列 → INSERT (UnitUID, IFNULL(StartCnt,0))；
+    //      有列且 Quantity < IFNULL(SupplyCnt,0) → UPDATE Quantity=SupplyCnt。
+    //   3) PlayDayCnt+1（LastDate 與 now 的日期不同時）；
+    //   4) LoginCount+1、LastDate=now（與 RecordUnitLogin 相同）。
+    // 單事務；任一步失敗整體 ROLLBACK。unitUID 不存在/已刪除 → false + err。
+    bool ApplyUnitLoginReset(int64_t unitUID, std::string& err);
+
+    // 讀取 GSpirit（缺列 → {0,0}，非錯誤）
+    bool GetSpiritValues(int64_t unitUID, SpiritValues& out, std::string& err);
+
+    // 讀取 GResurrectionStone（缺列 → false，非錯誤；供測試/除錯）
+    bool GetResurrectionStone(int64_t unitUID, ResurrectionStoneValues& out, std::string& err);
 
 private:
     Database& m_db;

@@ -15,7 +15,7 @@
 //             unitUID 不屬於此 userUID（或單位 ID 非法）→ ERR_SELECT_UNIT_07（1081，常數實測編譯值）
 //             DB 錯誤 → ERR_SELECT_UNIT_05（39）
 //             二級密碼未驗證（secondSecurityOk=false）→ ERR_VERIFY_21（578，實測編譯值）
-//             成功 → NET_OK + RecordUnitLogin（LoginCount+1、LastDate=now，比照原版角色登入副作用）
+//             成功 → NET_OK + ApplyUnitLoginReset（§0a8：gup_select_unit 的 DB 副作用——GSpirit 每日重置／復活石每日補充／PlayDayCnt／LoginCount+1／LastDate=now）
 //   ⚠ 二級密碼閘門目前只有 bool 參數（V2 尚無帳號二級認證服務）；
 //   ⚠ SELECT_UNIT_1_NOT…5_NOT 分片訊息未移植，本層成功時僅回送 EGS_SELECT_UNIT_ACK{NET_OK}。
 //     真實客戶端在收到 ACK 後仍缺 1_NOT…5_NOT 會無法進大廳 —— 見 docs/architecture.md §12。
@@ -39,7 +39,7 @@
 namespace x2 { namespace select_unit {
 
 // 成功時回傳 NET_OK；失敗回傳對應 NetError；DB 錯誤訊息寫入 err（僅伺服器側用）。
-// outUnit（可為 nullptr）：成功時帶出已更新 LoginCount 的角色記錄。
+// outUnit（可為 nullptr）：成功時帶出已執行登入副作用（§0a8 ApplyUnitLoginReset：重置/補充/計數）後的角色記錄。
 // outNot1（可為 nullptr）：成功時填入 SELECT_UNIT_1_NOT 的最小合法內容（見 BuildSelectUnitNot1）；
 // outNot2（可為 nullptr）：成功時填入 SELECT_UNIT_2_NOT 的最小合法內容（見 BuildSelectUnitNot2）；
 // outNot3（可為 nullptr）：成功時填入 SELECT_UNIT_3_NOT 的最小合法內容（見 BuildSelectUnitNot3）；
@@ -66,10 +66,10 @@ int32_t HandleSelectUnitReq(db::GameStore& gameDb, int64_t userUID, const Select
 //   2) GameStore::CreateUnit（guser 不存在/已刪除 → ERR_CREATE_UNIT_00(25)；暱稱重複 → ERR_CREATE_UNIT_01(26)；
 //      槽位達 USSize → ERR_CREATE_UNIT_05(30)；暱稱 14 天冷卻 → ERR_CREATE_UNIT_06(31)；DB 錯誤 → ERR_CREATE_UNIT_02(27)；
 //      §0a5：gunit+gunit_nickname 與衛星副作用（gquests/gskill/gskillslot/gspirit/gdenyoption）同一 transaction）
-//   3) 成功 → 重讀角色，kUnitInfo ← PopulateUnitInfoFromGUnit(userUID, authLevel, rec)；
+//   3) 成功 → 重讀角色＋GSpirit（§0a8），kUnitInfo ← PopulateUnitInfoFromGUnit(..., spirit=GSpirit 讀回值)；
 //      vecSkillSlot / wstrEnableDate 原由 AccountDB(DBE_ACCOUNT_CREATE_UNIT_*) 填寫，V2 一律空（誠實佔位）。
 //   （FT_NICKNAME 過濾已移植 §0w：字元集閘門＋禁用暱稱 266＋禁用字 1389＋禁用標記；無 NICKNAMEWORD 子列表、無禁用字 DB 動態更新）
-// 誠實偏差：無職業 templet 表（iClass 僅檢查 tinyint 範圍 0..255，由 GameStore 把關；IsInitNormalJob 閘門已移植 §0a3）、
+// 誠實偏差：templet 存在性以 enum 模型近似（§0a7，55 個 iClass；失敗→28；IsInitNormalJob 閘門 §0a3，失敗→1289）、
 //   IsExistPvpNpcName 閘門已移植（§0a4；TH/ID/BR/PH 空表、EU nation-flag 子表與 HK 獨立表未建模）；
 //   每日建立上限（ERR_CREATE_UNIT_03/09 的其他路徑未建模）、
 //   原版 S_SERVER_SELECT 狀態閘門與 DBE_ACCOUNT_CREATE_UNIT_REQ 兩段式未建模（V2 單段 game DB）。
@@ -210,17 +210,21 @@ void BuildSelectUnitNot2(SelectUnitNot2& out);
 
 // 由 GUnitRecord 填出 KUnitInfo（LoginCount/IP/port/exp→level 換算等原版衍生欄位無 V2 對應表，沿用儲存值）。
 // 供 BuildSelectUnitNot1 與 MY_UNIT_AND_INVENTORY_INFO_LIST_ACK 共用。
+// spiritValues（可為 nullptr）：非空則以 GSpirit 值填 UnitInfo.spirit；空 → 0（如 MY_UNIT_LIST 路徑，
+//   原 CHARACTER_LIST 的 P_GUnit_Userinfo_GET_20131212 亦不回傳 Spirit）。spiritMax 恆為 0（SpiritTable.lua 未隨倉庫提供）。
 void PopulateUnitInfoFromGUnit(int64_t userUID, int authLevel, const db::GUnitRecord& unit,
-                               unit::UnitInfo& outUnitInfo);
+                               unit::UnitInfo& outUnitInfo,
+                               const db::SpiritValues* spiritValues = nullptr);
 
-// 由 GUnitRecord 組裝 SELECT_UNIT_1_NOT（成功路徑的角色資料分片，第一手資料）。
-// 誠實說明：V2 game DB 僅有 gunit 一表可用——items/quests/titles/resStone/spirit/rating 等
-// 無資料來源，一律填 0/空容器；該值「不代表」角色實際狀態，僅為格式完整的佔位。
+// 由 GUnitRecord（+ GSpirit 讀回）組裝 SELECT_UNIT_1_NOT（成功路徑的角色資料分片，第一手資料）。
+// 誠實說明：items/quests/titles/復活石量/rating 等無資料來源，一律填 0/空容器；spirit 自 GSpirit 讀回
+// （spiritMax 恆 0：SpiritTable.lua 未隨倉庫提供）；該值「不代表」角色實際任務/道具狀態，僅為格式完整的佔位。
 // unitCreateDate=regDate、unitLastLoginDate=lastDate、lastPos.mapID=lastPosition、
 // Stat ← gunit 的 BaseHP/Atk*/Def*、win/lose ← GUnit.Win/Lose、exp/level ← GUnit。
 // vecUserSkillPageData 填一頁全預設資料（與 unitSkillData pages=1/1 一致）。
 void BuildSelectUnitNot1(int64_t userUID, int authLevel, const db::GUnitRecord& unit,
-                         SelectUnitNot1& out);
+                         SelectUnitNot1& out,
+                         const db::SpiritValues* spiritValues = nullptr);
 
 } // namespace select_unit
 } // namespace x2

@@ -16,7 +16,7 @@
 
 ## 0b. 2026-11-17 快照（game DB Phase 2a）
 
-`src/db/GameStore.{h,cpp}`、`tests/test_game_store.cpp` 新增：game DB（對應原 Database2）的 `guser`／`gunit`／`gunit_nickname`／`gdeleted_nickname_history` 四表 schema（v1，`Deleted` 生成欄、partial index）+ 存取層：`GetOrCreateGUser`（對應 gup_get_user_info，USSize=50）、`CreateUnit`（對應 gup_create_unit：usSize 上限／暱稱唯一／14 天刪除冷卻／事務化插入 gunit+gunit_nickname，LastPosition=20000、SPoint=1；衛星副作用已於 §0a5 補齊：gquests/gskill/gskillslot/gspirit/gdenyoption，GameDB schema v2）、`ListUnitsByUserUID`／`GetUnitByUID`（JOIN 暱稱）、`SoftDeleteUnit`（DelDate=now + 釋放暱稱 NULL + 寫入冷卻歷史，事務化、冪等）、`RecordUnitLogin`。
+`src/db/GameStore.{h,cpp}`、`tests/test_game_store.cpp` 新增：game DB（對應原 Database2）的 `guser`／`gunit`／`gunit_nickname`／`gdeleted_nickname_history` 四表 schema（v1，`Deleted` 生成欄、partial index）+ 存取層：`GetOrCreateGUser`（對應 gup_get_user_info，USSize=50）、`CreateUnit`（對應 gup_create_unit：usSize 上限／暱稱唯一／14 天刪除冷卻／事務化插入 gunit+gunit_nickname，LastPosition=20000、SPoint=1；衛星副作用已於 §0a5 補齊：gquests/gskill/gskillslot/gspirit/gdenyoption，GameDB schema v2）、`ListUnitsByUserUID`／`GetUnitByUID`（JOIN 暱稱）、`SoftDeleteUnit`（DelDate=now + 釋放暱稱 NULL + 寫入冷卻歷史，事務化、冪等）、`RecordUnitLogin`（SELECT_UNIT 的登入副作用自 §0a8 起改為 `ApplyUnitLoginReset`）。
 
 ⚠ 範圍誠實聲明：GDenyOption／GResurrectionStoneCnt／GSkill／GQuests／GItem 等衛星表**未實作**；SoftDeleteUnit 只處理 gunit 本身（原 proc 還會級聯 GTutor/GItem）；LastPosition 寫死 20000 為原 proc 預設；game DB 與 account DB 是兩個獨立 SQLite 檔，跨庫 UserUID↔LoginUID 無 FK（與原版一致）。
 ⚠ wire 層尚未消費此 store（SELECT_UNIT_ACK 未動）。
@@ -43,7 +43,7 @@
 
 **SelectUnitNot1**（`SelectUnitProtocol.{h,cpp}`，事件 ID 42）：`int32 iOK → KUnitInfo → wstr unitCreateDate(SERV_CHAR_LOG) → int32 realDataED(SERV_LOGOUT_ED_CHECK) → wstr unitLastLoginDate(SERV_DAILY_CHAR_FIRST_SELECT) → map<int32,int32> inventorySlotSize → map<int64,InventoryItemInfo> items → int32 iNumResurrectionStone → (AP_RESTONE) int32 iNumAutoPaymentResStone + wstr autoPayResStoneLastDate → (SKILL_PAGE_SYSTEM) vector<UserSkillPageData> → vector<int16> vecSkillUnsealed → (SERV_SKILL_NOTE) int8 skillNoteMaxPageNum + map<int8,int32> mapSkillNote → (RELATIONSHIP_SYSTEM) RelationshipInfo`。Put 順序機讀自 CommonPacket.cpp `KEGS_SELECT_UNIT_1_NOT`（SERIALIZE_DEFINE_PUT）。
 
-**組裝路徑**：`BuildSelectUnitNot1(userUID, authLevel, GUnitRecord, out)`（UnitSelectArbiter）由 V2 game DB 的 gunit 表組裝——level/exp/win/lose/stat/lastPos.mapID(←lastPosition)/nickname/regDate/lastDate 有真實資料源；**items/inventorySlotSize/dungeonClear/tcClear/spirit/rating/ED/resStone/skillPages 無對應表，一律填空容器/0/單一全預設技能頁（pages=1/1，與 KUnitSkillData 一致），這些值不代表角色實際狀態，不得當真**。`HandleSelectUnitReq` 成功路徑新增 outNot1/authLevel 參數（二級密碼閘門之後）。迴路整合測試：server 端成功時**先送 1_NOT(42) 再送收尾 ACK**（對齊原 `SendSelectUnitACK` 次序），client 端先收 1_NOT 再收 ACK。測試自 524 → **557 passed / 0 failed**（新增 Not1 codec golden roundtrip + gunit→Not1 建構 + 迴路 1_NOT 順序斷言）。
+**組裝路徑**：`BuildSelectUnitNot1(userUID, authLevel, GUnitRecord, out)`（UnitSelectArbiter）由 V2 game DB 的 gunit 表組裝——level/exp/win/lose/stat/lastPos.mapID(←lastPosition)/nickname/regDate/lastDate 有真實資料源；**items/inventorySlotSize/dungeonClear/tcClear/rating/ED/resStone/skillPages 無對應表，一律填空容器/0/單一全預設技能頁（pages=1/1，與 KUnitSkillData 一致），這些值不代表角色實際狀態，不得當真**；spirit 自 GSpirit 讀回（§0a8），spiritMax 恆 0（SpiritTable.lua 未隨倉庫提供）。`HandleSelectUnitReq` 成功路徑新增 outNot1/authLevel 參數（二級密碼閘門之後）。迴路整合測試：server 端成功時**先送 1_NOT(42) 再送收尾 ACK**（對齊原 `SendSelectUnitACK` 次序），client 端先收 1_NOT 再收 ACK。測試自 524 → **557 passed / 0 failed**（新增 Not1 codec golden roundtrip + gunit→Not1 建構 + 迴路 1_NOT 順序斷言）。
 
 ⚠ 誠實聲明：golden bytes 為自洽佈局，**未對原 SDK 實機驗證**；SELECT_UNIT 1_NOT…5_NOT 分片皆已移植（§0e…§0i）；**完整角色資料載入管線與 2_NOT…5_NOT 佔位內容替換為真實 DB 資料未開始**；1_NOT 中無資料來源的欄位全為佔位值（見上）；更換巨集組合佈局即變。
 
@@ -356,7 +356,26 @@ tests/test_string_filter.cpp 的字元集閘門斷言改為依 `X2_REGION_*` 分
 - **⚠ StartSpirit 起始值**：原 production DB 的 `GResurrectionStoneCnt` 有列（值不在倉庫）；原 stored proc 空表時 `@iStartSpirit` 保持 NULL → Spirit NULL → -21 → 建角整體失敗。**V2 以 0 續建**（誠實偏差；倉庫無 seed 資料，無法重現任何原值）。測試以 `INSERT INTO gresurrectionstonecnt … (StartSpirit=100)` 覆蓋「有列」路徑；「空表」路徑斷言 Spirit=0。
 - **測試** `tests/test_create_unit_satellite.cpp`（41 項）：class 1..4 SkillID 對應／class 5 無 gskill・gskillslot（忠實）／GQuests 所有職業 QuestID=13・SubQuest0=1／GDenyOption 4 列 CodeNo=1／GSpirit（空表→0、Flag=0；有列→100）／**副作用失敗 → 整體 ROLLBACK**（`DROP TABLE gskillslot` 後 create → ack=ERR_CREATE_UNIT_02、gunit/gunit_nickname/gquests 皆 0 列）。
 - **測試數**：**JP = 1297、TW = 1295、EU = 1293、CN = 1295 passed / 0 failed**。
-- 剩餘未移植：gmo_*_skill（技能 slot 更新）／gup_get_community_opt_unituid（社群選項查詢）／class 5..9 技能列（原 proc 不存在）／LogDB；gspirit 的 Flag 並列槽位 UI 亦未建模。
+- 剩餘未移植：gmo_*_skill（技能 slot 更新）／gup_get_community_opt_unituid（社群選項查詢）／class 5..9 技能列（原 proc 不存在）／LogDB；gspirit 的 Flag 完整語意與復活石補充/精力重置已於 §0a8 移植；Flag 並列槽位 UI 亦未建模。
+
+## 0a8. 2026-11-17 附記（SELECT_UNIT 登入副作用：gup_select_unit 的 DB 部分＋GSpirit 讀回）
+
+原 `DBE_GAME_SELECT_UNIT_REQ → gup_select_unit`（DataBase/…/dbo.gup_select_unit.proc.sql）在角色登入時會：
+
+1. **GSpirit 每日重置**：`CONVERT(SMALLDATETIME, CONVERT(NVARCHAR(10), dateadd(hh,+18,@sdtSpiritDate),120)+' 06:00') < @sdtNow` 成立 → `Spirit=@iStartSpirit（GResurrectionStoneCnt）, Flag=0, RegDate=now`（跨日 06:00 重置精力）。
+2. **復活石每日補充**：同法以 `@sdtLastLogin`（GUnit.LastDate）換算 06:00 邊界；成立 → 無 `GResurrectionStone` 列 → `INSERT (UnitUID, StartCnt)`；有列且 `Quantity < SupplyCnt` → `UPDATE SET Quantity=SupplyCnt`。
+3. **PlayDayCnt+1**（`DateDiff(day, @sdtLastLogin, @sdtNow) > 0`）；**LoginCount+1、LastDate=now**。
+4. `DBE_GAME_CREATE_UNIT_ACK`／`DBE_GAME_SELECT_UNIT_ACK` 的 `KUnitInfo.m_iSpirit` ← `gup_get_unit_info_by_unituid` 的 `@iSpirit`（GSpirit 讀回）；`gup_select_unit` 會先執行 1–3 再由 ACK 帶出最新值。
+
+**V2 實作（Schema v3 migration：`kGameSchemaVersion` 2→3，新增 `gresurrectionstone`（UnitUID PK、Quantity，對應原 dbo.GResurrectionStone））：**
+
+- **`GameStore::ApplyUnitLoginReset(unitUID)`**：單事務執行上述 1–4（其中 6:00 KST 邊界以 UTC 儲存時間＋SQL 內 `+9 hours` 換算；V2 時間一律 UTC ISO8601）：1) `UPDATE gspirit … WHERE (date(datetime(RegDate,'+9 hours','+18 hours')) || ' 06:00:00') < datetime('now','+9 hours')`，StartSpirit 缺列/NULL → `IFNULL(...,0)`；2) 先 `SELECT 1 FROM gresurrectionstone` 判斷有無列——無 → `INSERT IFNULL(StartCnt,0)`，有 → Quantity<IFNULL(SupplyCnt,0) 才補至 SupplyCnt（**INSERT 與 UPDATE 互斥，鏡像原 proc 的 IF/ELSE**；首版曾誤實作為 "INSERT 後又跑 UPDATE"，測試抓出 StartCnt=10 被改成 SupplyCnt=20，已修正）；3) `PlayDayCnt+1`（`substr(datetime('now'),1,10)` 與 LastDate 日期比對）；4) `LoginCount+1, LastDate=now`（與 `RecordUnitLogin` 相同）。unitUID 不存在/已刪除 → false＋err（整體 ROLLBACK）。
+- **GSpirit 讀回**：新增 `GetSpiritValues(unitUID)`（缺列 → `{0,0}`，非錯誤）與 `GetResurrectionStone`（測試用）；`PopulateUnitInfoFromGUnit(..., spiritValues=nullptr)` 第 5 參數——非空則 `UnitInfo.spirit=spiritValues->spirit`，空則 0（MY_UNIT_LIST/CHARACTER_LIST 路徑——原 `P_GUnit_Userinfo_GET_20131212` 亦不回傳 Spirit，忠實不填）。**spiritMax 恆 0**（SpiritTable.lua 未隨倉庫提供——與 §0a7 UnitTemplet.lua 同類缺口）。
+- **`HandleSelectUnitReq`**：`RecordUnitLogin` → `ApplyUnitLoginReset`（含 1–4）；re-read 後 `GetSpiritValues` → `BuildSelectUnitNot1(..., &sv)`（1_NOT 的 UnitInfo.spirit 為最新值）。歸屬錯誤/不存在路徑不觸動 GSpirit/PlayDayCnt/LoginCount（測試斷言）。
+- **`HandleCreateUnitReq`**：建立後 re-read 同時 `GetSpiritValues` → ACK 的 `kUnitInfo.spirit = StartSpirit`（§0a5 已寫入 gspirit；修掉原先硬編碼 0）；讀取失敗 → ERR_CREATE_UNIT_03（角色已建立，與原碼讀取失敗回 03 一致）。
+- **未移植（誠實聲明）**：`Statistics.dbo.StatsStoneCnt` 統計（LogDB/Statistics 庫不在倉庫配置）；`SERV_ACCUMULATION_SPIRIT_SYSTEM` 變體；`gup_select_unit` 的 `GAME01.dbo.GSpirit` 跨庫前綴；`GResurrectionStoneCnt` 的 seed（倉庫無值，V2 不預置列；缺值 → spirit/石頭補充為 0）；`KUnitInfo.m_bIsSpiritUpdated`（V2 UnitInfo 無此欄位——V2 wire 自洽，非原 KUnitInfo 逐欄對齊）。
+- **測試** `tests/test_select_unit_daily_reset.cpp`（41 項）：CREATE_ACK spirit（有/無 seed）、建角當日 spirit 不重置、跨日精靈重置＋Flag 歸零、無 seed → 重置為 0、復活石 INSERT StartCnt／補滿 SupplyCnt／高於 SupplyCnt 不動／無 seed → 0、PlayDayCnt 跨日 +1／同日不變、LoginCount 累加、GSpirit 缺列不炸（石頭補充仍執行）、歸屬錯誤不觸動 GSpirit/計數。
+- **測試數**：**JP = 1427、TW = 1425、EU = 1423、CN = 1425、US = 1424 passed / 0 failed**。
 
 ## 0a7. 2026-11-17 附記（GetUnitTemplet／UnitTemplet.mdb 徹查＋enum 模型移植 templet 存在性閘門）
 
@@ -676,8 +695,8 @@ V2 目前**原樣保留**協議所需的密碼學直譯，這些本身**不符�
 6. 效能與容量測試；記憶體/句柄洩漏基線（原版以 VLD 除錯，V2 無對應）。
 7. `LoadINIFile`、設定檔格式與部署工具（原 `ReleaseTool`/`.bat` 流程）。
 8. EventIDs 以外的大型表（道具/技能/副本資料）從 `X2/dat/Script` 的轉換管道。
-9. `SELECT_UNIT` 的 REQ/收尾 ACK + 決策層已完成（§0c）；`SELECT_UNIT_1_NOT` codec + 組裝（gunit 表 → Not1，缺資料項佔位）已完成（§0e）；`SELECT_UNIT_2_NOT` codec + 組裝（任務無資料源→空容器佔位）已完成（§0f）；`SELECT_UNIT_3_NOT` codec + 組裝（mission/title/pet 無資料源→空容器佔位）已完成（§0g）；`SELECT_UNIT_4_NOT` codec + 組裝（社交/Henir/Messenger/戰場狀態無資料源→空容器/零值佔位）已完成（§0h）；`SELECT_UNIT_5_NOT` codec + 組裝（spirit/pshop/henir-reward/cashshop 無資料源→false/0 佔位）已完成（§0i），1_NOT…5_NOT 全數落地；1_NOT…5_NOT 分片 codec 全數移植（§0e…0i）；完整角色資料載入管線未開始。Login 切片打通到 SELECT_UNIT_1_NOT 為止（items/任務/寵物/ED/rating 等無資料來源，值為佔位）。
-11. GDenyOption／GResurrectionStoneCnt／GSkill／GSkillSlot／GSpirit／GQuests——**建立流程副作用已移植（§0a5）**；其查詢/更新路徑（gup_get_community_opt_unituid、gup_*_skill、gspirit Flag 完整語意）未實作；其餘建角副作用（GTutor 新手教學進度、GItem 建角發放道具）未實作。
+9. `SELECT_UNIT` 的 REQ/收尾 ACK + 決策層已完成（§0c）；`SELECT_UNIT_1_NOT` codec + 組裝（gunit 表 → Not1，缺資料項佔位）已完成（§0e）；`SELECT_UNIT_2_NOT` codec + 組裝（任務無資料源→空容器佔位）已完成（§0f）；`SELECT_UNIT_3_NOT` codec + 組裝（mission/title/pet 無資料源→空容器佔位）已完成（§0g）；`SELECT_UNIT_4_NOT` codec + 組裝（社交/Henir/Messenger/戰場狀態無資料源→空容器/零值佔位）已完成（§0h）；`SELECT_UNIT_5_NOT` codec + 組裝（spirit/pshop/henir-reward/cashshop 無資料源→false/0 佔位）已完成（§0i），1_NOT…5_NOT 全數落地；1_NOT…5_NOT 分片 codec 全數移植（§0e…0i）；完整角色資料載入管線未開始。Login 切片打通到 SELECT_UNIT_1_NOT 為止（items/任務/寵物/ED/rating 等無資料來源，值為佔位；spirit 自 GSpirit 讀回，§0a8）。
+11. GDenyOption／GResurrectionStoneCnt／GSkill／GSkillSlot／GSpirit／GQuests——**建立流程副作用已移植（§0a5）；GSpirit 讀回與 gup_select_unit 每日重置／GResurrectionStone 每日補充／PlayDayCnt／LoginCount 登入副作用已移植（§0a8）**；其餘查詢/更新路徑（gup_get_community_opt_unituid、gup_*_skill、gspirit Flag 語意變體）未實作；建角道具發放（gup_create_unit_set_promotion／P_GItemPeriod_INS，**不隨倉庫提供**）不可移植。
 10. Wire 相容：Login 切片 codec 只有自洽 golden bytes，**缺原 SDK 實機對照向量**（見 §13）。
 
 ## 13. 風險

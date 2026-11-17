@@ -107,7 +107,8 @@ void BuildSelectUnitNot2(SelectUnitNot2& out)
 }
 
 void PopulateUnitInfoFromGUnit(int64_t userUID, int authLevel, const db::GUnitRecord& unit,
-                               unit::UnitInfo& u)
+                               unit::UnitInfo& u,
+                               const db::SpiritValues* spiritValues)
 {
     u = unit::UnitInfo{};
     u.ownerUserUID = userUID;
@@ -143,7 +144,8 @@ void PopulateUnitInfoFromGUnit(int64_t userUID, int authLevel, const db::GUnitRe
     u.lose = unit.lose;
     u.unitSkillData = unit::UnitSkillData{};        // 全預設（pages 1/1、槽位 0）
     u.isParty = false;
-    u.spiritMax = 0; u.spirit = 0;                  // GUnit 無 spirit 欄位
+    u.spiritMax = 0;                                // SpiritTable.lua 未隨倉庫提供（spirit 上限未知，誠實置 0）
+    u.spirit = spiritValues ? spiritValues->spirit : 0;   // ← GSpirit 讀回（§0a8）；list 路徑傳 nullptr → 0
     u.isGameBang = false;
     u.titleID = 0;
     u.userGuildInfo = unit::UserGuildInfo{};
@@ -151,12 +153,13 @@ void PopulateUnitInfoFromGUnit(int64_t userUID, int authLevel, const db::GUnitRe
 }
 
 void BuildSelectUnitNot1(int64_t userUID, int authLevel, const db::GUnitRecord& unit,
-                         SelectUnitNot1& out)
+                         SelectUnitNot1& out,
+                         const db::SpiritValues* spiritValues)
 {
     out = SelectUnitNot1{};
     out.iOK = NET_OK;
 
-    PopulateUnitInfoFromGUnit(userUID, authLevel, unit, out.unitInfo);
+    PopulateUnitInfoFromGUnit(userUID, authLevel, unit, out.unitInfo, spiritValues);
 
     out.unitCreateDate = Utf8ToWide(unit.regDate);  // SERV_CHAR_LOG
     out.realDataED = 0;                             // SERV_LOGOUT_ED_CHECK（無資料來源）
@@ -490,7 +493,13 @@ bool HandleCreateUnitReq(db::GameStore& gameDb, int64_t userUID, int authLevel,
         if (err.empty()) err = "unit vanished right after create";
         return true;
     }
-    PopulateUnitInfoFromGUnit(userUID, authLevel, rec, ack.kUnitInfo);
+    db::SpiritValues sv;
+    if (!gameDb.GetSpiritValues(unitUID, sv, err)) {
+        ack.iOK = ERR_CREATE_UNIT_03;      // 建立後讀 spirit 失敗（誠實失敗；角色已建立）
+        err = std::string("get spirit after create: ") + err;
+        return true;
+    }
+    PopulateUnitInfoFromGUnit(userUID, authLevel, rec, ack.kUnitInfo, &sv);
     ack.vecSkillSlot.clear();              // 原由 AccountDB 填；V2 空（誠實佔位）
     ack.wstrEnableDate = L"";              // 原由 AccountDB 填；V2 空（誠實佔位）
     ack.iOK = NET_OK;
@@ -546,24 +555,30 @@ int32_t HandleSelectUnitReq(db::GameStore& gameDb, int64_t userUID, const Select
         return ack.iOK;
     }
 
-    // 4) 成功：角色登入副作用（LoginCount+1、LastDate=now）
-    if (!gameDb.RecordUnitLogin(req.unitUID, err)) {
-        err = std::string("game db error recording unit login: ") + err;
+    // 4) 成功：角色登入副作用（gup_select_unit 的 DB 部分：GSpirit 每日重置／復活石每日補充／PlayDayCnt／LoginCount+1／LastDate=now）
+    if (!gameDb.ApplyUnitLoginReset(req.unitUID, err)) {
+        err = std::string("game db error applying unit login reset: ") + err;
         ack.iOK = ERR_SELECT_UNIT_05;
         return ack.iOK;
     }
-    // RecordUnitLogin 後重讀一次，讓呼叫端拿到含最新 LoginCount 的記錄
+    // ApplyUnitLoginReset 後重讀一次，讓呼叫端拿到含最新 LoginCount／Spirit 的記錄
     if (outUnit || outNot1 || outNot2 || outNot3 || outNot4 || outNot5) {
         db::GUnitRecord tmp;
         db::GUnitRecord& uRef = outUnit ? *outUnit : tmp;
         bool found2 = false;
         if (!gameDb.GetUnitByUID(req.unitUID, uRef, found2, err) || !found2) {
             // 記錄剛寫過卻讀不回：視為 DB 錯誤（誠實失敗，不假裝成功）
-            if (err.empty()) err = "unit vanished between RecordUnitLogin and re-read";
+            if (err.empty()) err = "unit vanished between ApplyUnitLoginReset and re-read";
             ack.iOK = ERR_SELECT_UNIT_05;
             return ack.iOK;
         }
-        if (outNot1) BuildSelectUnitNot1(userUID, authLevel, uRef, *outNot1);
+        db::SpiritValues sv;
+        if (!gameDb.GetSpiritValues(req.unitUID, sv, err)) {
+            err = std::string("get spirit after login reset: ") + err;
+            ack.iOK = ERR_SELECT_UNIT_05;
+            return ack.iOK;
+        }
+        if (outNot1) BuildSelectUnitNot1(userUID, authLevel, uRef, *outNot1, &sv);
     }
     if (outNot2) BuildSelectUnitNot2(*outNot2);
     if (outNot3) BuildSelectUnitNot3(*outNot3);

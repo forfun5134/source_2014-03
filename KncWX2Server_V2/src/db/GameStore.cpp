@@ -114,6 +114,14 @@ CREATE TABLE gspirit (
 );
 )SQL";
 
+static const char* kCreateGResurrectionStoneV3 = R"SQL(
+-- 原 dbo.GResurrectionStone（角色級復活石持有量；gup_select_unit 每日補充）。§0a8。
+CREATE TABLE gresurrectionstone (
+    UnitUID  INTEGER NOT NULL PRIMARY KEY REFERENCES gunit(UnitUID),
+    Quantity INTEGER NOT NULL DEFAULT 0
+);
+)SQL";
+
 static const char* kCreateGResurrectionStoneCntV2 = R"SQL(
 -- 單列全域設定表（原 dbo.GResurrectionStoneCnt；StartSpirit=GSpirit 起始值來源）。倉庫無 seed 資料 → V2 不預置列。
 CREATE TABLE gresurrectionstonecnt (
@@ -152,6 +160,14 @@ bool ApplyGameMigrations(Database& db, std::string& err)
             std::string unused;
             db.Rollback(unused);
             err = std::string("game migration v2 failed: ") + err;
+            return false;
+        }
+    }
+    if (v < 3) {
+        if (!db.Exec(kCreateGResurrectionStoneV3, err)) {
+            std::string unused;
+            db.Rollback(unused);
+            err = std::string("game migration v3 failed: ") + err;
             return false;
         }
     }
@@ -656,6 +672,177 @@ bool GameStore::SoftDeleteUnit(int64_t unitUID, std::string& err)
         if (!st.BindInt(2, unitUID, err)) { std::string u; m_db.Rollback(u); return false; }
         std::string stepErr;
         if (st.StepRow(stepErr)) { std::string u; m_db.Rollback(u); err = "unexpected row from INSERT"; return false; }
+        if (!stepErr.empty()) { std::string u; m_db.Rollback(u); err = stepErr; return false; }
+    }
+
+    return m_db.Commit(err);
+}
+
+bool GameStore::GetSpiritValues(int64_t unitUID, SpiritValues& out, std::string& err)
+{
+    out = SpiritValues{};
+    Statement st;
+    if (!st.Prepare(m_db, "SELECT Spirit, Flag FROM gspirit WHERE UnitUID = ?;", err)) return false;
+    if (!st.BindInt(1, unitUID, err)) return false;
+    std::string stepErr;
+    if (st.StepRow(stepErr)) {
+        out.spirit = static_cast<int>(st.ColumnInt64(0));
+        out.flag   = static_cast<int>(st.ColumnInt64(1));
+        err.clear();
+        return true;
+    }
+    if (!stepErr.empty()) { err = stepErr; return false; }
+    // 缺列 → {0,0}（原 proc 讀到 NULL，呼叫端以 0/false 使用）
+    err.clear();
+    return true;
+}
+
+bool GameStore::GetResurrectionStone(int64_t unitUID, ResurrectionStoneValues& out, std::string& err)
+{
+    out = ResurrectionStoneValues{};
+    Statement st;
+    if (!st.Prepare(m_db, "SELECT Quantity FROM gresurrectionstone WHERE UnitUID = ?;", err)) return false;
+    if (!st.BindInt(1, unitUID, err)) return false;
+    std::string stepErr;
+    if (st.StepRow(stepErr)) {
+        out.quantity = static_cast<int>(st.ColumnInt64(0));
+        err.clear();
+        return true;
+    }
+    if (!stepErr.empty()) { err = stepErr; return false; }
+    err.clear();
+    return false;   // 缺列（非錯誤）：以回傳值區分
+}
+
+bool GameStore::ApplyUnitLoginReset(int64_t unitUID, std::string& err)
+{
+    if (!m_db.Begin(err)) return false;
+
+    // 讀取 LastDate（不存在/已刪除直接失敗）
+    std::string lastDate;
+    {
+        Statement st;
+        if (!st.Prepare(m_db, "SELECT LastDate FROM gunit WHERE UnitUID = ? AND Deleted = 0;", err)) {
+            std::string u; m_db.Rollback(u); return false;
+        }
+        if (!st.BindInt(1, unitUID, err)) { std::string u; m_db.Rollback(u); return false; }
+        std::string stepErr;
+        if (st.StepRow(stepErr)) { lastDate = st.ColumnText(0); }
+        else if (!stepErr.empty()) { std::string u; m_db.Rollback(u); err = stepErr; return false; }
+        else { std::string u; m_db.Rollback(u); err = "unit not found or deleted"; return false; }
+    }
+
+    // 1) GSpirit 每日重置（06:00 KST 邊界）
+    {
+        Statement st;
+        const char* sql =
+            "UPDATE gspirit SET"
+            "   Spirit = IFNULL((SELECT StartSpirit FROM gresurrectionstonecnt LIMIT 1), 0),"
+            "   Flag = 0,"
+            "   RegDate = datetime('now')"
+            " WHERE UnitUID = ?"
+            "   AND (date(datetime(RegDate, '+9 hours', '+18 hours')) || ' 06:00:00')"
+            "       < datetime('now', '+9 hours');";
+        if (!st.Prepare(m_db, sql, err)) { std::string u; m_db.Rollback(u); return false; }
+        if (!st.BindInt(1, unitUID, err)) { std::string u; m_db.Rollback(u); return false; }
+        std::string stepErr;
+        if (st.StepRow(stepErr)) { std::string u; m_db.Rollback(u); err = "unexpected row from spirit reset UPDATE"; return false; }
+        if (!stepErr.empty()) { std::string u; m_db.Rollback(u); err = stepErr; return false; }
+    }
+
+    // 2) 復活石每日補充（以 LastDate 換算的 06:00 KST 邊界）
+    {
+        auto kstMidnight = [&](const char* base, std::string& out) -> bool {
+            Statement st;
+            const std::string sql = std::string(
+                "SELECT date(datetime(?, '+9 hours', '+18 hours')) || ' 06:00:00'"
+            );
+            if (!st.Prepare(m_db, sql.c_str(), out)) return false;
+            if (!st.BindText(1, base, out)) return false;
+            std::string stepErr;
+            if (st.StepRow(stepErr)) { out = st.ColumnText(0); }
+            else if (!stepErr.empty()) { out = stepErr; return false; }
+            else { out = ""; }
+            return true;
+        };
+        std::string refillAt;
+        if (!kstMidnight(lastDate.c_str(), refillAt)) {
+            std::string u; m_db.Rollback(u); err = std::string("kst boundary compute: ") + refillAt; return false;
+        }
+        std::string nowKst;
+        {
+            Statement st;
+            if (!st.Prepare(m_db, "SELECT datetime('now', '+9 hours');", err)) { std::string u; m_db.Rollback(u); return false; }
+            std::string stepErr;
+            if (st.StepRow(stepErr)) nowKst = st.ColumnText(0);
+            else { std::string u; m_db.Rollback(u); err = stepErr.empty() ? "cannot read now(KST)" : stepErr; return false; }
+        }
+        if (!refillAt.empty() && refillAt < nowKst) {
+            // 2a) 鏡像原 proc：無列 → INSERT StartCnt；有列 → Quantity < SupplyCnt 才補至 SupplyCnt
+            bool stoneExists = false;
+            {
+                Statement st;
+                if (!st.Prepare(m_db, "SELECT 1 FROM gresurrectionstone WHERE UnitUID = ?;", err)) { std::string u; m_db.Rollback(u); return false; }
+                if (!st.BindInt(1, unitUID, err)) { std::string u; m_db.Rollback(u); return false; }
+                std::string stepErr;
+                if (st.StepRow(stepErr)) stoneExists = true;
+                else if (!stepErr.empty()) { std::string u; m_db.Rollback(u); err = stepErr; return false; }
+            }
+            if (!stoneExists) {
+                Statement st;
+                const char* sql =
+                    "INSERT INTO gresurrectionstone (UnitUID, Quantity)"
+                    "   VALUES (?, IFNULL((SELECT StartCnt FROM gresurrectionstonecnt LIMIT 1), 0));";
+                if (!st.Prepare(m_db, sql, err)) { std::string u; m_db.Rollback(u); return false; }
+                if (!st.BindInt(1, unitUID, err)) { std::string u; m_db.Rollback(u); return false; }
+                std::string stepErr;
+                if (st.StepRow(stepErr)) { std::string u; m_db.Rollback(u); err = "unexpected row from refill INSERT"; return false; }
+                if (!stepErr.empty()) { std::string u; m_db.Rollback(u); err = stepErr; return false; }
+            } else {
+                Statement st2;
+                const char* sql2 =
+                    "UPDATE gresurrectionstone SET Quantity = IFNULL((SELECT SupplyCnt FROM gresurrectionstonecnt LIMIT 1), 0)"
+                    " WHERE UnitUID = ? AND Quantity < IFNULL((SELECT SupplyCnt FROM gresurrectionstonecnt LIMIT 1), 0);";
+                if (!st2.Prepare(m_db, sql2, err)) { std::string u; m_db.Rollback(u); return false; }
+                if (!st2.BindInt(1, unitUID, err)) { std::string u; m_db.Rollback(u); return false; }
+                std::string stepErr2;
+                if (st2.StepRow(stepErr2)) { std::string u; m_db.Rollback(u); err = "unexpected row from refill UPDATE"; return false; }
+                if (!stepErr2.empty()) { std::string u; m_db.Rollback(u); err = stepErr2; return false; }
+            }
+        }
+    }
+
+    // 3) PlayDayCnt+1（日期不同時）
+    if (lastDate.size() >= 10) {
+        std::string todayPrefix;
+        {
+            Statement st;
+            if (!st.Prepare(m_db, "SELECT substr(datetime('now'), 1, 10);", err)) { std::string u; m_db.Rollback(u); return false; }
+            std::string stepErr;
+            if (st.StepRow(stepErr)) { todayPrefix = st.ColumnText(0); }
+            else { std::string u; m_db.Rollback(u); err = stepErr.empty() ? "cannot read today" : stepErr; return false; }
+        }
+        if (!todayPrefix.empty() && lastDate.substr(0, 10) != todayPrefix) {
+            Statement st;
+            if (!st.Prepare(m_db, "UPDATE gunit SET PlayDayCnt = PlayDayCnt + 1 WHERE UnitUID = ?;", err)) {
+                std::string u; m_db.Rollback(u); return false;
+            }
+            if (!st.BindInt(1, unitUID, err)) { std::string u; m_db.Rollback(u); return false; }
+            std::string stepErr;
+            if (st.StepRow(stepErr)) { std::string u; m_db.Rollback(u); err = "unexpected row from playday UPDATE"; return false; }
+            if (!stepErr.empty()) { std::string u; m_db.Rollback(u); err = stepErr; return false; }
+        }
+    }
+
+    // 4) LoginCount+1、LastDate=now（與 RecordUnitLogin 相同語意）
+    {
+        Statement st;
+        if (!st.Prepare(m_db,
+                "UPDATE gunit SET LoginCount = LoginCount + 1, LastDate = datetime('now') WHERE UnitUID = ? AND Deleted = 0;",
+                err)) { std::string u; m_db.Rollback(u); return false; }
+        if (!st.BindInt(1, unitUID, err)) { std::string u; m_db.Rollback(u); return false; }
+        std::string stepErr;
+        if (st.StepRow(stepErr)) { std::string u; m_db.Rollback(u); err = "unexpected row from login UPDATE"; return false; }
         if (!stepErr.empty()) { std::string u; m_db.Rollback(u); err = stepErr; return false; }
     }
 
