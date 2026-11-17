@@ -8,6 +8,14 @@ bool PutDeleteUnitReq(Serializer& ks, const DeleteUnitReq& v)
 {
     return ks.Put(v.iUnitUID) && ks.Put(v.iUserUID);
 }
+bool PutEntryPointDeleteUnitReq(Serializer& ks, const EntryPointDeleteUnitReq& v)
+{
+    return ks.Put(v.iUnitUID) && ks.Put(v.iUserUID) && ks.Put(v.iServerGroup);
+}
+bool GetEntryPointDeleteUnitReq(Serializer& ks, EntryPointDeleteUnitReq& v)
+{
+    return ks.Get(v.iUnitUID) && ks.Get(v.iUserUID) && ks.Get(v.iServerGroup);
+}
 bool GetDeleteUnitReq(Serializer& ks, DeleteUnitReq& v)
 {
     return ks.Get(v.iUnitUID) && ks.Get(v.iUserUID);

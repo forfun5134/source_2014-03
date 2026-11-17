@@ -31,6 +31,13 @@ struct DeleteUnitReq
     int64_t iUserUID = 0;   // 原 m_iUserUID（SERV_UNIT_DELETE_EXCEPTION_MODIFY）
 };
 
+struct EntryPointDeleteUnitReq   // EGS_ENTRY_POINT_DELETE_UNIT_REQ（1160）：EGS_ENTRY_POINT 變體，回覆 EGS_DELETE_UNIT_ACK
+{
+    int64_t iUnitUID = 0;        // 原 m_iUnitUID（UidType）
+    int64_t iUserUID = 0;        // 原 m_iUserUID（UidType；SERV_UNIT_DELETE_EXCEPTION_MODIFY）
+    int32_t iServerGroup = 0;    // 原 m_iServerGroup（SEnum::SGI_*；V2 忽略）
+};
+
 struct DeleteUnitAck
 {
     int32_t iOK = 0;             // NetError（NET_OK=0；見 NetError.h ERR_DELETE_UNIT_00/05）
@@ -44,6 +51,8 @@ struct DeleteUnitAck
 
 bool PutDeleteUnitReq(Serializer& ks, const DeleteUnitReq& v);
 bool GetDeleteUnitReq(Serializer& ks, DeleteUnitReq& v);
+bool PutEntryPointDeleteUnitReq(Serializer& ks, const EntryPointDeleteUnitReq& v);
+bool GetEntryPointDeleteUnitReq(Serializer& ks, EntryPointDeleteUnitReq& v);
 bool PutDeleteUnitAck(Serializer& ks, const DeleteUnitAck& v);
 bool GetDeleteUnitAck(Serializer& ks, DeleteUnitAck& v);
 

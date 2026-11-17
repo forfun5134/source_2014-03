@@ -171,6 +171,21 @@
 
 **測試**（tests/test_change_nickname.cpp，18 項）：codec roundtrip（兩種 REQ + ACK）、空→06、注入→05、非本人→00、bCheckOnly 可用/占用他人/**自己的現有名（排除自身）→NET_OK**、實際改名→NET_OK（再讀回 store 為新暱稱；**舊暱稱進 14 天冷卻 → check 回 03**）、改回冷卻中舊暱稱→03、同名改名→NET_OK、ENTRY_POINT 入口共享決策。測試自 790 → **826 passed / 0 failed**。vcxproj 登記 ChangeNicknameProtocol.{h,cpp}；Loopback 未擴充。**修正記錄**：測試首版 fixture「別人的占位」為 15 bytes CJK 被長度閘門擋下（06≠02），改 12 bytes fixture 後全綠（UTF-8 字節口徑需先自量）。
 
+## 0q. 2026-11-17 快照（ENTRY_POINT CREATE_NEW_UNIT / DELETE_UNIT 變體）
+
+原 `SERV_ENTRY_POINT`（ServerDefine.h:4304）家族的兩個變體事件完成移植。兩者皆為 EGS_ENTRY_POINT 版本，沿用既有後端決策：
+
+**EGS_CREATE_NEW_UNIT_REQ（1159）**＝{wstrNickName, iClass, iServerGroup}（PUT 順序機讀自 ClientPacket.cpp:15012 起），回覆 **EGS_CREATE_UNIT_ACK（37）**。`HandleCreateNewUnitReq` 忽略 iServerGroup 並轉發至 `HandleCreateUnitReq`。
+原碼特有閘門（**未建模**）：`SiCXSLUnitManager()->GetUnitTemplet` 驗證 iClass（無 templet → `ERR_CREATE_UNIT_03`=28）、`IsInitNormalJob`（→ `ERR_CREATE_UNIT_11`，**enum 機讀實測＝1289**，非前值傳聞 1294）、`SiKPvpMatchManager()->IsExistPvpNpcName`（→ERR_CREATE_UNIT_01=26）；注入分支原碼用 `ERR_ODBC_00=175`（與 EGS_CREATE_UNIT_REQ 的 ERR_CREATE_UNIT_08=33 不同）。V2 共用決策（長度→04／注入→08）與誠實偏差聲明不變。
+
+**EGS_ENTRY_POINT_DELETE_UNIT_REQ（1160）**＝{iUnitUID, iUserUID, iServerGroup}（PUT 順序機讀自 :15028 起），回覆 **EGS_DELETE_UNIT_ACK（39）**。`HandleEntryPointDeleteUnitReq` 忽略 iServerGroup 並轉發至 `HandleDeleteUnitReq`（擁有權閘門等語意同前）。
+
+兩者皆經由 `DeleteUnitProtocol`/`CreateUnitProtocol` 擴充的 `EntryPointDeleteUnitReq` / `CreateNewUnitReq` 結構。EventIDs 1159/1160 既有。
+
+**測試**（tests/test_entry_point_unit.cpp，15 項）：兩種 REQ codec roundtrip（PUT 順序 iServerGroup 在第 3 位）、ENTRY_POINT 建立→NET_OK+unitInfo、同名再建→01、13+ bytes→04、ENTRY_POINT 非本人刪除→00（受害角色仍在）、ENTRY_POINT 本人刪除→NET_OK（SERV_CHAR_LOG 欄位自刪除前 record 回填）。測試自 826 → **847 passed / 0 failed**。wire 佈局自洽，**未對原 SDK 實機驗證**；Loopback 未擴充。未新增 .cpp → vcxproj 無需登記。
+
+**NetError 更正紀錄**：本輪 enum 機讀計數（同 §0m 解析器）實測 `ERR_CREATE_UNIT_11=1289`（舊筆記 1294 錯誤，已更正）、`ERR_ODBC_00=175`、`ERR_ODBC_01=555`。
+
 ## 0. 一句話現況
 
 V2 是原 Elsword 韓服伺服器（`X2Project`）的 **C++ 重寫地基**：平台無關的線路格式核心、安全模組已完成並以 golden bytes 測試驗證；最短網路路徑（同步 TCP + 原版 TCP 訊框 + 迴路 echo 整合測試）與 Session 層（SPI 握手換發、驗證失敗踢除、E_HEART_BEAT 丟棄、殭屍檢測、SERV_KEVENT_FROM 標記）已完成並 238 項測試全綠；**遊戲邏輯、非同步網路層未完成；資料庫層已完成 Phase 1（users 表 + 帳號存取層）**。V2 不是可運行的伺服器，不要部署它。

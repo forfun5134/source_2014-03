@@ -9,6 +9,14 @@ bool PutCreateUnitReq(Serializer& ks, const CreateUnitReq& v)
 {
     return ks.Put(v.wstrNickName) && ks.Put(v.iClass);
 }
+bool PutCreateNewUnitReq(Serializer& ks, const CreateNewUnitReq& v)
+{
+    return ks.Put(v.wstrNickName) && ks.Put(v.iClass) && ks.Put(v.iServerGroup);
+}
+bool GetCreateNewUnitReq(Serializer& ks, CreateNewUnitReq& v)
+{
+    return ks.Get(v.wstrNickName) && ks.Get(v.iClass) && ks.Get(v.iServerGroup);
+}
 bool GetCreateUnitReq(Serializer& ks, CreateUnitReq& v)
 {
     return ks.Get(v.wstrNickName) && ks.Get(v.iClass);

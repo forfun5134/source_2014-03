@@ -122,6 +122,20 @@ bool HandleEntryPointChangeNicknameReq(db::GameStore& gameDb, int64_t userUID,
                                        const change_nickname::EntryPointChangeNickNameReq& req,
                                        change_nickname::ChangeNickNameAck& ack, std::string& err);
 
+// EGS_CREATE_NEW_UNIT_REQ / EGS_ENTRY_POINT_DELETE_UNIT_REQ（EGS_ENTRY_POINT 變體）：
+//   兩者皆忽略 iServerGroup（V2 單一 game DB）後分別共用 HandleCreateUnitReq / HandleDeleteUnitReq 決策。
+// 誠實偏差（CREATE 變體特有）：原碼以 SiCXSLUnitManager()->GetUnitTemplet 驗證 m_iClass（無 templet → ERR_CREATE_UNIT_03(28)）、
+//   IsInitNormalJob 排除非初始職業（→ ERR_CREATE_UNIT_11=1294，該編號為 enum 位置反推未經實測）、SiKPvpMatchManager()->IsExistPvpNpcName
+//   （→ ERR_CREATE_UNIT_01=26）——V2 無 XSL templet 表與 PVP NPC 名單，兩項閘門**未建模**；僅共用既有檢查
+//   （長度→04 / 注入→ODBC_00? 注意：原 ENTRY_POINT CREATE_NEW_UNIT 的注入分支用 ERR_ODBC_00 而非 ERR_CREATE_UNIT_08，
+//    但為了與 EGS_CREATE_UNIT_REQ 一致，V2 共用決策一律 ERR_CREATE_UNIT_08——見文件 §0q）。
+bool HandleCreateNewUnitReq(db::GameStore& gameDb, int64_t userUID, int authLevel,
+                            const create_unit::CreateNewUnitReq& req,
+                            create_unit::CreateUnitAck& ack, std::string& err);
+bool HandleEntryPointDeleteUnitReq(db::GameStore& gameDb, int64_t userUID, int authLevel,
+                                   const delete_unit::EntryPointDeleteUnitReq& req,
+                                   delete_unit::DeleteUnitAck& ack, std::string& err);
+
 // EGS_MY_UNIT_AND_INVENTORY_INFO_LIST_REQ（無參數）決策：
 //   guser（GetOrCreateGUser，缺則建，USSize=50）取 nUnitSlot；ListUnitsByUserUID（Deleted=0，UnitUID 升序）
 //   取角色清單並逐個以 PopulateUnitInfoFromGUnit 填 KUnitInfo；ack.iOK=NET_OK。

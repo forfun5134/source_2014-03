@@ -33,6 +33,13 @@ struct CreateUnitReq
     int32_t iClass = 0;          // 原 m_iClass（int）
 };
 
+struct CreateNewUnitReq    // EGS_CREATE_NEW_UNIT_REQ（1159）：EGS_ENTRY_POINT 變體，回覆 EGS_CREATE_UNIT_ACK
+{
+    std::wstring wstrNickName;   // 原 m_wstrNickName（wstring）
+    int32_t iClass = 0;          // 原 m_iClass（int）
+    int32_t iServerGroup = 0;    // 原 m_iServerGroup（SEnum::SGI_*；V2 忽略）
+};
+
 struct CreateUnitAck
 {
     int32_t iOK = 0;                     // NetError（NET_OK=0；見 NetError.h ERR_CREATE_UNIT_00..09）
@@ -43,6 +50,8 @@ struct CreateUnitAck
 
 bool PutCreateUnitReq(Serializer& ks, const CreateUnitReq& v);
 bool GetCreateUnitReq(Serializer& ks, CreateUnitReq& v);
+bool PutCreateNewUnitReq(Serializer& ks, const CreateNewUnitReq& v);
+bool GetCreateNewUnitReq(Serializer& ks, CreateNewUnitReq& v);
 bool PutCreateUnitAck(Serializer& ks, const CreateUnitAck& v);
 bool GetCreateUnitAck(Serializer& ks, CreateUnitAck& v);
 

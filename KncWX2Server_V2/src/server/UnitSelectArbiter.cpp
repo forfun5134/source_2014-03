@@ -262,6 +262,29 @@ bool HandleCheckNicknameReq(db::GameStore& gameDb,
     return true;
 }
 
+bool HandleCreateNewUnitReq(db::GameStore& gameDb, int64_t userUID, int authLevel,
+                            const create_unit::CreateNewUnitReq& req,
+                            create_unit::CreateUnitAck& ack, std::string& err)
+{
+    // EGS_ENTRY_POINT 變體：忽略 iServerGroup（V2 單一 game DB）；共用 HandleCreateUnitReq 決策。
+    // 無 templet/IsInitNormalJob/PVP-NPC 名閘門（見標頭說明）。
+    create_unit::CreateUnitReq sub;
+    sub.wstrNickName = req.wstrNickName;
+    sub.iClass = req.iClass;
+    return HandleCreateUnitReq(gameDb, userUID, authLevel, sub, ack, err);
+}
+
+bool HandleEntryPointDeleteUnitReq(db::GameStore& gameDb, int64_t userUID, int authLevel,
+                                   const delete_unit::EntryPointDeleteUnitReq& req,
+                                   delete_unit::DeleteUnitAck& ack, std::string& err)
+{
+    // EGS_ENTRY_POINT 變體：忽略 iServerGroup（V2 單一 game DB）；共用 HandleDeleteUnitReq 決策。
+    delete_unit::DeleteUnitReq sub;
+    sub.iUnitUID = req.iUnitUID;
+    sub.iUserUID = req.iUserUID;
+    return HandleDeleteUnitReq(gameDb, userUID, authLevel, sub, ack, err);
+}
+
 bool HandleChangeNicknameReq(db::GameStore& gameDb, int64_t userUID,
                              const change_nickname::ChangeNickNameReq& req,
                              change_nickname::ChangeNickNameAck& ack, std::string& err)
