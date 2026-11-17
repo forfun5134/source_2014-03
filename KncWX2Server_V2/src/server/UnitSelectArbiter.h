@@ -58,6 +58,7 @@ int32_t HandleSelectUnitReq(db::GameStore& gameDb, int64_t userUID, const Select
                             SelectUnitNot5* outNot5 = nullptr);
 
 // EGS_CREATE_UNIT_REQ 決策（原 GSUserGameCommon::IMPL_ON_FUNC(EGS_CREATE_UNIT_REQ)）：
+//   0) IsInitNormalJob 閘門（§0a3）：iClass ∉ {1..9} → ERR_CREATE_UNIT_11(1289)（原 SERV_CHECK_CREATE_UNIT_CLASS，先於 length）
 //   1) 暱稱驗證：空或 UTF-8 位元組數 > 12 → ERR_CREATE_UNIT_04(29)（原版 CP_ACP 12 bytes；JP 未定義 SERV_NICK_NAME_MINIMUM_CHECK → 無最小長度檢查）
 //   1.5) FT_NICKNAME 過濾（§0w，authLevel ≥ UAL_GM(2) 繞過）→ ERR_CREATE_UNIT_08(33)
 //      含 KODBC 注入標記（; ' " -- /* */ \）→ ERR_CREATE_UNIT_08(33)（「無法使用的暱稱」）
@@ -133,7 +134,7 @@ bool HandleEntryPointChangeNicknameReq(db::GameStore& gameDb, int64_t userUID,
 // EGS_CREATE_NEW_UNIT_REQ / EGS_ENTRY_POINT_DELETE_UNIT_REQ（EGS_ENTRY_POINT 變體）：
 //   兩者皆忽略 iServerGroup（V2 單一 game DB）後分別共用 HandleCreateUnitReq / HandleDeleteUnitReq 決策。
 // 誠實偏差（CREATE 變體特有）：原碼以 SiCXSLUnitManager()->GetUnitTemplet 驗證 m_iClass（無 templet → ERR_CREATE_UNIT_03(28)）、
-//   IsInitNormalJob 排除非初始職業（→ ERR_CREATE_UNIT_11=1294，該編號為 enum 位置反推未經實測）、SiKPvpMatchManager()->IsExistPvpNpcName
+//   IsInitNormalJob 閘門已移植（§0a3；非初始普通職業 → ERR_CREATE_UNIT_11=1289，enum 機讀核對）、SiKPvpMatchManager()->IsExistPvpNpcName
 //   （→ ERR_CREATE_UNIT_01=26）——V2 無 XSL templet 表與 PVP NPC 名單，兩項閘門**未建模**；僅共用既有檢查
 //   （長度→04 / 注入→ODBC_00? 注意：原 ENTRY_POINT CREATE_NEW_UNIT 的注入分支用 ERR_ODBC_00 而非 ERR_CREATE_UNIT_08，
 //    但為了與 EGS_CREATE_UNIT_REQ 一致，V2 共用決策一律 ERR_CREATE_UNIT_08——見文件 §0q）。
@@ -148,7 +149,7 @@ bool HandleEntryPointDeleteUnitReq(db::GameStore& gameDb, int64_t userUID, int a
 //   GetOrCreateGUser（userUID, userID）→ ack.mapServerGroupUnitSlot = {{ serverGroupID=0, guser.usSize }}；
 //   ListUnitsByUserUID → mapServerGroupUnitInfo = {{ 0, vec<UnitInfo> }}（逐個 PopulateUnitInfoFromGUnit）；
 //   ack.strUserID = Utf8ToWide(userID)；ack.iOK = NET_OK。DB 失敗 → return false。
-// 誠實偏差：EXP/stat 表已移植（§0u/§0v：stat=DB+表、level ← CheckLevelUp(1, EXP)）、無 templet 表（不擋 iClass，原碼缺 templet → ERR_CREATE_UNIT_03=28）、
+// 誠實偏差：EXP/stat 表已移植（§0u/§0v：stat=DB+表、level ← CheckLevelUp(1, EXP)）、IsInitNormalJob 閘門已移植（§0a3；templet 存在性/名稱閘門未建模 → iClass=200 等以 ERR_CREATE_UNIT_11=1289 拒絕，原碼為 ERR_CREATE_UNIT_03=28）、
 //   無 PVP rating 表、無 P2P IP/port（空）、無 server group / 1st+2nd GameDB 會合；SERV_BATTLE_FIELD_BOSS 地圖修正未建模；
 //   handler 不在 2_NOT 鏈上寫 m_setMyUnitUIDList——V2 無此狀態。
 bool HandleCharacterListReq(db::GameStore& gameDb, int64_t userUID, const std::string& userID, int authLevel,

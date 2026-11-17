@@ -100,6 +100,7 @@ static void TestEntryPointDecision()
     {
         CreateNewUnitReq req;
         req.wstrNickName = L"一二三四五";   // 15 bytes
+        req.iClass = 1;                    // 初始職業（class 閘門先於 length 檢查，對齊原碼次序）
         CreateUnitAck ack;
         CHECK(HandleCreateNewUnitReq(store, 777, 5, req, ack, err), "entry long handled");
         CHECK(ack.iOK == ERR_CREATE_UNIT_04, "entry long -> 04");

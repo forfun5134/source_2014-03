@@ -27,7 +27,7 @@ inline constexpr int ERR_CREATE_UNIT_06 = 31;  // 暱稱 14 天冷卻中
 inline constexpr int ERR_CREATE_UNIT_07 = 32;  // Nexon Messenger CharacterSN 建立失敗
 inline constexpr int ERR_CREATE_UNIT_08 = 33;  // 無法使用的暱稱
 inline constexpr int ERR_CREATE_UNIT_09 = 34;  // 每日建立上限
-// ERR_CREATE_UNIT_10/11 未用到，數值未以編譯實測，故不添加（勿推算）
+inline constexpr int ERR_CREATE_UNIT_11 = 1289; // 初始職業限制（IsInitNormalJob；enum 機讀計數核對於 2026-11-17，NetError_def.h 顯式賦值＝1289）
 inline constexpr int ERR_SELECT_UNIT_00 = 35;  // 選擇的角色不在此遊戲伺服器
 inline constexpr int ERR_SELECT_UNIT_01 = 36;  // 角色職業異常
 inline constexpr int ERR_SELECT_UNIT_03 = 37;  // 復活石資訊 DB 錯誤

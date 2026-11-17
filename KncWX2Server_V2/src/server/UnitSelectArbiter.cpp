@@ -3,6 +3,7 @@
 #include "ExpTable.h"
 #include "StatTable.h"
 #include "StringFilter.h"
+#include "UnitTemplet.h"
 #include "../core/NetError.h"
 
 #include <string>
@@ -428,6 +429,12 @@ bool HandleCreateUnitReq(db::GameStore& gameDb, int64_t userUID, int authLevel,
                          create_unit::CreateUnitAck& ack, std::string& err)
 {
     ack = create_unit::CreateUnitAck{};
+    // 原碼（SERV_CHECK_CREATE_UNIT_CLASS）：IsInitNormalJob 驗證（templet 存在性閘門未建模，見 UnitTemplet.h）
+    if (!unit_templet::IsInitNormalJob(req.iClass)) {
+        ack.iOK = ERR_CREATE_UNIT_11;      // 非初始普通職業（enum 實測＝1289）
+        err.clear();
+        return true;
+    }
     const std::string nick = WideToUtf8(req.wstrNickName);
     if (nick.empty() || nick.size() > 12) {
         ack.iOK = ERR_CREATE_UNIT_04;      // 暱稱長度錯誤（原 CP_ACP > 12 bytes）
