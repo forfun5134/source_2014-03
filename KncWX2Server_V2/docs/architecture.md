@@ -285,6 +285,24 @@
 
 測試自 1052 → **1085 passed / 0 failed**。無新模組 → vcxproj 無需登記。§12-11（GDenyOption 等）不受影響。
 
+## 0y. 2026-11-17 快照（CHANGE_NICK_NAME／CHECK_NICK_NAME 迴路整合測試）
+
+**新增** `tests/test_nickname_change_flow.cpp`（`RunNicknameChangeFlowTestsByRef`）：真實 mkstemp account/game 雙庫 + TCP loopback，**authLevel 一律 0（UAL_NORMAL，filter 生效；handler 走 authLevel 預設參數）**：
+
+CONNECT → VERIFY（"changenickflow"）→ CREATE_UNIT(L"原創者", class 5) → CHANGE_NICK_NAME_REQ(431，bCheckOnly=true)：
+
+1. 新名稱 → `NET_OK`；
+2. 自己現名（排除自身）→ `NET_OK`；
+3. `NEXON`（禁用精確，非 GM）→ `ERR_RESTORE_NICK_NAME_05`；
+4. ENTRY_POINT_CHECK_NICK_NAME_REQ(1161) 新名稱 → `NET_OK`；
+5. CHANGE_NICK_NAME_REQ 實際改名 → `NET_OK`；
+6. ENTRY_POINT_CHECK_NICK_NAME_REQ 舊暱稱（14 天冷卻）→ `ERR_RESTORE_NICK_NAME_03`；
+7. MY_UNIT_AND_INVENTORY_INFO_LIST_REQ → 唯一角色 nickName == L"新名稱"（改名落庫可見）。
+
+意義：暱稱變更鏈（431 含 check-only 語意、1161 ENTRY_POINT 檢查、14 天冷卻狀態機、rename→list 可見）自此有**真實 socket + 真實雙庫**的端到端覆蓋；codec→決策→DB 全鏈連動。既有 unit 測試（tests/test_change_nickname.cpp）僅覆蓋記憶體內決策層。
+
+測試自 1085 → **1128 passed / 0 failed**。無新模組 → vcxproj 無需登記。
+
 ## 0. 一句話現況
 
 V2 是原 Elsword 韓服伺服器（`X2Project`）的 **C++ 重寫地基**：平台無關的線路格式核心、安全模組已完成並以 golden bytes 測試驗證；最短網路路徑（同步 TCP + 原版 TCP 訊框 + 迴路 echo 整合測試）與 Session 層（SPI 握手換發、驗證失敗踢除、E_HEART_BEAT 丟棄、殭屍檢測、SERV_KEVENT_FROM 標記）已完成並 238 項測試全綠；**遊戲邏輯、非同步網路層未完成；資料庫層已完成 Phase 1（users 表 + 帳號存取層）**。V2 不是可運行的伺服器，不要部署它。
