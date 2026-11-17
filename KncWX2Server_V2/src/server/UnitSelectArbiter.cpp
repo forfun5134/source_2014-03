@@ -262,6 +262,13 @@ bool HandleCheckNicknameReq(db::GameStore& gameDb,
     return true;
 }
 
+bool HandleGetChannelListReq(channel_list::GetChannelListAck& ack)
+{
+    // V2 無 SiKChannelManager（頻道註冊表）→ 四張表一律空；不查 DB；SGI_SOLES/SGI_GAIA 互換 1st/2nd 對應無從互換
+    ack = channel_list::GetChannelListAck{};
+    return true;
+}
+
 bool HandleCharacterListReq(db::GameStore& gameDb, int64_t userUID, const std::string& userID, int authLevel,
                             character_list::CharacterListAck& ack, std::string& err)
 {

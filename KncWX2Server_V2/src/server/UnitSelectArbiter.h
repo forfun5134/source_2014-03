@@ -34,6 +34,7 @@
 #include "CheckNicknameProtocol.h"
 #include "ChangeNicknameProtocol.h"
 #include "CharacterListProtocol.h"
+#include "EntryPointChannelListProtocol.h"
 
 namespace x2 { namespace select_unit {
 
@@ -146,6 +147,11 @@ bool HandleEntryPointDeleteUnitReq(db::GameStore& gameDb, int64_t userUID, int a
 //   handler 不在 2_NOT 鏈上寫 m_setMyUnitUIDList——V2 無此狀態。
 bool HandleCharacterListReq(db::GameStore& gameDb, int64_t userUID, const std::string& userID, int authLevel,
                             character_list::CharacterListAck& ack, std::string& err);
+
+// EGS_ENTRY_POINT_GET_CHANNEL_LIST_REQ 決策（原 IMPL_ON_FUNC_NOPARAM，GSUserSession.cpp:3480）：
+//   ack 四張表（Soles/Gaia × ChannelList/ChannelBonusList）；原碼依 SGI_SOLES/SGI_GAIA 互換 1st/2nd SiKChannelManager 對應。
+//   V2 無 SiKChannelManager（頻道註冊表）→ 四張表一律空（誠實佔位）；不查 DB；永遠成功。
+bool HandleGetChannelListReq(channel_list::GetChannelListAck& ack);
 
 // EGS_MY_UNIT_AND_INVENTORY_INFO_LIST_REQ（無參數）決策：
 //   guser（GetOrCreateGUser，缺則建，USSize=50）取 nUnitSlot；ListUnitsByUserUID（Deleted=0，UnitUID 升序）
