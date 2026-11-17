@@ -99,11 +99,45 @@ void BuildSelectUnitNot4(SelectUnitNot4& out, const db::DenyOptionValues& denyOp
     out.kDenyOptions.cDenyInvitePracticePVP = static_cast<int8_t>(denyOptions.invitePracticePVP);
 }
 
-void BuildSelectUnitNot3(SelectUnitNot3& out)
+void BuildSelectUnitNot3(SelectUnitNot3& out,
+                         const std::vector<db::TitleCompleteRecord>& titles,
+                         const std::vector<db::TitleMissionRecord>& missions)
 {
     out = SelectUnitNot3{};
     out.iOK = NET_OK;
-    // vecMission / vecTitle / vecPetList / …：無資料來源 → 空容器、iSummonedPetUID=0（誠實佔位）
+    // vecTitle ← gtitle_complete（原 gup_get_title_list）：KTitleInfo{ m_iTitleID, m_wstrEndDate（EndDate 原樣；NULL→空）,
+    //   m_kCTime=0、m_bInfinity=false（原 legacy fetch 不填——SERV_ALL_RENEWAL_SP 未定義，見 docs §0a12 偏差聲明）
+    out.vecTitle.reserve(titles.size());
+    for (const auto& t : titles) {
+        unit::TitleInfo ti;
+        ti.iTitleID = t.titleID;
+        ti.wstrEndDate = t.endDateNull ? std::wstring() : Utf8ToWide(t.endDate);
+        ti.kCTime = 0;
+        ti.bInfinity = false;
+        out.vecTitle.push_back(std::move(ti));
+    }
+    // vecMission ← gtitle_mission（原 gup_get_title_mission_list）：5×KSubMissionInstance 僅填 m_sClearData（原 fetch 不填 iID/bIsSuccess）；
+    //   跳過 TitleID 已存在於 vecTitle 者（SERV_TITLE_DUPLICATE_PROCESS_REVISION 已定義——原碼同法）
+    out.vecMission.reserve(missions.size());
+    for (const auto& m : missions) {
+        bool duplicated = false;
+        for (const auto& vt : out.vecTitle) {
+            if (vt.iTitleID == m.titleID) { duplicated = true; break; }
+        }
+        if (duplicated) continue;
+        unit::MissionInstance mi;
+        mi.iID = m.titleID;
+        mi.subMissionInstances.reserve(5);
+        for (int i = 0; i < 5; ++i) {
+            unit::SubMissionInstance sq;
+            sq.iID = 0;
+            sq.sClearData = m.sub[i];
+            sq.bIsSuccess = false;
+            mi.subMissionInstances.push_back(sq);
+        }
+        out.vecMission.push_back(std::move(mi));
+    }
+    // pet（SERV_PET_SYSTEM 已定義）：V2 無 GPet 等 pet 表 → 空容器／iSummonedPetUID=0（誠實佔位；見 docs §0a12）
 }
 
 void BuildSelectUnitNot2(SelectUnitNot2& out,
@@ -141,7 +175,8 @@ void BuildSelectUnitNot2(SelectUnitNot2& out,
 
 void PopulateUnitInfoFromGUnit(int64_t userUID, int authLevel, const db::GUnitRecord& unit,
                                unit::UnitInfo& u,
-                               const db::SpiritValues* spiritValues)
+                               const db::SpiritValues* spiritValues,
+                               int32_t equippedTitleID)
 {
     u = unit::UnitInfo{};
     u.ownerUserUID = userUID;
@@ -180,19 +215,20 @@ void PopulateUnitInfoFromGUnit(int64_t userUID, int authLevel, const db::GUnitRe
     u.spiritMax = 0;                                // SpiritTable.lua 未隨倉庫提供（spirit 上限未知，誠實置 0）
     u.spirit = spiritValues ? spiritValues->spirit : 0;   // ← GSpirit 讀回（§0a8）；list 路徑傳 nullptr → 0
     u.isGameBang = false;
-    u.titleID = 0;
+    u.titleID = equippedTitleID;                  // ← GTitle_Complete.IsHang（§0a12；SELECT_UNIT 路徑傳入；其餘路徑 0）
     u.userGuildInfo = unit::UserGuildInfo{};
     u.lastLoginTime = Utf8ToWide(unit.lastDate);
 }
 
 void BuildSelectUnitNot1(int64_t userUID, int authLevel, const db::GUnitRecord& unit,
                          SelectUnitNot1& out,
-                         const db::SpiritValues* spiritValues)
+                         const db::SpiritValues* spiritValues,
+                         int32_t equippedTitleID)
 {
     out = SelectUnitNot1{};
     out.iOK = NET_OK;
 
-    PopulateUnitInfoFromGUnit(userUID, authLevel, unit, out.unitInfo, spiritValues);
+    PopulateUnitInfoFromGUnit(userUID, authLevel, unit, out.unitInfo, spiritValues, equippedTitleID);
 
     out.unitCreateDate = Utf8ToWide(unit.regDate);  // SERV_CHAR_LOG
     out.realDataED = 0;                             // SERV_LOGOUT_ED_CHECK（無資料來源）
@@ -595,6 +631,27 @@ int32_t HandleSelectUnitReq(db::GameStore& gameDb, int64_t userUID, const Select
         return ack.iOK;
     }
     // ApplyUnitLoginReset 後重讀一次，讓呼叫端拿到含最新 LoginCount／Spirit 的記錄
+    // §0a12：稱號 complete list（先於 Not1/Not3——Not1 的 UnitInfo.titleID ← 第一個 IsHang=1 列；原 SELECT_UNIT 語意）
+    std::vector<db::TitleCompleteRecord> titleComplete;
+    std::vector<db::TitleMissionRecord> titleMission;
+    int32_t equippedTitleID = 0;
+    if (outNot1 || outNot3) {
+        if (!gameDb.GetTitleCompleteList(req.unitUID, titleComplete, err)) {
+            err = std::string("get title complete list: ") + err;
+            ack.iOK = ERR_SELECT_UNIT_05;
+            return ack.iOK;
+        }
+        for (const auto& t : titleComplete) {
+            if (t.isHang) { equippedTitleID = t.titleID; break; }   // 原碼：第一個 IsHang=1 生效（多筆 → 視為損壞；V2 唯讀不改寫，見 docs §0a12 偏差聲明）
+        }
+        if (outNot3) {
+            if (!gameDb.GetTitleMissionList(req.unitUID, titleMission, err)) {
+                err = std::string("get title mission list: ") + err;
+                ack.iOK = ERR_SELECT_UNIT_05;
+                return ack.iOK;
+            }
+        }
+    }
     if (outUnit || outNot1 || outNot2 || outNot3 || outNot4 || outNot5) {
         db::GUnitRecord tmp;
         db::GUnitRecord& uRef = outUnit ? *outUnit : tmp;
@@ -611,7 +668,7 @@ int32_t HandleSelectUnitReq(db::GameStore& gameDb, int64_t userUID, const Select
             ack.iOK = ERR_SELECT_UNIT_05;
             return ack.iOK;
         }
-        if (outNot1) BuildSelectUnitNot1(userUID, authLevel, uRef, *outNot1, &sv);
+        if (outNot1) BuildSelectUnitNot1(userUID, authLevel, uRef, *outNot1, &sv, equippedTitleID);
     }
     if (outNot2) {
         std::vector<db::QuestRecord> quests;
@@ -628,7 +685,7 @@ int32_t HandleSelectUnitReq(db::GameStore& gameDb, int64_t userUID, const Select
         }
         BuildSelectUnitNot2(*outNot2, req.unitUID, quests, completed);
     }
-    if (outNot3) BuildSelectUnitNot3(*outNot3);
+    if (outNot3) BuildSelectUnitNot3(*outNot3, titleComplete, titleMission);
     if (outNot4) {
         db::DenyOptionValues deny;
         if (!gameDb.GetDenyOptions(req.unitUID, deny, err)) {

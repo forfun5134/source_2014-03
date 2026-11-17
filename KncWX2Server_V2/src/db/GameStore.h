@@ -40,7 +40,7 @@
 
 namespace x2 { namespace db {
 
-inline constexpr int kGameSchemaVersion = 5;
+inline constexpr int kGameSchemaVersion = 6;
 
 // game DB 遷移：v0→v1 建立 guser / gunit / gunit_nickname / gdeleted_nickname_history；冪等
 bool ApplyGameMigrations(Database& db, std::string& err);
@@ -105,6 +105,18 @@ struct QuestCompleteRecord
 {
     int32_t  questID = 0;
     int64_t  completeDateEpoch = 0;    // UTC epoch seconds
+};
+struct TitleCompleteRecord
+{
+    int32_t     titleID = 0;
+    std::string endDate;               // 'YYYY-MM-DD HH:MM:SS' UTC；NULL（永久）→ 空字串
+    bool        endDateNull = true;    // GTitle_Complete.EndDate NULL-able
+    bool        isHang = false;        // IsHang bit（原 DEFAULT 0）
+};
+struct TitleMissionRecord
+{
+    int32_t titleID = 0;
+    int16_t sub[5] = { 0, 0, 0, 0, 0 };   // SubMission1..5（NULL → 0）
 };
 
 // GDenyOption 讀回 → SELECT_UNIT_4_NOT kDenyOptions（原 gup_select_unit 的 DBE ACK 一併回傳；V2 §0a9）。
@@ -218,6 +230,13 @@ public:
     // 讀取已完成任務（SERV_DAILY_QUEST：GQuests_Complete（先）∪ GQuests_Repeat（後）；非 Repeat 表忠實保留無 PK）
     // completeDate 解析失敗 → false＋err（整個讀回視為 DB 錯誤，不回傳部分資料）
     bool GetQuestCompleteList(int64_t unitUID, std::vector<QuestCompleteRecord>& out, std::string& err);
+
+    // 讀取已獲得稱號（原 gup_get_title_list；unit 不存在也回空列表（原 proc 不檢查）；
+    // V2 加 ORDER BY TitleID ASC（原無 ORDER BY，僅為輸出確定性））
+    bool GetTitleCompleteList(int64_t unitUID, std::vector<TitleCompleteRecord>& out, std::string& err);
+
+    // 讀取稱號任務進度（原 gup_get_title_mission_list；同上）
+    bool GetTitleMissionList(int64_t unitUID, std::vector<TitleMissionRecord>& out, std::string& err);
 
     // Upsert GDenyOption QN1..6（EGS_UPDATE_COMMUNITY_OPTION_REQ 的 write-through，§0a10）。
     // unit 不存在/已刪除 → false＋err（鏡像 gup_update_community_opt 的 -1「該 Unit 不存在」）；

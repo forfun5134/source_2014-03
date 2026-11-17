@@ -63,7 +63,7 @@
 
 **SelectUnitNot3**（`SelectUnitProtocol.{h,cpp}`，事件 ID 44）：`int32 iOK → vector<MissionInstance> → vector<TitleInfo> → (SERV_PET_SYSTEM) int64 iSummonedPetUID → vector<PetInfo> → vector<int64> vecCanEvolutionPetList → vector<int64> vecNeverSummonPetList → (SERV_PET_SYSTEM) map<int64, map<int64, InventoryItemInfo>> mapPetItem`。Put 順序機讀自 CommonPacket.cpp `KEGS_SELECT_UNIT_3_NOT`。嵌套 map 走 WireHelpers 內層 PutCountPrefixMap。
 
-**組裝**：`BuildSelectUnitNot3(out)`——V2 game DB 無 mission/title/pet/petItem 表，容器空、iSummonedPetUID=0（誠實佔位）。迴路：server 成功時**1_NOT → 2_NOT → 3_NOT → 收尾 ACK**；client 按序斷言。測試自 572 → **590 passed / 0 failed**。
+**組裝**：`BuildSelectUnitNot3(out)`——V2 game DB 無 mission/title/pet/petItem 表，容器空、iSummonedPetUID=0（誠實佔位）。**§0a12 已改為 gtitle_complete/gtitle_mission 讀回 vecTitle/vecMission（pet 仍空佔位）**。迴路：server 成功時**1_NOT → 2_NOT → 3_NOT → 收尾 ACK**；client 按序斷言。測試自 572 → **590 passed / 0 failed**。
 
 ⚠ 誠實聲明：golden bytes 為自洽佈局，**未對原 SDK 實機驗證**；SELECT_UNIT **4_NOT…5_NOT 未移植**；3_NOT 容器為空佔位（見上）。
 
@@ -357,6 +357,37 @@ tests/test_string_filter.cpp 的字元集閘門斷言改為依 `X2_REGION_*` 分
 - **測試** `tests/test_create_unit_satellite.cpp`（41 項）：class 1..4 SkillID 對應／class 5 無 gskill・gskillslot（忠實）／GQuests 所有職業 QuestID=13・SubQuest0=1／GDenyOption 4 列 CodeNo=1／GSpirit（空表→0、Flag=0；有列→100）／**副作用失敗 → 整體 ROLLBACK**（`DROP TABLE gskillslot` 後 create → ack=ERR_CREATE_UNIT_02、gunit/gunit_nickname/gquests 皆 0 列）。
 - **測試數**：**JP = 1297、TW = 1295、EU = 1293、CN = 1295 passed / 0 failed**。
 - 剩餘未移植：gmo_*_skill（技能 slot 更新）／gup_get_community_opt_unituid（社群選項查詢——V2 改以 gdenyoption 直接讀回近似，§0a9；relationship 6 欄寫入 EGS_UPDATE_COMMUNITY_OPT 已於 §0a10 以 write-through upsert 移植；P_GDenyOption_UPD 仍缺 proc）／class 5..9 技能列（原 proc 不存在）／LogDB；gspirit 的 Flag 完整語意與復活石補充/精力重置已於 §0a8 移植；Flag 並列槽位 UI 亦未建模。
+
+## 0a12. 2026-11-17 附記（SELECT_UNIT_3_NOT 稱號/稱號任務讀回：gtitle_complete ∪ gtitle_mission；schema v6）
+
+§0g 落地 Not3 時，V2 game DB 尚無稱號表，vecTitle／vecMission 一律空容器佔位。本切片補上真實資料源（pet 部分維持空佔位，見偏差聲明）。
+
+原版（JP INT_INTERNAL；SERV_ALL_RENEWAL_SP 未定義 → legacy proc 路徑；SERV_TITLE_DATA_SIZE 已定義 → m_iTitleID(int)；SERV_TITLE_DUPLICATE_PROCESS_REVISION:1411 已定義；SERV_PET_SYSTEM:460 已定義）：
+
+- **vecTitle**（GSGameDBThread.cpp:1829–1866）：`gup_get_title_list`（`SELECT TitleID, EndDate, IsHang FROM GTitle_Complete WHERE UnitUID = @iUnitUID`；倉庫 **proc 隨附**、語意與 V2 schema 對應 → **原樣可移植**，`P_GTitle_Complete_SEL` 未採用）
+  - `KTitleInfo{ m_iTitleID ← TitleID, m_wstrEndDate ← EndDate 原始字串（含 NULL 永久列）, m_kCTime=0／m_bInfinity=false（legacy fetch 不填） }`
+  - **第一個 IsHang=1 列 → kUnitInfo.m_iTitleID**（SERV_TITLE_DATA_SIZE int）；後續 IsHang=1 列 → `bResetTitle=true`（視為 DB 損壞），原會 `gup_update_title_hang` 兩段式修復（先 unhang 全部、再掛回第一筆）。
+- **vecMission**（GSGameDBThread.cpp:1945–1991）：`gup_get_title_mission_list`（倉庫 **proc 隨附**；`SELECT TitleID, SubMission1..5 FROM GTitle_Mission`）→ `KMissionInstance{ m_iID=TitleID, 5×KSubMissionInstance{ m_iID=0、m_sClearData=SubMissionN、m_bIsSuccess=false } }`；**跳過 TitleID 已在 vecTitle 者**（SERV_TITLE_DUPLICATE_PROCESS_REVISION）。
+- 表：`GTitle_Complete`（PK(UnitUID,TitleID)；EndDate smalldatetime **NULL**；IsHang bit **NULL DEFAULT 0**；FK→GUnit ON DELETE CASCADE ON UPDATE CASCADE）；`GTitle_Mission`（PK(UnitUID,TitleID)；SubMission1..5 smallint NULL-able）。
+
+**V2 實作**：
+
+- **Schema v6**（`kGameSchemaVersion` 5→6）：`gtitle_complete`（TitleID CHECK ±32767；EndDate TEXT NULL-able；IsHang INTEGER NOT NULL DEFAULT 0 CHECK 0/1）、`gtitle_mission`（SubMission1..5 NOT NULL DEFAULT 0 CHECK ±32767——**收斂 NULL-able 為 NOT NULL**，NULL→0 換算之近似）。兩表 PK(UnitUID, TitleID)、FK→gunit CASCADE。
+- **GameStore**：`GetTitleCompleteList`／`GetTitleMissionList`——unit 不存在也回空列表 true（原 proc 不檢查）；V2 加 `ORDER BY TitleID ASC`（原無 ORDER BY，僅保證輸出確定性）；`EndDate` NULL → `endDateNull=true`、空字串。
+- **`PopulateUnitInfoFromGUnit`**／**`BuildSelectUnitNot1`** 新增 `equippedTitleID = 0` 尾參（預設 0，其餘呼叫點不變）：`u.titleID ← equippedTitleID`（僅 SELECT_UNIT 路徑傳入；MY_UNIT_LIST/CHARACTER_LIST 路徑 titleID 仍 0 佔位）。
+- **`HandleSelectUnitReq`**：outNot1/outNot3 非空時先讀 `gtitle_complete` 求 `equippedTitleID`（第一個 IsHang=1；**多筆 IsHang=1 → 第一筆生效，DB 不改寫**——SELECT 唯讀；原 bResetTitle 修復寫路徑未移植）；outNot3 再讀 `gtitle_mission`。任一步失敗 → `ERR_SELECT_UNIT_05`。
+- **`BuildSelectUnitNot3(out, titles, missions)`**（簽名變更）：vecTitle（wstrEndDate ← EndDate 原樣（Utf8ToWide）或空 wstring（NULL）；kCTime=0、bInfinity=false）＋ vecMission（SERV_TITLE_DUPLICATE_PROCESS_REVISION 過濾；iID/sClearData/bIsSuccess=0/clear/false）。pet 容器維持空／iSummonedPetUID=0。
+- **測試** `tests/test_title_readback.cpp`（schema v6／兩表 PK／GetTitleCompleteList（ORDER BY／NULL EndDate／不存在 unit／缺表→false）／GetTitleMissionList／Not1+Not3 整合（equipped title→Not1.titleID；永久稱號→空 wstring；dup-of-title mission 過濾；雙 IsHang=1 → 第一筆生效；缺表→ERR_SELECT_UNIT_05；歸屬錯誤））；`tests/test_select_unit.cpp` TestBuildSelectUnitNot3Defaults 同步新簽名。
+- **測試數**：**JP = 1616、TW = 1614、EU = 1612、CN = 1614、US = 1613 passed / 0 failed**。
+- **偏差聲明（逐條）**：
+  1. **bResetTitle 修復寫路徑未移植**：原 SELECT_UNIT 於多筆 IsHang=1（DB 損壞）時會 unhang-all + 掛回第一筆（`gup_update_title_hang` ×2）；V2 SELECT 唯讀，不改寫 DB，僅第一筆生效。V2 尚無任何寫入稱號掛載狀態的路徑，此損壞態無法由 V2 自行產生。
+  2. **EndDate 不解析**：原 legacy fetch 僅原樣搬 WString；m_kCTime=0、m_bInfinity=false（SERV_ALL_RENEWAL_SP 的 `P_GTitle_Complete_SEL` 未採用；可能填 CTime 語意，未對照）。V2 同值（kCTime=0/bInfinity=false），EndDate 僅原樣字串。
+  3. **GTitle_Mission SubMission NULL → 0**（欄位收斂 NOT NULL DEFAULT 0）；原 smalldatetime NULL→ODBC 讀回語意。
+  4. **ORDER BY TitleID ASC**：原 proc 無 ORDER BY（輸出順序依 DB 實作）；V2 明確排序（wire 輸出確定性）。
+  5. **清單路徑 titleID 佔位**：MY_UNIT_LIST / CHARACTER_LIST 的 UnitInfo.titleID 仍為 0（清單路徑讀回稱號未移植）。
+  6. **pet 未移植**：SERV_PET_SYSTEM 已定義，但 V2 無 GPet 等表——iSummonedPetUID=0、vecPetList/vecCanEvolutionPetList/vecNeverSummonPetList/mapPetItem 空容器。
+  7. **IsHang=1 掛載寫入端未移植**（無台詞執行緒實際寫 gtitle_complete 的路徑；Not3 目前只讀）。
+  8. V1 新表不做「SELECT 修復」：`gtitle_complete` 為 GameStore 遷移之 v6 新表，v0→v6 遷移鏈完整（v1..v5 於舊庫上依序套用）。
 
 ## 0a11. 2026-11-17 附記（SELECT_UNIT_2_NOT 任務資料讀回：gquests／gquests_complete ∪ gquests_repeat；schema v5）
 
@@ -763,7 +794,7 @@ V2 目前**原樣保留**協議所需的密碼學直譯，這些本身**不符�
 6. 效能與容量測試；記憶體/句柄洩漏基線（原版以 VLD 除錯，V2 無對應）。
 7. `LoadINIFile`、設定檔格式與部署工具（原 `ReleaseTool`/`.bat` 流程）。
 8. EventIDs 以外的大型表（道具/技能/副本資料）從 `X2/dat/Script` 的轉換管道。
-9. `SELECT_UNIT` 的 REQ/收尾 ACK + 決策層已完成（§0c）；`SELECT_UNIT_1_NOT` codec + 組裝（gunit 表 → Not1，缺資料項佔位）已完成（§0e）；`SELECT_UNIT_2_NOT` codec + 組裝（§0f；任務讀回自 §0a11 ← gquests/gquests_complete/gquests_repeat）已完成（§0f）；`SELECT_UNIT_3_NOT` codec + 組裝（mission/title/pet 無資料源→空容器佔位）已完成（§0g）；`SELECT_UNIT_4_NOT` codec + 組裝（Henir/Messenger/戰場狀態無資料源→空容器/零值佔位；kDenyOptions 自 §0a9 起 ← gdenyoption 讀回）已完成（§0h）；`SELECT_UNIT_5_NOT` codec + 組裝（spirit/pshop/henir-reward/cashshop 無資料源→false/0 佔位）已完成（§0i），1_NOT…5_NOT 全數落地；1_NOT…5_NOT 分片 codec 全數移植（§0e…0i）；完整角色資料載入管線未開始。Login 切片打通到 SELECT_UNIT_1_NOT 為止（items/寵物/ED/rating 等無資料來源，值為佔位；spirit 自 GSpirit 讀回，§0a8；任務自 §0a11 起讀 gquests/gquests_complete/gquests_repeat）。
+9. `SELECT_UNIT` 的 REQ/收尾 ACK + 決策層已完成（§0c）；`SELECT_UNIT_1_NOT` codec + 組裝（gunit 表 → Not1，缺資料項佔位）已完成（§0e）；`SELECT_UNIT_2_NOT` codec + 組裝（§0f；任務讀回自 §0a11 ← gquests/gquests_complete/gquests_repeat）已完成（§0f）；`SELECT_UNIT_3_NOT` codec + 組裝（§0g；title/mission 讀回自 §0a12 ← gtitle_complete/gtitle_mission）已完成（§0g）；`SELECT_UNIT_3_NOT` codec + 組裝（§0g；title/mission 讀回自 §0a12 ← gtitle_complete/gtitle_mission；pet 仍空佔位）已完成（§0g）；`SELECT_UNIT_4_NOT` codec + 組裝（Henir/Messenger/戰場狀態無資料源→空容器/零值佔位；kDenyOptions 自 §0a9 起 ← gdenyoption 讀回）已完成（§0h）；`SELECT_UNIT_5_NOT` codec + 組裝（spirit/pshop/henir-reward/cashshop 無資料源→false/0 佔位）已完成（§0i），1_NOT…5_NOT 全數落地；1_NOT…5_NOT 分片 codec 全數移植（§0e…0i）；完整角色資料載入管線未開始。Login 切片打通到 SELECT_UNIT_1_NOT 為止（items/寵物/ED/rating 等無資料來源，值為佔位；spirit 自 GSpirit 讀回，§0a8；任務自 §0a11 起讀 gquests/gquests_complete/gquests_repeat）。
 11. GDenyOption／GResurrectionStoneCnt／GSkill／GSkillSlot／GSpirit／GQuests——**建立流程副作用已移植（§0a5）；GSpirit 讀回與 gup_select_unit 每日重置／GResurrectionStone 每日補充／PlayDayCnt／LoginCount 登入副作用已移植（§0a8）**；其餘查詢/更新路徑（gup_get_community_opt_unituid——V2 改以 gdenyoption 直接讀回近似，§0a9；EGS_UPDATE_COMMUNITY_OPT 6 欄寫入（§0a10 write-through；P_GDenyOption_UPD 缺 proc，以 upsert 近似）已移植；gup_*_skill、gspirit Flag 語意變體）未實作；建角道具發放（gup_create_unit_set_promotion／P_GItemPeriod_INS，**不隨倉庫提供**）不可移植。
 10. Wire 相容：Login 切片 codec 只有自洽 golden bytes，**缺原 SDK 實機對照向量**（見 §13）。
 

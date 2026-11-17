@@ -168,6 +168,30 @@ CREATE TABLE gquests_repeat (
 );
 )SQL";
 
+// GTitle_Complete：PK(UnitUID, TitleID)、EndDate NULL（永久）、IsHang bit NOT NULL DEFAULT 0（原 DF__GTitle_Co__IsHan__222B06A9 DEFAULT(0)）、FK→gunit ON DELETE CASCADE ON UPDATE CASCADE
+// GTitle_Mission：PK(UnitUID, TitleID)；SubMission1..5 smallint NULL-able（V2 收斂為 NOT NULL DEFAULT 0；NULL → ODBC 讀回失敗換算 0 之近似，見 docs §0a12 偏差聲明）
+static const char* kCreateGTitleCompleteV6 = R"SQL(
+CREATE TABLE gtitle_complete (
+    UnitUID  INTEGER NOT NULL REFERENCES gunit(UnitUID) ON DELETE CASCADE ON UPDATE CASCADE,
+    TitleID  INTEGER NOT NULL CHECK (TitleID BETWEEN -32768 AND 32767),
+    EndDate  TEXT,
+    IsHang   INTEGER NOT NULL DEFAULT 0 CHECK (IsHang BETWEEN 0 AND 1),
+    PRIMARY KEY (UnitUID, TitleID)
+);
+)SQL";
+static const char* kCreateGTitleMissionV6 = R"SQL(
+CREATE TABLE gtitle_mission (
+    UnitUID      INTEGER NOT NULL REFERENCES gunit(UnitUID) ON DELETE CASCADE ON UPDATE CASCADE,
+    TitleID      INTEGER NOT NULL CHECK (TitleID BETWEEN -32768 AND 32767),
+    SubMission1  INTEGER NOT NULL DEFAULT 0 CHECK (SubMission1 BETWEEN -32768 AND 32767),
+    SubMission2  INTEGER NOT NULL DEFAULT 0 CHECK (SubMission2 BETWEEN -32768 AND 32767),
+    SubMission3  INTEGER NOT NULL DEFAULT 0 CHECK (SubMission3 BETWEEN -32768 AND 32767),
+    SubMission4  INTEGER NOT NULL DEFAULT 0 CHECK (SubMission4 BETWEEN -32768 AND 32767),
+    SubMission5  INTEGER NOT NULL DEFAULT 0 CHECK (SubMission5 BETWEEN -32768 AND 32767),
+    PRIMARY KEY (UnitUID, TitleID)
+);
+)SQL";
+
 // 'YYYY-MM-DD HH:MM:SS'（SQLite datetime('now') 格式）以 UTC 解析為 epoch 秒（days_from_civil 演算法，平台無關）。
 static bool ParseUtcDatetime(const std::string& s, int64_t& epochOut)
 {
@@ -249,6 +273,14 @@ bool ApplyGameMigrations(Database& db, std::string& err)
             std::string unused;
             db.Rollback(unused);
             err = std::string("game migration v5 failed: ") + err;
+            return false;
+        }
+    }
+    if (v < 6) {
+        if (!db.Exec(kCreateGTitleCompleteV6, err) || !db.Exec(kCreateGTitleMissionV6, err)) {
+            std::string unused;
+            db.Rollback(unused);
+            err = std::string("game migration v6 failed: ") + err;
             return false;
         }
     }
@@ -910,6 +942,56 @@ bool GameStore::GetQuestCompleteList(int64_t unitUID, std::vector<QuestCompleteR
                 if (!stepErr.empty()) { err = stepErr; return false; }
                 break;
             }
+        }
+    }
+    err.clear();
+    return true;
+}
+
+bool GameStore::GetTitleCompleteList(int64_t unitUID, std::vector<TitleCompleteRecord>& out, std::string& err)
+{
+    out.clear();
+    Statement st;
+    if (!st.Prepare(m_db,
+            "SELECT TitleID, EndDate, IsHang FROM gtitle_complete WHERE UnitUID = ? ORDER BY TitleID ASC;", err)) return false;
+    if (!st.BindInt(1, unitUID, err)) return false;
+    std::string stepErr;
+    while (true) {
+        stepErr.clear();
+        if (st.StepRow(stepErr)) {
+            TitleCompleteRecord rec;
+            rec.titleID = static_cast<int32_t>(st.ColumnInt64(0));
+            if (st.ColumnIsNull(1)) { rec.endDate.clear(); rec.endDateNull = true; }
+            else { rec.endDate = st.ColumnText(1); rec.endDateNull = false; }
+            rec.isHang = st.ColumnInt64(2) != 0;
+            out.push_back(std::move(rec));
+        } else {
+            if (!stepErr.empty()) { err = stepErr; return false; }
+            break;
+        }
+    }
+    err.clear();
+    return true;
+}
+
+bool GameStore::GetTitleMissionList(int64_t unitUID, std::vector<TitleMissionRecord>& out, std::string& err)
+{
+    out.clear();
+    Statement st;
+    if (!st.Prepare(m_db,
+            "SELECT TitleID, SubMission1, SubMission2, SubMission3, SubMission4, SubMission5 FROM gtitle_mission WHERE UnitUID = ? ORDER BY TitleID ASC;", err)) return false;
+    if (!st.BindInt(1, unitUID, err)) return false;
+    std::string stepErr;
+    while (true) {
+        stepErr.clear();
+        if (st.StepRow(stepErr)) {
+            TitleMissionRecord rec;
+            rec.titleID = static_cast<int32_t>(st.ColumnInt64(0));
+            for (int i = 0; i < 5; ++i) rec.sub[i] = static_cast<int16_t>(st.ColumnInt64(1 + i));
+            out.push_back(rec);
+        } else {
+            if (!stepErr.empty()) { err = stepErr; return false; }
+            break;
         }
     }
     err.clear();

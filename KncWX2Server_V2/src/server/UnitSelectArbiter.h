@@ -42,7 +42,7 @@ namespace x2 { namespace select_unit {
 // outUnit（可為 nullptr）：成功時帶出已執行登入副作用（§0a8 ApplyUnitLoginReset：重置/補充/計數）後的角色記錄。
 // outNot1（可為 nullptr）：成功時填入 SELECT_UNIT_1_NOT 的最小合法內容（見 BuildSelectUnitNot1）；
 // outNot2（可為 nullptr）：成功時填入 SELECT_UNIT_2_NOT（見 BuildSelectUnitNot2；vecQuest/vecCompletQuest ← gquests/gquests_complete/gquests_repeat，§0a11；mapRandomQuestList 恆空——SiCXSLQuestManager 無資料源）；
-// outNot3（可為 nullptr）：成功時填入 SELECT_UNIT_3_NOT 的最小合法內容（見 BuildSelectUnitNot3）；
+// outNot3（可為 nullptr）：成功時填入 SELECT_UNIT_3_NOT（見 BuildSelectUnitNot3；vecTitle/vecMission ← gtitle_complete/gtitle_mission，§0a12；pet 無資料源 → 空容器）；
 // outNot4（可為 nullptr）：成功時填入 SELECT_UNIT_4_NOT 的最小合法內容（見 BuildSelectUnitNot4）；
 // outNot5（可為 nullptr）：成功時填入 SELECT_UNIT_5_NOT 的最小合法內容（見 BuildSelectUnitNot5）；
 //   失敗時不動。呼叫端應「先送 1_NOT…5_NOT，再送收尾 ACK」（對照原版 SendSelectUnitACK 的次序）。
@@ -202,7 +202,9 @@ void BuildSelectUnitNot4(SelectUnitNot4& out, const db::DenyOptionValues& denyOp
 // 組裝 SELECT_UNIT_3_NOT（成功路徑的使命/稱號/寵物分片）。
 // 誠實說明：V2 game DB 無 mission/title/pet/petItem 表，這些容器一律空、iSummonedPetUID=0——
 // 不代表角色真實使命/稱號/寵物狀態。iOK=NET_OK。
-void BuildSelectUnitNot3(SelectUnitNot3& out);
+void BuildSelectUnitNot3(SelectUnitNot3& out,
+                         const std::vector<db::TitleCompleteRecord>& titles,
+                         const std::vector<db::TitleMissionRecord>& missions);
 
 // 組裝 SELECT_UNIT_2_NOT（成功路徑的任務進度分片）。
 // 誠實說明：V2 game DB 無任務/日常任務/隨機日常任務表，vecQuest/vecCompletQuest/mapRandomQuestList
@@ -218,7 +220,8 @@ void BuildSelectUnitNot2(SelectUnitNot2& out,
 //   原 CHARACTER_LIST 的 P_GUnit_Userinfo_GET_20131212 亦不回傳 Spirit）。spiritMax 恆為 0（SpiritTable.lua 未隨倉庫提供）。
 void PopulateUnitInfoFromGUnit(int64_t userUID, int authLevel, const db::GUnitRecord& unit,
                                unit::UnitInfo& outUnitInfo,
-                               const db::SpiritValues* spiritValues = nullptr);
+                               const db::SpiritValues* spiritValues = nullptr,
+                               int32_t equippedTitleID = 0);
 
 // 由 GUnitRecord（+ GSpirit 讀回）組裝 SELECT_UNIT_1_NOT（成功路徑的角色資料分片，第一手資料）。
 // 誠實說明：items/quests/titles/復活石量/rating 等無資料來源，一律填 0/空容器；spirit 自 GSpirit 讀回
@@ -228,7 +231,8 @@ void PopulateUnitInfoFromGUnit(int64_t userUID, int authLevel, const db::GUnitRe
 // vecUserSkillPageData 填一頁全預設資料（與 unitSkillData pages=1/1 一致）。
 void BuildSelectUnitNot1(int64_t userUID, int authLevel, const db::GUnitRecord& unit,
                          SelectUnitNot1& out,
-                         const db::SpiritValues* spiritValues = nullptr);
+                         const db::SpiritValues* spiritValues = nullptr,
+                         int32_t equippedTitleID = 0);
 
 } // namespace select_unit
 } // namespace x2

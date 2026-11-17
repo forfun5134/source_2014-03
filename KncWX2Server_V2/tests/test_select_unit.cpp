@@ -411,12 +411,32 @@ static void TestSelectUnitNot3Codec()
 static void TestBuildSelectUnitNot3Defaults()
 {
     SelectUnitNot3 not3;
-    BuildSelectUnitNot3(not3);
+    BuildSelectUnitNot3(not3, {}, {});
     CHECK(not3.iOK == NET_OK, "not3 builder iOK");
     CHECK(not3.vecMission.empty() && not3.vecTitle.empty() && not3.vecPetList.empty() &&
           not3.vecCanEvolutionPetList.empty() && not3.vecNeverSummonPetList.empty() &&
           not3.mapPetItem.empty() && not3.iSummonedPetUID == 0,
           "not3 builder: no fabricated mission/title/pet data (empty placeholders)");
+    // 餵入資料 → 正確映射（§0a12）：title + mission、dup 過濾、永久（NULL）EndDate
+    std::vector<db::TitleCompleteRecord> titles(2);
+    titles[0].titleID = 100; titles[0].endDateNull = false; titles[0].endDate = "2000-01-01 00:00:00"; titles[0].isHang = true;
+    titles[1].titleID = 200; titles[1].endDateNull = true;  titles[1].isHang = false;
+    std::vector<db::TitleMissionRecord> missions(2);
+    missions[0].titleID = 100; missions[0].sub[0] = 3; missions[0].sub[1] = 7;   // → 應被 vecTitle 過濾
+    missions[1].titleID = 300; missions[1].sub[0] = 9; missions[1].sub[4] = 5;
+    BuildSelectUnitNot3(not3, titles, missions);
+    CHECK(not3.vecTitle.size() == 2 && not3.vecTitle[0].iTitleID == 100 && not3.vecTitle[0].kCTime == 0 &&
+          not3.vecTitle[0].bInfinity == false &&
+          not3.vecTitle[0].wstrEndDate == std::wstring(L"2000-01-01 00:00:00") &&
+          not3.vecTitle[1].wstrEndDate.empty(),
+          "not3 builder: title mapped (EndDate kept / permanent->empty wstring)");
+    CHECK(not3.vecMission.size() == 1 && not3.vecMission[0].iID == 300 &&
+          not3.vecMission[0].subMissionInstances.size() == 5 &&
+          not3.vecMission[0].subMissionInstances[0].sClearData == 9 &&
+          not3.vecMission[0].subMissionInstances[0].iID == 0 &&
+          not3.vecMission[0].subMissionInstances[0].bIsSuccess == false &&
+          not3.vecMission[0].subMissionInstances[4].sClearData == 5,
+          "not3 builder: mission mapped; duplicate-of-title mission filtered");
 }
 
 static void TestSelectUnitNot4Codec()
