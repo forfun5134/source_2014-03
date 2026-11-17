@@ -250,6 +250,33 @@ CREATE TABLE giteminventorysize (
 CREATE INDEX ix_giteminventorysize_unituid ON giteminventorysize(UnitUID);
 )SQL";
 
+static const char* kCreateGItemSatellitesV10 = R"SQL(
+CREATE TABLE gitemquantity (
+    ItemUID  INTEGER PRIMARY KEY REFERENCES gitem(ItemUID) ON DELETE CASCADE,
+    Quantity INTEGER NOT NULL
+);
+CREATE TABLE gitemendurance (
+    ItemUID   INTEGER PRIMARY KEY REFERENCES gitem(ItemUID) ON DELETE CASCADE,
+    Endurance INTEGER NOT NULL
+);
+CREATE TABLE gitemenchant (
+    ItemUID INTEGER PRIMARY KEY REFERENCES gitem(ItemUID) ON DELETE CASCADE,
+    ELevel  INTEGER NULL  -- 原 GItemEnchant.ELevel smallint NULL
+);
+CREATE TABLE gitemperiod (
+    ItemUID        INTEGER PRIMARY KEY REFERENCES gitem(ItemUID) ON DELETE CASCADE,
+    Period         INTEGER NOT NULL CHECK (Period BETWEEN -32768 AND 32767),
+    ExpirationDate TEXT NOT NULL
+);
+CREATE TABLE gitemsocket (
+    ItemUID INTEGER PRIMARY KEY REFERENCES gitem(ItemUID) ON DELETE CASCADE,
+    Socket1 INTEGER NOT NULL DEFAULT -1,  -- 原 DF__GItemSock__Socke__* DEFAULT(-1)
+    Socket2 INTEGER NOT NULL DEFAULT -1,
+    Socket3 INTEGER NOT NULL DEFAULT -1,
+    Socket4 INTEGER NOT NULL DEFAULT -1
+);
+)SQL";
+
 static const char* kCreateGRecommendV9 = R"SQL(
 CREATE TABLE grecommend (
     OldUID        INTEGER NOT NULL,
@@ -372,6 +399,14 @@ bool ApplyGameMigrations(Database& db, std::string& err)
             std::string unused;
             db.Rollback(unused);
             err = std::string("game migration v9 failed: ") + err;
+            return false;
+        }
+    }
+    if (v < 10) {
+        if (!db.Exec(kCreateGItemSatellitesV10, err)) {
+            std::string unused;
+            db.Rollback(unused);
+            err = std::string("game migration v10 failed: ") + err;
             return false;
         }
     }
@@ -1201,9 +1236,29 @@ bool GameStore::GetInventoryItems(int64_t unitUID, std::vector<InventoryItemReco
 {
     out.clear();
     Statement st;
+    // 對照原 gup_get_item_list：INSERT 暫存表（defaults）→ GItemQuantity（UsageType=2）→ GItemEndurance（UsageType=1，覆寫）
+    //   → GItemEnchant（ELevel）→ GItemPeriod（Period/EndDate）→ GItemSocket（Socket1..4）。
+    // V2 以 LEFT JOIN 一次讀取；UsageType 依同序推導（Endurance 覆寫 Quantity）。缺列 → proc 暫存表預設。
     if (!st.Prepare(m_db,
-            "SELECT ItemUID, ItemID, InventoryCategory, SlotID FROM gitem"
-            " WHERE UnitUID = ? AND Deleted = 0 ORDER BY InventoryCategory ASC, SlotID ASC, ItemUID ASC;", err)) return false;
+            "SELECT g.ItemUID, g.ItemID, g.InventoryCategory, g.SlotID,"
+            "       (CASE WHEN e.ItemUID IS NOT NULL THEN 1"
+            "             WHEN q.ItemUID IS NOT NULL THEN 2"
+            "             ELSE 0 END) AS UsageType,"
+            "       COALESCE(q.Quantity, 0) AS Quantity,"
+            "       COALESCE(e.Endurance, -1) AS Endurance,"
+            "       COALESCE(en.ELevel, 0) AS ELevel,"
+            "       COALESCE(p.Period, 0) AS Period,"
+            "       COALESCE(p.ExpirationDate, '') AS ExpirationDate,"
+            "       COALESCE(s.Socket1, 0) AS Socket1, COALESCE(s.Socket2, 0) AS Socket2,"
+            "       COALESCE(s.Socket3, 0) AS Socket3, COALESCE(s.Socket4, 0) AS Socket4"
+            "  FROM gitem g"
+            "  LEFT JOIN gitemquantity q  ON q.ItemUID  = g.ItemUID"
+            "  LEFT JOIN gitemendurance e ON e.ItemUID  = g.ItemUID"
+            "  LEFT JOIN gitemenchant en  ON en.ItemUID = g.ItemUID"
+            "  LEFT JOIN gitemperiod p    ON p.ItemUID  = g.ItemUID"
+            "  LEFT JOIN gitemsocket s    ON s.ItemUID  = g.ItemUID"
+            " WHERE g.UnitUID = ? AND g.Deleted = 0"
+            " ORDER BY g.InventoryCategory ASC, g.SlotID ASC, g.ItemUID ASC;", err)) return false;
     if (!st.BindInt(1, unitUID, err)) return false;
     std::string stepErr;
     while (true) {
@@ -1214,6 +1269,13 @@ bool GameStore::GetInventoryItems(int64_t unitUID, std::vector<InventoryItemReco
             rec.itemID = static_cast<int32_t>(st.ColumnInt64(1));
             rec.slotCategory = static_cast<int8_t>(st.ColumnInt64(2));
             rec.slotID = static_cast<int16_t>(st.ColumnInt64(3));
+            rec.usageType = static_cast<int8_t>(st.ColumnInt64(4));
+            rec.quantity = static_cast<int32_t>(st.ColumnInt64(5));
+            rec.endurance = static_cast<int16_t>(st.ColumnInt64(6));
+            rec.enchantLevel = static_cast<int8_t>(st.ColumnInt64(7));
+            rec.period = static_cast<int16_t>(st.ColumnInt64(8));
+            rec.expirationDate = st.ColumnText(9);
+            for (int i = 0; i < 4; ++i) rec.socket[i] = static_cast<int32_t>(st.ColumnInt64(10 + i));
             out.push_back(rec);
         } else {
             if (!stepErr.empty()) { err = stepErr; return false; }

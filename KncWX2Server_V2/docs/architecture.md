@@ -358,6 +358,34 @@ tests/test_string_filter.cpp 的字元集閘門斷言改為依 `X2_REGION_*` 分
 - **測試數**：**JP = 1297、TW = 1295、EU = 1293、CN = 1295 passed / 0 failed**。
 - 剩餘未移植：gmo_*_skill（技能 slot 更新）／gup_get_community_opt_unituid（社群選項查詢——V2 改以 gdenyoption 直接讀回近似，§0a9；relationship 6 欄寫入 EGS_UPDATE_COMMUNITY_OPT 已於 §0a10 以 write-through upsert 移植；P_GDenyOption_UPD 仍缺 proc）／class 5..9 技能列（原 proc 不存在）／LogDB；gspirit 的 Flag 完整語意與復活石補充/精力重置已於 §0a8 移植；Flag 並列槽位 UI 亦未建模。
 
+## 0a16. 2026-11-17 附記（SELECT_UNIT_1_NOT：物品衛星欄位讀回——修正 §0a14 勘誤；schema v10）
+
+**勘誤**：§0a14 以「衛星表（GItemQuantity/GItemEndurance/GItemEnchant/GItemPeriod/GItemSocket）均不在倉庫」為由，quantity/endurance/enchantLevel/period/sockets 一律填預設。**此結論錯誤**：這些表實際存在於 `Database2/Database2/Schema Objects/Tables/`（`dbo.GItemQuantity.table.sql` 等；keys 目錄含 PKs：ItemUID CLUSTERED PK ＋ FK→GItem ON DELETE CASCADE；GItemSocket 四欄 DF 預設 -1；GItemEnchant.ELevel 為 smallint NULL）。本節將衛星欄位接上真實資料源，並回溯修正 §0a14 的偏差聲明（第 3、4 條作廢）。
+
+原版（`gup_get_item_list.proc.sql`，隨附）語意：
+
+- 暫存表 `@ItemList`（ItemUID PK；UsageType tinyint DEFAULT 0；Quantity int DEFAULT 0；Endurance int DEFAULT -1；Period/EndDate；ELevel tinyint DEFAULT 0；Socket1..4 smallint DEFAULT 0；InventoryCategory/SlotID tinyint）
+- `UPDATE … JOIN GItemQuantity` → `UsageType=2, Quantity=Quantity`
+- `UPDATE … JOIN GItemEndurance` → `UsageType=1, Endurance=Endurance`（**耐久覆寫量型**——Leech 最後套用）
+- `UPDATE … JOIN GItemEnchant` → `ELevel`
+- `UPDATE … JOIN GItemPeriod` → `Period, EndDate`
+- `UPDATE … JOIN GItemSocket` → `Socket1..4`
+- `order by inventorycategory`
+
+**V2 實作**：
+
+- **Schema v10**：`gitemquantity`／`gitemendurance`／`gitemenchant`／`gitemperiod`／`gitemsocket` 五表（ItemUID INTEGER PK REFERENCES gitem(ItemUID) ON DELETE CASCADE；ELevel INTEGER NULL 保留 NULL；GItemSocket 預設 -1 保留；Period CHECK ±32767；ExpirationDate TEXT NOT NULL 保留 smalldatetime→字串原樣）。
+- **GetInventoryItems**：LEFT JOIN 五表一次讀取；UsageType 依原 proc 同序推導（`endurance row` 存在 → 1，否則 `quantity row` 存在 → 2，否則 0）；ELevel `COALESCE(NULL→0)`；缺列 → proc 暫存表預設（Quantity=0/Endurance=-1/Period=0/EndDate=""/Sockets=0/UsageType=0）。
+- **Not1 端到端**：quantity/UsageType/period/ExpirationDate（→ Utf8ToWide wstrEndDate）/enchantLevel/itemSocket[4] 經 BuildSelectUnitNot1 進 mapItem；equippedItem 映射同步真實值。
+- **測試**：`tests/test_inventory_readback.cpp` 新增 TestSatellites（兩表同列 UsageType=1 覆寫、NULL ELevel→0、缺列→預設、Not1 端到端 quantity/period/expirationDate/socket/enchant 接線）。
+- **測試數**：**JP = 1765、TW = 1763、EU = 1761、CN = 1763、US = 1762 passed / 0 failed**。
+- **仍未接（資料源不存在/缺失）**：GItemSeal（無 reader proc `gup_get_item_list_seal`；sealData 恆 0）、GItemAttribute（`gup_get_attribute` 不在倉庫；GItemAttribute 表本身存在但無原版 SELECT 可逐欄對齊 → attrib 恆預設、randomSocket 空）、GItemOption/GItemWishList/GItemToolHistory（非 Not1 資料路徑）、`P_GItem_ItemList_SEL`（BOSS 路徑，5 socket；SERV_BATTLE_FIELD_BOSS 已定義但 proc 不在倉庫 → 仍 4 socket）。
+- **偏差聲明**：
+  1. ELevel：NULL → 0（原 proc 將 NULL 寫入 NOT NULL tinyint 會失敗；V2 以 0 收斂——較寬容，偏差明示）。
+  2. ExpirationDate 存字串原樣（smalldatetime 的 V2 儲存格式為 UTC 文本；proto wire 同 §0a14 慣例 Utf8ToWide）。
+  3. ORDER BY 明確 `InventoryCategory, SlotID, ItemUID`（原無 SlotID 序）。
+  4. Equipped mirror 不變（SlotCategory==9、key=SlotID、insert 保留首筆）。
+
 ## 0a15. 2026-11-17 附記（SELECT_UNIT_4_NOT：iRecommendUnitUID 讀回；SELECT_UNIT_5_NOT：bIsSpiritUpdated 讀回；schema v9）
 
 §0a9/§0a13 落地 Not4、§0e 落地 Not5 時，`iRecommendUnitUID`/`bIsSpiritUpdated` 皆為 0/false 佔位。本切片接上兩個**資料源在倉庫內**的項目。

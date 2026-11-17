@@ -41,7 +41,7 @@
 
 namespace x2 { namespace db {
 
-inline constexpr int kGameSchemaVersion = 9;
+inline constexpr int kGameSchemaVersion = 10;
 
 // game DB 遷移：v0→v1 建立 guser / gunit / gunit_nickname / gdeleted_nickname_history；冪等
 bool ApplyGameMigrations(Database& db, std::string& err);
@@ -135,13 +135,13 @@ struct InventoryItemRecord
 {
     int64_t itemUID = 0;
     int32_t itemID = 0;
-    int8_t  usageType = 0;               // 無 GItemQuantity/GItemEndurance 表 → 恆 0（proc 預設值）
-    int32_t quantity = 0;                // 同上（gup_get_item_list 暫存表 Quantity 預設 0）
-    int16_t endurance = -1;              // 同上（proc 預設 -1）
-    int8_t  enchantLevel = 0;            // GItemEnchant 表不在倉庫
-    int16_t period = 0;                  // GItemPeriod 表不在倉庫
-    std::string expirationDate;          // GItemPeriod.ExpirationDate；缺 → 空字串
-    int32_t socket[4] = { 0, 0, 0, 0 };  // GItemSocket 表不在倉庫 → 全 0
+    int8_t  usageType = 0;               // gup_get_item_list 語意：match GItemQuantity → 2；match GItemEndurance → 1（覆寫；原 proc 同序）
+    int32_t quantity = 0;                // GItemQuantity.Quantity（缺列 → 0）
+    int16_t endurance = -1;              // GItemEndurance.Endurance（缺列 → -1）
+    int8_t  enchantLevel = 0;            // COALESCE(GItemEnchant.ELevel, 0)（缺列/NULL → 0）
+    int16_t period = 0;                  // GItemPeriod.Period（缺列 → 0）
+    std::string expirationDate;          // GItemPeriod.ExpirationDate 原樣（缺列 → ""）
+    int32_t socket[4] = { 0, 0, 0, 0 };  // GItemSocket.Socket1..4（缺列 → 全 0，proc 暫存表預設）
     int8_t  slotCategory = 0;            // gitem.InventoryCategory
     int16_t slotID = 0;                  // gitem.SlotID
 };

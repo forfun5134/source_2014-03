@@ -66,9 +66,14 @@ static void TestSchemaV8()
 {
     Fixture fx;
     int v = fx.db.UserVersion(fx.err);
-    CHECK(v == kGameSchemaVersion && kGameSchemaVersion == 9, "schema v9 (user_version == 9)");
+    CHECK(v == kGameSchemaVersion && kGameSchemaVersion == 10, "schema v10 (user_version == 10)");
     CHECK(fx.db.Exec("SELECT 1 FROM gitem LIMIT 0;", fx.err), "gitem exists");
     CHECK(fx.db.Exec("SELECT 1 FROM giteminventorysize LIMIT 0;", fx.err), "giteminventorysize exists");
+    CHECK(fx.db.Exec("SELECT 1 FROM gitemquantity LIMIT 0;", fx.err), "gitemquantity exists");
+    CHECK(fx.db.Exec("SELECT 1 FROM gitemendurance LIMIT 0;", fx.err), "gitemendurance exists");
+    CHECK(fx.db.Exec("SELECT 1 FROM gitemenchant LIMIT 0;", fx.err), "gitemenchant exists");
+    CHECK(fx.db.Exec("SELECT 1 FROM gitemperiod LIMIT 0;", fx.err), "gitemperiod exists");
+    CHECK(fx.db.Exec("SELECT 1 FROM gitemsocket LIMIT 0;", fx.err), "gitemsocket exists");
     const int64_t uid = fx.MakeUnit(777, L"inv.schema");
     CHECK(uid > 0, "unit created");
     CHECK(fx.db.Exec("INSERT INTO gitem (UnitUID, ItemID, InventoryCategory, SlotID) VALUES (" + std::to_string(uid) + ", 1001, 1, 0);", fx.err), "seed item");
@@ -122,7 +127,7 @@ static void TestItems()
         CHECK(items[0].slotCategory == 3 && items[1].slotCategory == 9, "ordered by category");
         CHECK(items[1].itemID == 11001 && items[1].slotID == 2, "equip item mapped");
         CHECK(items[1].quantity == 0 && items[1].endurance == -1 && items[1].period == 0 &&
-              items[1].enchantLevel == 0 && items[1].socket[0] == 0, "satellite defaults (no tables)");
+              items[1].enchantLevel == 0 && items[1].socket[0] == 0, "satellite defaults (no rows)");
     }
     // 軟刪除 → 讀不到
     CHECK(fx.db.Exec("UPDATE gitem SET DelDate = '2999-01-01 00:00:00' WHERE UnitUID = " + std::to_string(uid) + " AND ItemID = 11001;", fx.err), "soft-delete equip item");
@@ -189,12 +194,86 @@ static void TestSelectIntegration()
     }
 }
 
+static void TestSatellites();
+
 void RunInventoryReadbackTestsByRef(int& pass, int& fail)
 {
     TestSchemaV8();
     TestSlotSize();
     TestItems();
     TestSelectIntegration();
+    TestSatellites();
     pass += g_pass_inv;
     fail += g_fail_inv;
+}
+
+// ── §0a16：衛星表接線（schema v10）─────────────────────────────────────────
+static void TestSatellites()
+{
+    Fixture fx;
+    const int64_t uid = fx.MakeUnit(777, L"inv.sat");
+    CHECK(uid > 0, "unit created");
+    CHECK(fx.db.Exec(
+        "INSERT INTO gitem (UnitUID, ItemID, InventoryCategory, SlotID) VALUES "
+        "(" + std::to_string(uid) + ", 30001, 1, 0),"
+        "(" + std::to_string(uid) + ", 30002, 1, 1),"
+        "(" + std::to_string(uid) + ", 30003, 1, 2);", fx.err), "seed items");
+    int i1 = 0, i2 = 0, i3 = 0;
+    {
+        std::vector<InventoryItemRecord> items;
+        CHECK(fx.store.GetInventoryItems(uid, items, fx.err), "items readable");
+        CHECK(items.size() == 3, "three items");
+        for (const auto& it : items) {
+            if (it.itemID == 30001) i1 = static_cast<int>(it.itemUID);
+            else if (it.itemID == 30002) i2 = static_cast<int>(it.itemUID);
+            else i3 = static_cast<int>(it.itemUID);
+        }
+    }
+    const std::string id1 = std::to_string(i1), id2 = std::to_string(i2), id3 = std::to_string(i3);
+    // 30001：數量型（UsageType=2）＋ 期間型 ＋ Enchant ＋ Socket
+    CHECK(fx.db.Exec("INSERT INTO gitemquantity (ItemUID, Quantity) VALUES (" + id1 + ", 99);", fx.err), "seed qty");
+    CHECK(fx.db.Exec("INSERT INTO gitemperiod (ItemUID, Period, ExpirationDate) VALUES (" + id1 + ", 30, '2030-12-31 23:59:59');", fx.err), "seed period");
+    CHECK(fx.db.Exec("INSERT INTO gitemenchant (ItemUID, ELevel) VALUES (" + id1 + ", 7);", fx.err), "seed enchant");
+    CHECK(fx.db.Exec("INSERT INTO gitemsocket (ItemUID, Socket1, Socket2, Socket3, Socket4) VALUES (" + id1 + ", 11, 22, 33, 44);", fx.err), "seed socket");
+    // 30002：耐久型（UsageType=1，覆寫量型）：兩表同列 → UsageType=1（原 proc 同序）
+    CHECK(fx.db.Exec("INSERT INTO gitemquantity (ItemUID, Quantity) VALUES (" + id2 + ", 50);", fx.err), "seed qty2");
+    CHECK(fx.db.Exec("INSERT INTO gitemendurance (ItemUID, Endurance) VALUES (" + id2 + ", 87);", fx.err), "seed endurance2");
+    // 30003：Enchant ELevel NULL → 0
+    CHECK(fx.db.Exec("INSERT INTO gitemenchant (ItemUID, ELevel) VALUES (" + id3 + ", NULL);", fx.err), "seed enchant null");
+    {
+        std::vector<InventoryItemRecord> items;
+        CHECK(fx.store.GetInventoryItems(uid, items, fx.err), "items readable (satellites)");
+        CHECK(items.size() == 3, "three items");
+        InventoryItemRecord r1{}, r2{}, r3{};
+        for (const auto& it : items) {
+            if (it.itemUID == i1) r1 = it;
+            else if (it.itemUID == i2) r2 = it;
+            else r3 = it;
+        }
+        CHECK(r1.usageType == 2 && r1.quantity == 99, "qty row -> UsageType=2, Quantity=99");
+        CHECK(r1.period == 30 && r1.expirationDate == "2030-12-31 23:59:59", "period row mapped");
+        CHECK(r1.enchantLevel == 7, "enchant mapped");
+        CHECK(r1.socket[0] == 11 && r1.socket[3] == 44, "sockets mapped");
+        CHECK(r1.endurance == -1, "no endurance row -> -1");
+        CHECK(r2.usageType == 1 && r2.endurance == 87 && r2.quantity == 50, "endurance row overrides UsageType to 1");
+        CHECK(r3.enchantLevel == 0, "NULL ELevel -> 0");
+        CHECK(r3.usageType == 0 && r3.quantity == 0 && r3.period == 0 && r3.expirationDate.empty(), "no rows -> proc defaults");
+    }
+    // Not1 端到端：quantity/sockets/period 透過 BuildSelectUnitNot1 進 UnitInfo.items
+    {
+        SelectUnitNot1 not1{};
+        CHECK(SelectNot1(fx.store, 777, uid, &not1), "select ok");
+        const unit::InventoryItemInfo* eq = nullptr;
+        for (const auto& kv : not1.items) {
+            if (kv.second.itemInfo.itemID == 30001) eq = &kv.second;
+        }
+        CHECK(eq != nullptr, "item 30001 present in Not1.mapItem");
+        if (eq) {
+            CHECK(eq->itemInfo.quantity == 99 && eq->itemInfo.usageType == 2, "Not1 quantity/usageType wired");
+            CHECK(eq->itemInfo.period == 30 && eq->itemInfo.expirationDate == std::wstring(L"2030-12-31 23:59:59"),
+                  "Not1 period + expirationDate wired");
+            CHECK(eq->itemInfo.enchantLevel == 7 && eq->itemInfo.itemSocket.size() == 4 &&
+                  eq->itemInfo.itemSocket[0] == 11 && eq->itemInfo.itemSocket[3] == 44, "Not1 enchant/socket wired");
+        }
+    }
 }

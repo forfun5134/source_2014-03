@@ -281,7 +281,7 @@ void BuildSelectUnitNot1(int64_t userUID, int authLevel, const db::GUnitRecord& 
     if (supplemental) {
         // mapInventorySlotSize ← giteminventorysize（§0a14）
         out.inventorySlotSize = supplemental->inventorySlotSize;
-        // mapItem ← gitem（§0a14）：有值、衛星欄位為預設佔位（見 InventoryItemRecord 說明）
+        // mapItem ← gitem（§0a14；衛星欄位自 §0a16 ← gitemquantity/endurance/enchant/period/socket，缺列 → proc 暫存表預設）
         out.items.clear();
         for (const auto& rec : supplemental->items) {
             unit::InventoryItemInfo it;

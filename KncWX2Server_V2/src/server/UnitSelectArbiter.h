@@ -231,7 +231,7 @@ void PopulateUnitInfoFromGUnit(int64_t userUID, int authLevel, const db::GUnitRe
 
 // 由 GUnitRecord（+ GSpirit 讀回 + §0a14 補充：背包/裝備映射/復活石量）組裝 SELECT_UNIT_1_NOT（成功路徑的角色資料分片）。
 // 誠實說明：rating 等無資料來源，一律填 0/空容器；spirit 自 GSpirit 讀回（spiritMax 恆 0）；
-//   items ← gitem（無衛星表 → quantity=0/endurance=-1/period=0/enchant=0/sockets=0）；
+//   items ← gitem（§0a14；衛星欄位自 §0a16 ← gitemquantity/endurance/enchant/period/socket，缺列 → 預設）；
 //   inventorySlotSize ← giteminventorysize；equippedItem ← SlotCategory==9 的物品映射（ST_E_EQUIP，keyed by SlotID）。
 // unitCreateDate=regDate、unitLastLoginDate=lastDate、lastPos.mapID=lastPosition、
 // Stat ← gunit 的 BaseHP/Atk*/Def*、win/lose ← GUnit.Win/Lose、exp/level ← GUnit。
