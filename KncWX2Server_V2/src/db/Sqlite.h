@@ -34,6 +34,9 @@ public:
     int  UserVersion(std::string& err);
     bool SetUserVersion(int v, std::string& err);
 
+    // sqlite3_changes64：最近一條 INSERT/UPDATE/DELETE 影響的列數（0 = 未命中）
+    int64_t Changes() const;
+
     // 交易（BEGIN/COMMIT/ROLLBACK）
     bool Begin(std::string& err);
     bool Commit(std::string& err);

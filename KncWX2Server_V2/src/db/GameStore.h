@@ -35,6 +35,7 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include <array>
 #include <map>
 #include <tuple>
 
@@ -42,7 +43,7 @@
 
 namespace x2 { namespace db {
 
-inline constexpr int kGameSchemaVersion = 12;
+inline constexpr int kGameSchemaVersion = 13;
 
 // game DB 遷移：v0→v1 建立 guser / gunit / gunit_nickname / gdeleted_nickname_history；冪等
 bool ApplyGameMigrations(Database& db, std::string& err);
@@ -310,6 +311,15 @@ public:
     // GItemAttribute 讀回（原 gup_get_attribute：category IN (1,9)）：每筆 (ItemUID, ESI_SLOT 0..2, Attribute)。
     // GetInventoryItems 內部已合併；此方法供需要逐列檢視的呼叫端（測試用）。
     bool GetItemAttributes(int64_t unitUID, std::vector<std::tuple<int64_t, int32_t, int32_t>>& out, std::string& err);
+    // 찜 리스트（GItemWishList；§0a21；gup_get_WishList/gup_update_WishList 語義）
+    //   GetWishList：只回傳 ItemID > 0 的列（proc 過濾）且 ORDER BY SlotNo（原無序；偏差明示）；NULL SlotNo 略過
+    static constexpr int kWishListSlotMax = 21;   // 原 SLOT_MAX=21
+    bool GetWishList(int64_t userUID, std::map<int32_t, int32_t>& out, std::string& err);
+    // 讀完整 21 槽快照（ItemID=0/ NULL 皆歸零；越界略過）——modify handler 的讀態用
+    bool GetWishListSlots(int64_t userUID, std::array<int32_t, kWishListSlotMax>& slots, std::string& err);
+    // 單一 transaction upsert 所有 (slot, itemID)：row 存在→UPDATE ItemID；否則 INSERT（gup_update_WishList 語義）；
+    // 每條影響列數必須為 1（否則 -2 式失敗、rollback）。
+    bool ApplyWishListChanges(int64_t userUID, const std::vector<std::pair<int32_t, int32_t>>& upserts, std::string& err);
 
     // Upsert GDenyOption QN1..6（EGS_UPDATE_COMMUNITY_OPTION_REQ 的 write-through，§0a10）。
     // unit 不存在/已刪除 → false＋err（鏡像 gup_update_community_opt 的 -1「該 Unit 不存在」）；

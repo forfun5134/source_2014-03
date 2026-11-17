@@ -305,6 +305,16 @@ CREATE TABLE gtrainingcenter (
 );
 )SQL";
 
+static const char* kCreateGItemWishListV13 = R"SQL(
+CREATE TABLE gitemwishlist (
+    UserUID INTEGER NOT NULL REFERENCES guser(UserUID) ON DELETE CASCADE ON UPDATE CASCADE,  -- 原 FK→GUser CASCADE
+    SlotNo  INTEGER NULL CHECK (SlotNo BETWEEN 0 AND 32767),        -- smallint NULL（proc 無過濾）
+    ItemID  INTEGER NULL,                                           -- int NULL；0 = 空槽（DelWish flush 會寫回 0）
+    UNIQUE (UserUID, SlotNo)                                        -- proc 的 NOT EXISTS→INSERT / 否則 UPDATE 隱含唯一性；NULL SlotNo 不參與唯一性
+);
+CREATE INDEX ix_gitemwishlist_useruid ON gitemwishlist(UserUID);    -- 原 CLUSTERED IX UserUID
+)SQL";
+
 static const char* kCreateGRecommendV9 = R"SQL(
 CREATE TABLE grecommend (
     OldUID        INTEGER NOT NULL,
@@ -451,6 +461,14 @@ bool ApplyGameMigrations(Database& db, std::string& err)
             std::string unused;
             db.Rollback(unused);
             err = std::string("game migration v12 failed: ") + err;
+            return false;
+        }
+    }
+    if (v < 13) {
+        if (!db.Exec(kCreateGItemWishListV13, err)) {
+            std::string unused;
+            db.Rollback(unused);
+            err = std::string("game migration v13 failed: ") + err;
             return false;
         }
     }
@@ -1510,6 +1528,90 @@ bool GameStore::EquipTitleHang(int64_t unitUID, int32_t oldTitleID, int32_t newT
         std::string stepErr;
         if (!st.StepRow(stepErr)) { rollback(); err = "verify query failed"; return false; }
         if (st.ColumnInt64(0) != 1) { rollback(); err = "attach verify failed"; return false; }
+    }
+    return m_db.Commit(err);
+}
+
+bool GameStore::GetWishList(int64_t userUID, std::map<int32_t, int32_t>& out, std::string& err)
+{
+    out.clear();
+    Statement st;
+    // 原 gup_get_WishList：SELECT SlotNo, ItemID FROM GItemWishList WHERE UserUID = @iUserUID AND ItemID > 0
+    // V2 將 InitWishList 的越界槽過濾（原 UserWishList.cpp:SlotNo<0 或 >=SLOT_MAX 略過）內聯到 SQL（wire 結果一致）；
+    // ORDER BY SlotNo 為 V2 追加（原未指定；偏差明示）
+    if (!st.Prepare(m_db,
+            "SELECT SlotNo, ItemID FROM gitemwishlist WHERE UserUID = ? AND ItemID > 0 AND SlotNo BETWEEN 0 AND 20 ORDER BY SlotNo ASC;", err)) return false;
+    if (!st.BindInt(1, userUID, err)) return false;
+    std::string stepErr;
+    while (true) {
+        stepErr.clear();
+        if (st.StepRow(stepErr)) {
+            if (st.ColumnIsNull(0) || st.ColumnIsNull(1)) continue;   // 原 FETCH 至 int 會得 0/NULL 混雜；V2 略過（明示）
+            out.emplace(static_cast<int32_t>(st.ColumnInt64(0)), static_cast<int32_t>(st.ColumnInt64(1)));
+        } else {
+            if (!stepErr.empty()) { err = stepErr; return false; }
+            break;
+        }
+    }
+    err.clear();
+    return true;
+}
+
+bool GameStore::GetWishListSlots(int64_t userUID, std::array<int32_t, kWishListSlotMax>& slots, std::string& err)
+{
+    slots.fill(0);
+    Statement st;
+    // 不掛 ItemID 過濾：modify handler 需要 0 槽位的原始狀態（原 m_arrWishList）
+    if (!st.Prepare(m_db,
+            "SELECT SlotNo, ItemID FROM gitemwishlist WHERE UserUID = ?;", err)) return false;
+    if (!st.BindInt(1, userUID, err)) return false;
+    std::string stepErr;
+    while (true) {
+        stepErr.clear();
+        if (st.StepRow(stepErr)) {
+            if (st.ColumnIsNull(0) || st.ColumnIsNull(1)) continue;
+            const int32_t slot = static_cast<int32_t>(st.ColumnInt64(0));
+            if (slot < 0 || slot >= kWishListSlotMax) continue;      // 原 InitWishList 亦略過越界槽
+            slots[static_cast<size_t>(slot)] = static_cast<int32_t>(st.ColumnInt64(1));
+        } else {
+            if (!stepErr.empty()) { err = stepErr; return false; }
+            break;
+        }
+    }
+    err.clear();
+    return true;
+}
+
+bool GameStore::ApplyWishListChanges(int64_t userUID, const std::vector<std::pair<int32_t, int32_t>>& upserts, std::string& err)
+{
+    if (!m_db.Begin(err)) return false;
+    for (const auto& kv : upserts) {
+        const int32_t slot = kv.first, itemID = kv.second;
+        if (slot < 0 || slot >= kWishListSlotMax) { err = "wish list slot out of range"; std::string u; m_db.Rollback(u); return false; }
+        // 原 gup_update_WishList：NOT EXISTS → INSERT；否則 UPDATE（@@ROWCOUNT<>1 → FAIL_TRAN）
+        Statement stSel;
+        if (!stSel.Prepare(m_db, "SELECT COUNT(*) FROM gitemwishlist WHERE UserUID = ? AND SlotNo = ?;", err)) { std::string u; m_db.Rollback(u); return false; }
+        if (!stSel.BindInt(1, userUID, err) || !stSel.BindInt(2, slot, err)) { std::string u; m_db.Rollback(u); return false; }
+        std::string stepErr;
+        if (!stSel.StepRow(stepErr)) { std::string u; m_db.Rollback(u); err = "wish list existence check failed"; return false; }
+        const bool exists = stSel.ColumnInt64(0) > 0;
+        if (!exists) {
+            Statement stI;
+            if (!stI.Prepare(m_db, "INSERT INTO gitemwishlist (UserUID, SlotNo, ItemID) VALUES (?, ?, ?);", err)) { std::string u; m_db.Rollback(u); return false; }
+            if (!stI.BindInt(1, userUID, err) || !stI.BindInt(2, slot, err) || !stI.BindInt(3, itemID, err)) { std::string u; m_db.Rollback(u); return false; }
+            std::string stErr;
+            if (stI.StepRow(stErr)) { std::string u; m_db.Rollback(u); err = "unexpected row from INSERT"; return false; }
+            if (!stErr.empty()) { std::string u; m_db.Rollback(u); err = stErr; return false; }
+            if (m_db.Changes() != 1) { std::string u; m_db.Rollback(u); err = "wish list insert affected rows != 1"; return false; }
+        } else {
+            Statement stU;
+            if (!stU.Prepare(m_db, "UPDATE gitemwishlist SET ItemID = ? WHERE UserUID = ? AND SlotNo = ?;", err)) { std::string u; m_db.Rollback(u); return false; }
+            if (!stU.BindInt(1, itemID, err) || !stU.BindInt(2, userUID, err) || !stU.BindInt(3, slot, err)) { std::string u; m_db.Rollback(u); return false; }
+            std::string stErr;
+            if (stU.StepRow(stErr)) { std::string u; m_db.Rollback(u); err = "unexpected row from UPDATE"; return false; }
+            if (!stErr.empty()) { std::string u; m_db.Rollback(u); err = stErr; return false; }
+            if (m_db.Changes() != 1) { std::string u; m_db.Rollback(u); err = "wish list update affected rows != 1"; return false; }
+        }
     }
     return m_db.Commit(err);
 }

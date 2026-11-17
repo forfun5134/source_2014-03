@@ -358,6 +358,32 @@ tests/test_string_filter.cpp 的字元集閘門斷言改為依 `X2_REGION_*` 分
 - **測試數**：**JP = 1297、TW = 1295、EU = 1293、CN = 1295 passed / 0 failed**。
 - 剩餘未移植：gmo_*_skill（技能 slot 更新）／gup_get_community_opt_unituid（社群選項查詢——V2 改以 gdenyoption 直接讀回近似，§0a9；relationship 6 欄寫入 EGS_UPDATE_COMMUNITY_OPT 已於 §0a10 以 write-through upsert 移植；P_GDenyOption_UPD 仍缺 proc）／class 5..9 技能列（原 proc 不存在）／LogDB；gspirit 的 Flag 完整語意與復活石補充/精力重置已於 §0a8 移植；Flag 並列槽位 UI 亦未建模。
 
+## 0a21. 2026-11-17 附記（EGS_GET/MODIFY_WISH_LIST：찜 리스트讀寫；schema v13；帳號級）
+
+原版 `EGS_GET_WISH_LIST_REQ`（NOPARAM）→ in-memory `KUserWishList.GetWishList` → `EGS_GET_WISH_LIST_ACK{ map<int,int> m_mapWishList }`；`EGS_MODIFY_WISH_LIST_REQ{ vector<int> m_vecWishListItemID; bool m_bIsDelete }` → `AddWish`/`DelWish`（SLOT_MAX=21）→ `EGS_MODIFY_WISH_LIST_ACK{ iOK, vec, bIsDelete }`。ItemID 為**現金商城產品 ID**（DB 商品），非道具 ID。**帳號級（UserUID）**，與角色選擇無關；FK→GUser。
+
+原版：
+
+- **Get**：VERIFY_STATE（S_FIELD_MAP/S_ROOM）；`GetWishList` 回傳 map（非 SERV_WISH_LIST_BUG_FIX）；
+- **Modify**：VERIFY_STATE_ACK；非刪除路徑逐項 `SiCXSLItemManager()->GetItemTemplet` 查腳本表（缺 → ERR_WISH_LIST_00）、再排除轉職/銀行擴充/技能頁擴充/活動假商品/IsPossibleCart 等（全部腳本表查詢）；`AddWish` 已列→log+true、有空槽→最低位空槽、滿→`ERR_WISH_LIST_02`；刪除路徑 `DelWish` 找到→**左移壓實**（SLOT_MAX-1 內壓縮、尾端補 0），找不到→log+`goto end_proc`（批次中斷、iOK 保持 NET_OK——與原 `DelWish` 不 SET_ERROR 一致）；成功 → `FlushWishListChange` 標記 IsChanged 槽，於 `Query_UpdateWishList`（DBE_UPDATE_UNIT_INFO_REQ）逐槽 `gup_update_WishList`（upsert）。
+
+**V2 實作**：
+
+- **Schema v13**：`gitemwishlist`（UserUID FK→guser CASCADE；SlotNo smallint NULL（CHECK 0..32767）；ItemID int NULL；**UNIQUE(UserUID, SlotNo)**（proc NOT EXISTS→INSERT / 否則 UPDATE 隱含唯一性；NULL SlotNo 不參與）；IX UserUID（原 CLUSTERED））。
+- **GameStore**：`GetWishList`（ItemID>0 過濾，**SlotNo BETWEEN 0 AND 20**（原 InitWishList 越界略過——內聯 SQL，wire 結果一致），ORDER BY SlotNo（原未指定；偏差明示）；NULL 列略過）／`GetWishListSlots`（完整 21 槽快照供 modify 讀態）／`ApplyWishListChanges`（單一 transaction；逐槽：不存在→INSERT、存在→UPDATE ItemID；每條 `Changes()==1` 驗證（proc @@ROWCOUNT<>1 → FAIL_TRAN 的等價））＋ `Database::Changes()`（sqlite3_changes64）。
+- **協議** `src/server/WishListProtocol.{h,cpp}`（x2::wish_list）：GET REQ NOPARAM／GET ACK map<int,int>；MODIFY REQ vec<int>+bool／ACK{iOK, vec<int>, bool}；**map/vector 的序列化＝dword BE 個數＋元素**（與原 eTAG_MAP/eTAG_VECTOR 無 tag 模式逐位元組一致；golden tests 驗證）。event id 509/510/511/512。**NetError：ERR_WISH_LIST_00=450、ERR_WISH_LIST_02=451**（2026-11-17 g++ 實編原 NetError_def.h 實測）。
+- **Handler**：GET 回傳持有商品（ItemID>0）；MODIFY 指示（AddWish/DelWish）為 **drain semantics**：AddWish 逐項（≤0 item 靜默跳過、已列 no-op、最低位空槽、滿→ERR_WISH_LIST_02、**全無部分寫入**）；DelWish 逐項（找到→壓實；缺項→靜默跳過——偏差聲明 5）；成功才 NET_OK＋回顯；寫入失敗→全 rollback、ERR_WISH_LIST_02（借用，偏差聲明 4）。**write-through**（單一 transaction 僅變更槽；原為副本結束延遲 flush，偏差聲明 3）。
+- **測試**：`tests/test_wish_list.cpp`（codec golden bytes ×4（GET ACK map 序列化、MODIFY REQ/ACK、GET REQ NOPARAM）、事件 id、NetError 值、讀過濾（ItemID>0/NULL/越界）、Add（空清單填槽/dup no-op/21 槽上限/22nd→ERR_WISH_LIST_02 且零寫入）、寫失敗（換名表 → ERR_WISH_LIST_02）、Delete 壓實、帳號級隔離）。
+- **測試數**：**JP = 1900、TW = 1898、EU = 1896、CN = 1898、US = 1897 passed / 0 failed**。
+- **偏差聲明**（完整列表見 WishListProtocol.h 檔頭）：
+  1. **腳本 DB 缺失**（SiCXSLItemManager/SiCXSLCashItemManager/SiKBillManager/WishListNoItem）→ 商品存在性/轉職擴充排除/下架過濾 **全不做**；ERR_WISH_LIST_00 不產生。
+  2. InitWishList 越界槽過濾內聯 SQL；GetWishList ORDER BY 追加（原未指定）。
+  3. write-through vs 延遲 flush。
+  4. 寫入失敗 → ERR_WISH_LIST_02（無原碼可用）。
+  5. DelWish 缺項：drain（繼續其餘項）而非原「中斷批次」。
+  6. NULL SlotNo/ItemID 列略過（原 ODBC 讀 NULL 進 int 語意不明確）。
+  7. 線路佈局自洽 golden bytes；未對原 SDK 實機驗證。
+
 ## 0a20. 2026-11-17 附記（EGS_EQUIP_TITLE_REQ：칭호 장착/해제——首個稱號寫入事件；write-through）
 
 選角路徑（§0a19）處理「重複配裝損壞修復」；稱號的**主動裝/卸事件**（客戶端稱號欄點擊）此前未實作。本切片落地 `EGS_EQUIP_TITLE_REQ/ACK`（事件 543/544）。

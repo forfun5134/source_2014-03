@@ -65,6 +65,8 @@ bool Database::SetUserVersion(int v, std::string& err)
     return Exec("PRAGMA user_version = " + std::to_string(v) + ";", err);
 }
 
+int64_t Database::Changes() const { return sqlite3_changes64(m_db); }
+
 bool Database::Begin(std::string& err)    { return Exec("BEGIN;", err); }
 bool Database::Commit(std::string& err)   { return Exec("COMMIT;", err); }
 bool Database::Rollback(std::string& err) { return Exec("ROLLBACK;", err); }

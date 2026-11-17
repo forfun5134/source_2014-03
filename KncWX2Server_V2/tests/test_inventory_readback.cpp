@@ -66,7 +66,7 @@ static void TestSchemaV8()
 {
     Fixture fx;
     int v = fx.db.UserVersion(fx.err);
-    CHECK(v == kGameSchemaVersion && kGameSchemaVersion == 12, "schema v12 (user_version == 12)");
+    CHECK(v == kGameSchemaVersion && kGameSchemaVersion == 13, "schema v13 (user_version == 13)");
     CHECK(fx.db.Exec("SELECT 1 FROM gitem LIMIT 0;", fx.err), "gitem exists");
     CHECK(fx.db.Exec("SELECT 1 FROM giteminventorysize LIMIT 0;", fx.err), "giteminventorysize exists");
     CHECK(fx.db.Exec("SELECT 1 FROM gitemquantity LIMIT 0;", fx.err), "gitemquantity exists");
@@ -77,6 +77,7 @@ static void TestSchemaV8()
     CHECK(fx.db.Exec("SELECT 1 FROM gitemattribute LIMIT 0;", fx.err), "gitemattribute exists");
     CHECK(fx.db.Exec("SELECT 1 FROM gdungeonclear LIMIT 0;", fx.err), "gdungeonclear exists");
     CHECK(fx.db.Exec("SELECT 1 FROM gtrainingcenter LIMIT 0;", fx.err), "gtrainingcenter exists");
+    CHECK(fx.db.Exec("SELECT 1 FROM gitemwishlist LIMIT 0;", fx.err), "gitemwishlist exists");
     const int64_t uid = fx.MakeUnit(777, L"inv.schema");
     CHECK(uid > 0, "unit created");
     CHECK(fx.db.Exec("INSERT INTO gitem (UnitUID, ItemID, InventoryCategory, SlotID) VALUES (" + std::to_string(uid) + ", 1001, 1, 0);", fx.err), "seed item");
