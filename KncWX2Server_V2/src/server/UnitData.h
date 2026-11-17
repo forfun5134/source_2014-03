@@ -185,6 +185,27 @@ struct UserSkillPageData
     std::vector<UserSkillData> userSkillData;
 };
 
+struct SubQuestInstance              // KSubQuestInstance
+{
+    int32_t iID = 0;                       // int
+    uint8_t ucClearData = 0;               // UCHAR
+    bool    bIsSuccess = false;
+};
+
+struct QuestInstance                   // KQuestInstance
+{
+    int32_t iID = 0;                       // int
+    int64_t ownerUnitUID = 0;              // UidType
+    std::vector<SubQuestInstance> subQuests;
+};
+
+struct CompleteQuestInfo               // KCompleteQuestInfo（SERV_DAILY_QUEST）
+{
+    int32_t questID = 0;                   // int
+    int32_t completeCount = 0;             // int
+    int64_t completeDate = 0;              // __int64
+};
+
 struct RelationshipInfo               // SERV_RELATIONSHIP_SYSTEM（KRelationshipInfo）
 {
     int8_t  relationshipType = 0;         // char
@@ -268,6 +289,12 @@ bool PutUserSkillData(Serializer& ks, const UserSkillData& v);
 bool GetUserSkillData(Serializer& ks, UserSkillData& v);
 bool PutUserSkillPageData(Serializer& ks, const UserSkillPageData& v);
 bool GetUserSkillPageData(Serializer& ks, UserSkillPageData& v);
+bool PutSubQuestInstance(Serializer& ks, const SubQuestInstance& v);
+bool GetSubQuestInstance(Serializer& ks, SubQuestInstance& v);
+bool PutQuestInstance(Serializer& ks, const QuestInstance& v);
+bool GetQuestInstance(Serializer& ks, QuestInstance& v);
+bool PutCompleteQuestInfo(Serializer& ks, const CompleteQuestInfo& v);
+bool GetCompleteQuestInfo(Serializer& ks, CompleteQuestInfo& v);
 bool PutRelationshipInfo(Serializer& ks, const RelationshipInfo& v);
 bool GetRelationshipInfo(Serializer& ks, RelationshipInfo& v);
 bool PutUserGuildInfo(Serializer& ks, const UserGuildInfo& v);

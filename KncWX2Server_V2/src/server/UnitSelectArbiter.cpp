@@ -40,6 +40,13 @@ std::wstring Utf8ToWide(const std::string& in)
 
 namespace x2 { namespace select_unit {
 
+void BuildSelectUnitNot2(SelectUnitNot2& out)
+{
+    out = SelectUnitNot2{};
+    out.iOK = NET_OK;
+    // vecQuest / vecCompletQuest / mapRandomQuestList：無資料來源 → 空容器（誠實佔位）
+}
+
 void BuildSelectUnitNot1(int64_t userUID, int authLevel, const db::GUnitRecord& unit,
                          SelectUnitNot1& out)
 {
@@ -93,7 +100,8 @@ int32_t HandleSelectUnitReq(db::GameStore& gameDb, int64_t userUID, const Select
                             bool secondSecurityOk,
                             db::GUnitRecord* outUnit,
                             SelectUnitNot1* outNot1,
-                            int authLevel)
+                            int authLevel,
+                            SelectUnitNot2* outNot2)
 {
     // 0) 二級密碼閘門（對應 GSUserGameCommon 的 SERV_SECOND_SECURITY 檢查）
     if (!secondSecurityOk) {
@@ -139,7 +147,7 @@ int32_t HandleSelectUnitReq(db::GameStore& gameDb, int64_t userUID, const Select
         return ack.iOK;
     }
     // RecordUnitLogin 後重讀一次，讓呼叫端拿到含最新 LoginCount 的記錄
-    if (outUnit || outNot1) {
+    if (outUnit || outNot1 || outNot2) {
         db::GUnitRecord tmp;
         db::GUnitRecord& uRef = outUnit ? *outUnit : tmp;
         bool found2 = false;
@@ -151,6 +159,7 @@ int32_t HandleSelectUnitReq(db::GameStore& gameDb, int64_t userUID, const Select
         }
         if (outNot1) BuildSelectUnitNot1(userUID, authLevel, uRef, *outNot1);
     }
+    if (outNot2) BuildSelectUnitNot2(*outNot2);
 
     ack.iOK = NET_OK;
     err.clear();

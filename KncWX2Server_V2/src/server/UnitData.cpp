@@ -149,6 +149,37 @@ bool GetUserSkillPageData(Serializer& ks, UserSkillPageData& v)
                [](Serializer& s2, UserSkillData& e) { return GetUserSkillData(s2, e); });
 }
 
+bool PutSubQuestInstance(Serializer& ks, const SubQuestInstance& v)
+{
+    return ks.Put(v.iID) && ks.Put(v.ucClearData) && ks.Put(v.bIsSuccess);
+}
+bool GetSubQuestInstance(Serializer& ks, SubQuestInstance& v)
+{
+    return ks.Get(v.iID) && ks.Get(v.ucClearData) && ks.Get(v.bIsSuccess);
+}
+
+bool PutQuestInstance(Serializer& ks, const QuestInstance& v)
+{
+    return ks.Put(v.iID) && ks.Put(v.ownerUnitUID) &&
+           x2::detail::PutCountPrefixVec(ks, v.subQuests,
+               [](Serializer& s2, const SubQuestInstance& e) { return PutSubQuestInstance(s2, e); });
+}
+bool GetQuestInstance(Serializer& ks, QuestInstance& v)
+{
+    return ks.Get(v.iID) && ks.Get(v.ownerUnitUID) &&
+           x2::detail::GetCountPrefixVec(ks, v.subQuests,
+               [](Serializer& s2, SubQuestInstance& e) { return GetSubQuestInstance(s2, e); });
+}
+
+bool PutCompleteQuestInfo(Serializer& ks, const CompleteQuestInfo& v)
+{
+    return ks.Put(v.questID) && ks.Put(v.completeCount) && ks.Put(v.completeDate);
+}
+bool GetCompleteQuestInfo(Serializer& ks, CompleteQuestInfo& v)
+{
+    return ks.Get(v.questID) && ks.Get(v.completeCount) && ks.Get(v.completeDate);
+}
+
 bool PutRelationshipInfo(Serializer& ks, const RelationshipInfo& v)
 {
     return ks.Put(v.relationshipType) && ks.Put(v.otherUnitUID) &&

@@ -43,6 +43,7 @@ static int g_pass_sel = 0, g_fail_sel = 0;
 static const uint16_t kSelectUnitReqID = static_cast<uint16_t>(EventID::EGS_SELECT_UNIT_REQ);
 static const uint16_t kSelectUnitAckID = static_cast<uint16_t>(EventID::EGS_SELECT_UNIT_ACK);
 static const uint16_t kSelectUnit1NotID = static_cast<uint16_t>(EventID::EGS_SELECT_UNIT_1_NOT);
+static const uint16_t kSelectUnit2NotID = static_cast<uint16_t>(EventID::EGS_SELECT_UNIT_2_NOT);
 static const uint16_t kConnectReqID = static_cast<uint16_t>(EventID::EGS_CONNECT_REQ);
 static const uint16_t kConnectAckID = static_cast<uint16_t>(EventID::EGS_CONNECT_ACK);
 static const uint16_t kVerifyReqID  = static_cast<uint16_t>(EventID::EGS_VERIFY_ACCOUNT_REQ);
@@ -271,6 +272,47 @@ static void TestBuildSelectUnitNot1FromGUnit()
     CHECK(not1.items.empty() && not1.inventorySlotSize.empty() && not1.numResurrectionStone == 0, "not1 no fabricated items/stones");
 }
 
+static void TestSelectUnitNot2Codec()
+{
+    SelectUnitNot2 v;
+    v.iOK = NET_OK;
+    {
+        unit::QuestInstance q;
+        q.iID = 8001;
+        q.ownerUnitUID = 0x0BADCAFE12345678LL;
+        q.subQuests.push_back({ 9001, 7, true });
+        q.subQuests.push_back({ 9002, 0, false });
+        v.vecQuest.push_back(q);
+    }
+    v.vecCompletQuest.push_back({ 7001, 3, 0x0102030405060708LL });
+    v.mapRandomQuestList[11] = 101;
+    v.mapRandomQuestList[12] = 102;
+
+    SerBuffer buf = PutPayload([&v](Serializer& s) { return PutSelectUnitNot2(s, v); });
+    CHECK(buf.GetLength() > 0, "not2 encodes");
+
+    Serializer ks2;
+    SerBuffer tmp = buf;
+    SelectUnitNot2 out;
+    CHECK(ks2.BeginReading(&tmp), "not2 begin read");
+    CHECK(GetSelectUnitNot2(ks2, out), "not2 decodes");
+    ks2.EndReading();
+    CHECK(out.iOK == NET_OK, "not2 iOK rt");
+    CHECK(out.vecQuest.size() == 1 && out.vecQuest[0].iID == 8001 && out.vecQuest[0].ownerUnitUID == 0x0BADCAFE12345678LL, "not2 quest rt");
+    CHECK(out.vecQuest[0].subQuests.size() == 2 && out.vecQuest[0].subQuests[0].ucClearData == 7 && out.vecQuest[0].subQuests[0].bIsSuccess, "not2 subquest rt");
+    CHECK(out.vecCompletQuest.size() == 1 && out.vecCompletQuest[0].questID == 7001 && out.vecCompletQuest[0].completeCount == 3 && out.vecCompletQuest[0].completeDate == 0x0102030405060708LL, "not2 completeQuest rt");
+    CHECK(out.mapRandomQuestList.size() == 2 && out.mapRandomQuestList[11] == 101 && out.mapRandomQuestList[12] == 102, "not2 randomQuest rt");
+}
+
+static void TestBuildSelectUnitNot2Defaults()
+{
+    SelectUnitNot2 not2;
+    BuildSelectUnitNot2(not2);
+    CHECK(not2.iOK == NET_OK, "not2 builder iOK");
+    CHECK(not2.vecQuest.empty() && not2.vecCompletQuest.empty() && not2.mapRandomQuestList.empty(),
+          "not2 builder: no fabricated quest data (empty placeholders)");
+}
+
 // ---- loopback：CONNECT → VERIFY → SELECT_UNIT（雙庫聯動）----
 static void TestSelectUnitLoopback()
 {
@@ -383,10 +425,13 @@ static void TestSelectUnitLoopback()
                 ks.EndReading();
                 SelectUnitAck ack;
                 SelectUnitNot1 not1;
-                HandleSelectUnitReq(gameStore, seenUserUID.load(), req, ack, err, true, nullptr, &not1, 5);
+                SelectUnitNot2 not2;
+                HandleSelectUnitReq(gameStore, seenUserUID.load(), req, ack, err, true, nullptr, &not1, 5, &not2);
                 if (ack.iOK == NET_OK) {
                     SerBuffer p1 = PutPayload([&not1](Serializer& s2) { return PutSelectUnitNot1(s2, not1); });
                     if (!srv.SendEvent(MakeEvent(kSelectUnit1NotID, p1))) return;
+                    SerBuffer p2 = PutPayload([&not2](Serializer& s2) { return PutSelectUnitNot2(s2, not2); });
+                    if (!srv.SendEvent(MakeEvent(kSelectUnit2NotID, p2))) return;
                 }
                 SerBuffer payload = PutPayload([&ack](Serializer& s) { return PutSelectUnitAck(s, ack); });
                 if (!srv.SendEvent(MakeEvent(kSelectUnitAckID, payload))) return;
@@ -452,6 +497,15 @@ static void TestSelectUnitLoopback()
         CHECK(GetSelectUnitNot1(ksNot, not1), "decode 1_NOT");
         ksNot.EndReading();
         CHECK(not1.iOK == NET_OK && not1.unitInfo.unitUID == unitUID && not1.unitInfo.nickName == L"選擇切片", "1_NOT carries selected unit");
+        Event not2Ev;
+        CHECK(client.RecvEvent(not2Ev, 5000) == Session::RecvResult::Event, "select 2_NOT received");
+        CHECK(not2Ev.eventID == kSelectUnit2NotID, "select 2_NOT id == 43");
+        SelectUnitNot2 not2;
+        Serializer ksNot2;
+        CHECK(ksNot2.BeginReading(&not2Ev.payload), "read 2_NOT");
+        CHECK(GetSelectUnitNot2(ksNot2, not2), "decode 2_NOT");
+        ksNot2.EndReading();
+        CHECK(not2.iOK == NET_OK, "2_NOT iOK");
         Event ackEv;
         CHECK(client.RecvEvent(ackEv, 5000) == Session::RecvResult::Event, "select ack (own) received");
         CHECK(ackEv.eventID == kSelectUnitAckID, "select ack (own) id");
@@ -520,6 +574,8 @@ void RunSelectUnitTestsByRef(int& pass, int& fail)
     TestSelectUnitCodec();
     TestSelectUnitNot1Codec();
     TestBuildSelectUnitNot1FromGUnit();
+    TestSelectUnitNot2Codec();
+    TestBuildSelectUnitNot2Defaults();
     TestUnitSelectArbiterDecisions();
     TestSelectUnitLoopback();
     pass += g_pass_sel;

@@ -10,9 +10,9 @@
 //   事件 ID（V2 EventIDs.h 實測）：EGS_SELECT_UNIT_REQ=40, EGS_SELECT_UNIT_ACK=41,
 //                                    EGS_SELECT_UNIT_1_NOT..5_NOT = 42..46。
 //
-// ⚠ 本檔只覆蓋 REQ 與「收尾 ACK」。
-//   SELECT_UNIT_1_NOT…5_NOT（KUnitInfo / KInventoryItemInfo / KQuestInstance / KMissionInstance /
-//   KPetInfo / KDenyOptions / KMessengerInfo … 約 20 個巢狀型別）**尚未移植**；
+// ⚠ 本檔覆蓋 REQ、「收尾 ACK」、SELECT_UNIT_1_NOT 與 SELECT_UNIT_2_NOT。
+//   SELECT_UNIT_3_NOT…5_NOT（KMissionInstance / KTitleInfo / KPetInfo / KDenyOptions /
+//   KMessengerInfo / KGamePlayStatusContainer …）**尚未移植**；
 //   在它們完成前，真實客戶端無法用 V2 完成角色選擇流程（見 docs/architecture.md §12）。
 //   線路佈局為自洽 golden bytes，未對原 SDK 實機驗證。
 #pragma once
@@ -72,8 +72,24 @@ bool PutSelectUnitReq(Serializer& ks, const SelectUnitReq& v);
 bool GetSelectUnitReq(Serializer& ks, SelectUnitReq& v);
 bool PutSelectUnitAck(Serializer& ks, const SelectUnitAck& v);
 bool GetSelectUnitAck(Serializer& ks, SelectUnitAck& v);
+// EGS_SELECT_UNIT_2_NOT（服務端 → 客戶端）：任務進度分片。
+// JP INT_INTERNAL（SERV_DAILY_QUEST、SERV_RANDOM_DAY_QUEST 皆已定義，2026-11-17 機讀核對）
+// PUT 順序機讀自 CommonPacket.cpp（2026-11-17）：
+//   iOK, vecQuest<KQuestInstance>, vecCompletQuest<KCompleteQuestInfo>, mapRandomQuestList<int,int>
+// 事件 ID：EGS_SELECT_UNIT_2_NOT = 43。
+// ⚠ 自洽 golden bytes；未對原 SDK 實機驗證。
+struct SelectUnitNot2
+{
+    int32_t iOK = 0;
+    std::vector<unit::QuestInstance> vecQuest;              // vector<KQuestInstance>
+    std::vector<unit::CompleteQuestInfo> vecCompletQuest;   // SERV_DAILY_QUEST（vector<KCompleteQuestInfo>）
+    std::map<int32_t, int32_t> mapRandomQuestList;          // SERV_RANDOM_DAY_QUEST（map<int,int>）
+};
+
 bool PutSelectUnitNot1(Serializer& ks, const SelectUnitNot1& v);
 bool GetSelectUnitNot1(Serializer& ks, SelectUnitNot1& v);
+bool PutSelectUnitNot2(Serializer& ks, const SelectUnitNot2& v);
+bool GetSelectUnitNot2(Serializer& ks, SelectUnitNot2& v);
 
 } // namespace select_unit
 } // namespace x2

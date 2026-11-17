@@ -76,4 +76,27 @@ bool GetSelectUnitNot1(Serializer& ks, SelectUnitNot1& v)
     return unit::GetRelationshipInfo(ks, v.relationshipInfo);
 }
 
+bool PutSelectUnitNot2(Serializer& ks, const SelectUnitNot2& v)
+{
+    if (!ks.Put(v.iOK)) return false;
+    if (!x2::detail::PutCountPrefixVec(ks, v.vecQuest,
+            [](Serializer& s2, const unit::QuestInstance& e) { return unit::PutQuestInstance(s2, e); })) return false;
+    if (!x2::detail::PutCountPrefixVec(ks, v.vecCompletQuest,
+            [](Serializer& s2, const unit::CompleteQuestInfo& e) { return unit::PutCompleteQuestInfo(s2, e); })) return false;
+    return x2::detail::PutCountPrefixMap(ks, v.mapRandomQuestList,
+            [](Serializer& s2, const int32_t& e) { return s2.Put(e); },
+            [](Serializer& s2, const int32_t& e) { return s2.Put(e); });   // map<int,int>
+}
+bool GetSelectUnitNot2(Serializer& ks, SelectUnitNot2& v)
+{
+    if (!ks.Get(v.iOK)) return false;
+    if (!x2::detail::GetCountPrefixVec(ks, v.vecQuest,
+            [](Serializer& s2, unit::QuestInstance& e) { return unit::GetQuestInstance(s2, e); })) return false;
+    if (!x2::detail::GetCountPrefixVec(ks, v.vecCompletQuest,
+            [](Serializer& s2, unit::CompleteQuestInfo& e) { return unit::GetCompleteQuestInfo(s2, e); })) return false;
+    return x2::detail::GetCountPrefixMap(ks, v.mapRandomQuestList,
+            [](Serializer& s2, int32_t& e) { return s2.Get(e); },
+            [](Serializer& s2, int32_t& e) { return s2.Get(e); });
+}
+
 }} // namespace x2::select_unit
