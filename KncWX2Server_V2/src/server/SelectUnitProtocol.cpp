@@ -99,4 +99,49 @@ bool GetSelectUnitNot2(Serializer& ks, SelectUnitNot2& v)
             [](Serializer& s2, int32_t& e) { return s2.Get(e); });
 }
 
+bool PutSelectUnitNot3(Serializer& ks, const SelectUnitNot3& v)
+{
+    if (!ks.Put(v.iOK)) return false;
+    if (!x2::detail::PutCountPrefixVec(ks, v.vecMission,
+            [](Serializer& s2, const unit::MissionInstance& e) { return unit::PutMissionInstance(s2, e); })) return false;
+    if (!x2::detail::PutCountPrefixVec(ks, v.vecTitle,
+            [](Serializer& s2, const unit::TitleInfo& e) { return unit::PutTitleInfo(s2, e); })) return false;
+    if (!ks.Put(v.iSummonedPetUID)) return false;
+    if (!x2::detail::PutCountPrefixVec(ks, v.vecPetList,
+            [](Serializer& s2, const unit::PetInfo& e) { return unit::PutPetInfo(s2, e); })) return false;
+    if (!x2::detail::PutCountPrefixVec(ks, v.vecCanEvolutionPetList,
+            [](Serializer& s2, const int64_t& e) { return s2.Put(e); })) return false;
+    if (!x2::detail::PutCountPrefixVec(ks, v.vecNeverSummonPetList,
+            [](Serializer& s2, const int64_t& e) { return s2.Put(e); })) return false;
+    return x2::detail::PutCountPrefixMap(ks, v.mapPetItem,
+            [](Serializer& s2, const int64_t& e) { return s2.Put(e); },
+            [](Serializer& s2, const std::map<int64_t, unit::InventoryItemInfo>& inner) {
+                return x2::detail::PutCountPrefixMap(s2, inner,
+                    [](Serializer& s3, const int64_t& e) { return s3.Put(e); },
+                    [](Serializer& s3, const unit::InventoryItemInfo& e) { return unit::PutInventoryItemInfo(s3, e); });
+            });
+}
+bool GetSelectUnitNot3(Serializer& ks, SelectUnitNot3& v)
+{
+    if (!ks.Get(v.iOK)) return false;
+    if (!x2::detail::GetCountPrefixVec(ks, v.vecMission,
+            [](Serializer& s2, unit::MissionInstance& e) { return unit::GetMissionInstance(s2, e); })) return false;
+    if (!x2::detail::GetCountPrefixVec(ks, v.vecTitle,
+            [](Serializer& s2, unit::TitleInfo& e) { return unit::GetTitleInfo(s2, e); })) return false;
+    if (!ks.Get(v.iSummonedPetUID)) return false;
+    if (!x2::detail::GetCountPrefixVec(ks, v.vecPetList,
+            [](Serializer& s2, unit::PetInfo& e) { return unit::GetPetInfo(s2, e); })) return false;
+    if (!x2::detail::GetCountPrefixVec(ks, v.vecCanEvolutionPetList,
+            [](Serializer& s2, int64_t& e) { return s2.Get(e); })) return false;
+    if (!x2::detail::GetCountPrefixVec(ks, v.vecNeverSummonPetList,
+            [](Serializer& s2, int64_t& e) { return s2.Get(e); })) return false;
+    return x2::detail::GetCountPrefixMap(ks, v.mapPetItem,
+            [](Serializer& s2, int64_t& e) { return s2.Get(e); },
+            [](Serializer& s2, std::map<int64_t, unit::InventoryItemInfo>& inner) {
+                return x2::detail::GetCountPrefixMap(s2, inner,
+                    [](Serializer& s3, int64_t& e) { return s3.Get(e); },
+                    [](Serializer& s3, unit::InventoryItemInfo& e) { return unit::GetInventoryItemInfo(s3, e); });
+            });
+}
+
 }} // namespace x2::select_unit

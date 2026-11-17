@@ -206,6 +206,44 @@ struct CompleteQuestInfo               // KCompleteQuestInfo（SERV_DAILY_QUEST�
     int64_t completeDate = 0;              // __int64
 };
 
+struct SubMissionInstance              // KSubMissionInstance
+{
+    int32_t iID = 0;                       // int
+    int16_t sClearData = 0;                // short
+    bool    bIsSuccess = false;
+};
+
+struct MissionInstance                   // KMissionInstance
+{
+    int32_t iID = 0;                       // int
+    std::vector<SubMissionInstance> subMissionInstances;
+};
+
+struct TitleInfo                        // KTitleInfo
+{
+    int32_t  iTitleID = 0;                 // int
+    std::wstring wstrEndDate;
+    int64_t  kCTime = 0;                   // __int64
+    bool     bInfinity = false;
+};
+
+struct PetInfo                          // KPetInfo（SERV_PETID_DATA_TYPE_CHANGE + SERV_PET_AUTO_LOOTING 已定義；SERV_EVENT_PET_INVENTORY/FREE_AUTO_LOOTING/PERIOD_PET 未定義）
+{
+    int64_t  iPetUID = 0;                  // UidType
+    int32_t  iPetID = 0;                   // int（SERV_PETID_DATA_TYPE_CHANGE）
+    std::wstring wstrPetName;
+    int8_t   cEvolutionStep = 0;           // char
+    int16_t  sSatiety = 0;                 // short
+    int32_t  iIntimacy = 0;                // int
+    int16_t  sExtroversion = 0;            // short
+    int16_t  sEmotion = 0;                 // short
+    bool     bAutoFeed = false;
+    std::wstring wstrLastFeedDate;
+    std::wstring wstrLastSummonDate;
+    std::wstring wstrRegDate;
+    bool     bAutoLooting = false;         // SERV_PET_AUTO_LOOTING
+};
+
 struct RelationshipInfo               // SERV_RELATIONSHIP_SYSTEM（KRelationshipInfo）
 {
     int8_t  relationshipType = 0;         // char
@@ -293,6 +331,14 @@ bool PutSubQuestInstance(Serializer& ks, const SubQuestInstance& v);
 bool GetSubQuestInstance(Serializer& ks, SubQuestInstance& v);
 bool PutQuestInstance(Serializer& ks, const QuestInstance& v);
 bool GetQuestInstance(Serializer& ks, QuestInstance& v);
+bool PutSubMissionInstance(Serializer& ks, const SubMissionInstance& v);
+bool GetSubMissionInstance(Serializer& ks, SubMissionInstance& v);
+bool PutMissionInstance(Serializer& ks, const MissionInstance& v);
+bool GetMissionInstance(Serializer& ks, MissionInstance& v);
+bool PutTitleInfo(Serializer& ks, const TitleInfo& v);
+bool GetTitleInfo(Serializer& ks, TitleInfo& v);
+bool PutPetInfo(Serializer& ks, const PetInfo& v);
+bool GetPetInfo(Serializer& ks, PetInfo& v);
 bool PutCompleteQuestInfo(Serializer& ks, const CompleteQuestInfo& v);
 bool GetCompleteQuestInfo(Serializer& ks, CompleteQuestInfo& v);
 bool PutRelationshipInfo(Serializer& ks, const RelationshipInfo& v);

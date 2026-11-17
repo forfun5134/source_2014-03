@@ -44,6 +44,7 @@ static const uint16_t kSelectUnitReqID = static_cast<uint16_t>(EventID::EGS_SELE
 static const uint16_t kSelectUnitAckID = static_cast<uint16_t>(EventID::EGS_SELECT_UNIT_ACK);
 static const uint16_t kSelectUnit1NotID = static_cast<uint16_t>(EventID::EGS_SELECT_UNIT_1_NOT);
 static const uint16_t kSelectUnit2NotID = static_cast<uint16_t>(EventID::EGS_SELECT_UNIT_2_NOT);
+static const uint16_t kSelectUnit3NotID = static_cast<uint16_t>(EventID::EGS_SELECT_UNIT_3_NOT);
 static const uint16_t kConnectReqID = static_cast<uint16_t>(EventID::EGS_CONNECT_REQ);
 static const uint16_t kConnectAckID = static_cast<uint16_t>(EventID::EGS_CONNECT_ACK);
 static const uint16_t kVerifyReqID  = static_cast<uint16_t>(EventID::EGS_VERIFY_ACCOUNT_REQ);
@@ -313,6 +314,81 @@ static void TestBuildSelectUnitNot2Defaults()
           "not2 builder: no fabricated quest data (empty placeholders)");
 }
 
+static void TestSelectUnitNot3Codec()
+{
+    SelectUnitNot3 v;
+    v.iOK = NET_OK;
+    {
+        unit::MissionInstance m;
+        m.iID = 5001;
+        m.subMissionInstances.push_back({ 6001, 3, true });
+        m.subMissionInstances.push_back({ 6002, 0, false });
+        v.vecMission.push_back(m);
+    }
+    v.vecTitle.push_back({ 3001, L"2099-12-31 00:00:00", 0x0102030405060708LL, true });
+    v.iSummonedPetUID = 0x0BADCAFE12345678LL;
+    {
+        unit::PetInfo p;
+        p.iPetUID = 0x0BADCAFE12345678LL;
+        p.iPetID = 9001;
+        p.wstrPetName = L"小火";
+        p.cEvolutionStep = 2;
+        p.sSatiety = 80;
+        p.iIntimacy = 12345;
+        p.sExtroversion = 50;
+        p.sEmotion = 60;
+        p.bAutoFeed = true;
+        p.wstrLastFeedDate = L"2026-11-15 10:00:00";
+        p.wstrLastSummonDate = L"2026-11-16 10:00:00";
+        p.wstrRegDate = L"2026-01-01 00:00:00";
+        p.bAutoLooting = true;
+        v.vecPetList.push_back(p);
+    }
+    v.vecCanEvolutionPetList = { 0x1111111111111111LL, 0x2222222222222222LL };
+    v.vecNeverSummonPetList = { 0x3333333333333333LL };
+    {
+        unit::InventoryItemInfo ii;
+        ii.itemUID = 0x4444444444444444LL;
+        ii.slotCategory = 9;
+        ii.slotID = 3;
+        ii.itemInfo.itemID = 1234;
+        v.mapPetItem[0x0BADCAFE12345678LL][0x4444444444444444LL] = ii;
+    }
+
+    SerBuffer buf = PutPayload([&v](Serializer& s) { return PutSelectUnitNot3(s, v); });
+    CHECK(buf.GetLength() > 0, "not3 encodes");
+
+    Serializer ks2;
+    SerBuffer tmp = buf;
+    SelectUnitNot3 out;
+    CHECK(ks2.BeginReading(&tmp), "not3 begin read");
+    CHECK(GetSelectUnitNot3(ks2, out), "not3 decodes");
+    ks2.EndReading();
+    CHECK(out.iOK == NET_OK, "not3 iOK rt");
+    CHECK(out.vecMission.size() == 1 && out.vecMission[0].iID == 5001 && out.vecMission[0].subMissionInstances.size() == 2 &&
+          out.vecMission[0].subMissionInstances[0].sClearData == 3, "not3 mission rt");
+    CHECK(out.vecTitle.size() == 1 && out.vecTitle[0].iTitleID == 3001 && out.vecTitle[0].bInfinity &&
+          out.vecTitle[0].kCTime == 0x0102030405060708LL, "not3 title rt");
+    CHECK(out.iSummonedPetUID == 0x0BADCAFE12345678LL, "not3 summoned pet rt");
+    CHECK(out.vecPetList.size() == 1 && out.vecPetList[0].iPetID == 9001 && out.vecPetList[0].wstrPetName == L"小火" &&
+          out.vecPetList[0].sSatiety == 80 && out.vecPetList[0].bAutoFeed && out.vecPetList[0].bAutoLooting, "not3 pet rt");
+    CHECK(out.vecCanEvolutionPetList == std::vector<int64_t>({ 0x1111111111111111LL, 0x2222222222222222LL }), "not3 canEvolution rt");
+    CHECK(out.vecNeverSummonPetList == std::vector<int64_t>({ 0x3333333333333333LL }), "not3 neverSummon rt");
+    CHECK(out.mapPetItem.size() == 1 &&
+          out.mapPetItem.begin()->second.begin()->second.itemInfo.itemID == 1234, "not3 petItem nested map rt");
+}
+
+static void TestBuildSelectUnitNot3Defaults()
+{
+    SelectUnitNot3 not3;
+    BuildSelectUnitNot3(not3);
+    CHECK(not3.iOK == NET_OK, "not3 builder iOK");
+    CHECK(not3.vecMission.empty() && not3.vecTitle.empty() && not3.vecPetList.empty() &&
+          not3.vecCanEvolutionPetList.empty() && not3.vecNeverSummonPetList.empty() &&
+          not3.mapPetItem.empty() && not3.iSummonedPetUID == 0,
+          "not3 builder: no fabricated mission/title/pet data (empty placeholders)");
+}
+
 // ---- loopback：CONNECT → VERIFY → SELECT_UNIT（雙庫聯動）----
 static void TestSelectUnitLoopback()
 {
@@ -426,12 +502,15 @@ static void TestSelectUnitLoopback()
                 SelectUnitAck ack;
                 SelectUnitNot1 not1;
                 SelectUnitNot2 not2;
-                HandleSelectUnitReq(gameStore, seenUserUID.load(), req, ack, err, true, nullptr, &not1, 5, &not2);
+                SelectUnitNot3 not3;
+                HandleSelectUnitReq(gameStore, seenUserUID.load(), req, ack, err, true, nullptr, &not1, 5, &not2, &not3);
                 if (ack.iOK == NET_OK) {
                     SerBuffer p1 = PutPayload([&not1](Serializer& s2) { return PutSelectUnitNot1(s2, not1); });
                     if (!srv.SendEvent(MakeEvent(kSelectUnit1NotID, p1))) return;
                     SerBuffer p2 = PutPayload([&not2](Serializer& s2) { return PutSelectUnitNot2(s2, not2); });
                     if (!srv.SendEvent(MakeEvent(kSelectUnit2NotID, p2))) return;
+                    SerBuffer p3 = PutPayload([&not3](Serializer& s2) { return PutSelectUnitNot3(s2, not3); });
+                    if (!srv.SendEvent(MakeEvent(kSelectUnit3NotID, p3))) return;
                 }
                 SerBuffer payload = PutPayload([&ack](Serializer& s) { return PutSelectUnitAck(s, ack); });
                 if (!srv.SendEvent(MakeEvent(kSelectUnitAckID, payload))) return;
@@ -506,6 +585,15 @@ static void TestSelectUnitLoopback()
         CHECK(GetSelectUnitNot2(ksNot2, not2), "decode 2_NOT");
         ksNot2.EndReading();
         CHECK(not2.iOK == NET_OK, "2_NOT iOK");
+        Event not3Ev;
+        CHECK(client.RecvEvent(not3Ev, 5000) == Session::RecvResult::Event, "select 3_NOT received");
+        CHECK(not3Ev.eventID == kSelectUnit3NotID, "select 3_NOT id == 44");
+        SelectUnitNot3 not3;
+        Serializer ksNot3;
+        CHECK(ksNot3.BeginReading(&not3Ev.payload), "read 3_NOT");
+        CHECK(GetSelectUnitNot3(ksNot3, not3), "decode 3_NOT");
+        ksNot3.EndReading();
+        CHECK(not3.iOK == NET_OK, "3_NOT iOK");
         Event ackEv;
         CHECK(client.RecvEvent(ackEv, 5000) == Session::RecvResult::Event, "select ack (own) received");
         CHECK(ackEv.eventID == kSelectUnitAckID, "select ack (own) id");
@@ -576,6 +664,8 @@ void RunSelectUnitTestsByRef(int& pass, int& fail)
     TestBuildSelectUnitNot1FromGUnit();
     TestSelectUnitNot2Codec();
     TestBuildSelectUnitNot2Defaults();
+    TestSelectUnitNot3Codec();
+    TestBuildSelectUnitNot3Defaults();
     TestUnitSelectArbiterDecisions();
     TestSelectUnitLoopback();
     pass += g_pass_sel;

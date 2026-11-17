@@ -10,9 +10,8 @@
 //   事件 ID（V2 EventIDs.h 實測）：EGS_SELECT_UNIT_REQ=40, EGS_SELECT_UNIT_ACK=41,
 //                                    EGS_SELECT_UNIT_1_NOT..5_NOT = 42..46。
 //
-// ⚠ 本檔覆蓋 REQ、「收尾 ACK」、SELECT_UNIT_1_NOT 與 SELECT_UNIT_2_NOT。
-//   SELECT_UNIT_3_NOT…5_NOT（KMissionInstance / KTitleInfo / KPetInfo / KDenyOptions /
-//   KMessengerInfo / KGamePlayStatusContainer …）**尚未移植**；
+// ⚠ 本檔覆蓋 REQ、「收尾 ACK」、SELECT_UNIT_1_NOT…3_NOT。
+//   SELECT_UNIT_4_NOT…5_NOT（KDenyOptions / KMessengerInfo / KGamePlayStatusContainer …）**尚未移植**；
 //   在它們完成前，真實客戶端無法用 V2 完成角色選擇流程（見 docs/architecture.md §12）。
 //   線路佈局為自洽 golden bytes，未對原 SDK 實機驗證。
 #pragma once
@@ -88,8 +87,32 @@ struct SelectUnitNot2
 
 bool PutSelectUnitNot1(Serializer& ks, const SelectUnitNot1& v);
 bool GetSelectUnitNot1(Serializer& ks, SelectUnitNot1& v);
+// EGS_SELECT_UNIT_3_NOT（服務端 → 客戶端）：使命/稱號/寵物分片。
+// JP INT_INTERNAL（SERV_PET_SYSTEM:460、SERV_PETID_DATA_TYPE_CHANGE:3891、SERV_PET_AUTO_LOOTING:2342 皆已定義；
+// SERV_EVENT_PET_INVENTORY/SERV_FREE_AUTO_LOOTING/SERV_PERIOD_PET 未定義——2026-11-17 機讀核對）
+// PUT 順序機讀自 CommonPacket.cpp（2026-11-17）：
+//   iOK, vecMission<KMissionInstance>, vecTitle<KTitleInfo>,
+//   iSummonedPetUID(UidType), vecPetList<KPetInfo>,
+//   vecCanEvolutionPetList<UidType>, vecNeverSummonPetList<UidType>,
+//   mapPetItem<UidType, map<UidType,KInventoryItemInfo>>
+// 事件 ID：EGS_SELECT_UNIT_3_NOT = 44。
+// ⚠ 自洽 golden bytes；未對原 SDK 實機驗證。
+struct SelectUnitNot3
+{
+    int32_t iOK = 0;
+    std::vector<unit::MissionInstance> vecMission;                       // vector<KMissionInstance>
+    std::vector<unit::TitleInfo> vecTitle;                               // vector<KTitleInfo>
+    int64_t iSummonedPetUID = 0;                                         // UidType（SERV_PET_SYSTEM）
+    std::vector<unit::PetInfo> vecPetList;                               // SERV_PET_SYSTEM
+    std::vector<int64_t> vecCanEvolutionPetList;                         // SERV_PET_SYSTEM（vector<UidType>）
+    std::vector<int64_t> vecNeverSummonPetList;                          // SERV_PET_SYSTEM（vector<UidType>）
+    std::map<int64_t, std::map<int64_t, unit::InventoryItemInfo>> mapPetItem;  // SERV_PET_SYSTEM（map<UidType,map<UidType,KInventoryItemInfo>>）
+};
+
 bool PutSelectUnitNot2(Serializer& ks, const SelectUnitNot2& v);
 bool GetSelectUnitNot2(Serializer& ks, SelectUnitNot2& v);
+bool PutSelectUnitNot3(Serializer& ks, const SelectUnitNot3& v);
+bool GetSelectUnitNot3(Serializer& ks, SelectUnitNot3& v);
 
 } // namespace select_unit
 } // namespace x2

@@ -171,6 +171,54 @@ bool GetQuestInstance(Serializer& ks, QuestInstance& v)
                [](Serializer& s2, SubQuestInstance& e) { return GetSubQuestInstance(s2, e); });
 }
 
+bool PutSubMissionInstance(Serializer& ks, const SubMissionInstance& v)
+{
+    return ks.Put(v.iID) && ks.Put(v.sClearData) && ks.Put(v.bIsSuccess);
+}
+bool GetSubMissionInstance(Serializer& ks, SubMissionInstance& v)
+{
+    return ks.Get(v.iID) && ks.Get(v.sClearData) && ks.Get(v.bIsSuccess);
+}
+
+bool PutMissionInstance(Serializer& ks, const MissionInstance& v)
+{
+    if (!ks.Put(v.iID)) return false;
+    return x2::detail::PutCountPrefixVec(ks, v.subMissionInstances,
+               [](Serializer& s2, const SubMissionInstance& e) { return PutSubMissionInstance(s2, e); });
+}
+bool GetMissionInstance(Serializer& ks, MissionInstance& v)
+{
+    if (!ks.Get(v.iID)) return false;
+    return x2::detail::GetCountPrefixVec(ks, v.subMissionInstances,
+               [](Serializer& s2, SubMissionInstance& e) { return GetSubMissionInstance(s2, e); });
+}
+
+bool PutTitleInfo(Serializer& ks, const TitleInfo& v)
+{
+    return ks.Put(v.iTitleID) && ks.Put(v.wstrEndDate) && ks.Put(v.kCTime) && ks.Put(v.bInfinity);
+}
+bool GetTitleInfo(Serializer& ks, TitleInfo& v)
+{
+    return ks.Get(v.iTitleID) && ks.Get(v.wstrEndDate) && ks.Get(v.kCTime) && ks.Get(v.bInfinity);
+}
+
+bool PutPetInfo(Serializer& ks, const PetInfo& v)
+{
+    return ks.Put(v.iPetUID) && ks.Put(v.iPetID) && ks.Put(v.wstrPetName) &&
+           ks.Put(v.cEvolutionStep) && ks.Put(v.sSatiety) && ks.Put(v.iIntimacy) &&
+           ks.Put(v.sExtroversion) && ks.Put(v.sEmotion) && ks.Put(v.bAutoFeed) &&
+           ks.Put(v.wstrLastFeedDate) && ks.Put(v.wstrLastSummonDate) && ks.Put(v.wstrRegDate) &&
+           ks.Put(v.bAutoLooting);
+}
+bool GetPetInfo(Serializer& ks, PetInfo& v)
+{
+    return ks.Get(v.iPetUID) && ks.Get(v.iPetID) && ks.Get(v.wstrPetName) &&
+           ks.Get(v.cEvolutionStep) && ks.Get(v.sSatiety) && ks.Get(v.iIntimacy) &&
+           ks.Get(v.sExtroversion) && ks.Get(v.sEmotion) && ks.Get(v.bAutoFeed) &&
+           ks.Get(v.wstrLastFeedDate) && ks.Get(v.wstrLastSummonDate) && ks.Get(v.wstrRegDate) &&
+           ks.Get(v.bAutoLooting);
+}
+
 bool PutCompleteQuestInfo(Serializer& ks, const CompleteQuestInfo& v)
 {
     return ks.Put(v.questID) && ks.Put(v.completeCount) && ks.Put(v.completeDate);
