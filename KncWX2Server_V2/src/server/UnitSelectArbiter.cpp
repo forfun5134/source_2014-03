@@ -85,11 +85,21 @@ void BuildSelectUnitNot5(SelectUnitNot5& out)
     // 無資料來源 → 全 false/0/空容器（誠實佔位）
 }
 
-void BuildSelectUnitNot4(SelectUnitNot4& out, const db::DenyOptionValues& denyOptions)
+void BuildSelectUnitNot4(SelectUnitNot4& out, const db::DenyOptionValues& denyOptions,
+                         const std::vector<db::BlacklistRecord>& blacklist,
+                         const std::vector<db::TutorRecord>& tutor,
+                         const std::vector<db::ConnectTimeEventRecord>& connectTimeEvents)
 {
     out = SelectUnitNot4{};
     out.iOK = NET_OK;
-    // vecChatBlackList / vecTutorialDBUnitInfo / …：無資料來源 → 全預設（誠實佔位）
+    // vecChatBlackList ← gblacklist（原 gup_select_blacklist；NickName NULL → 空字串；kUnitInfo 對手方實際等級等未建模）
+    out.vecChatBlackList.reserve(blacklist.size());
+    for (const auto& b : blacklist) {
+        unit::ChatBlackListUnit e;
+        e.iUnitUID = b.blockUnitUID;
+        e.wstrNickName = Utf8ToWide(b.nickname);
+        out.vecChatBlackList.push_back(std::move(e));
+    }
     // kDenyOptions ← GDenyOption（§0a9；question 1..6 → friendShip/inviteGuild/party/personalTrade/requestCouple/invitePracticePVP）
     out.kDenyOptions.cDenyFriendShip      = static_cast<int8_t>(denyOptions.friendShip);
     out.kDenyOptions.cDenyInviteGuild     = static_cast<int8_t>(denyOptions.inviteGuild);
@@ -97,6 +107,30 @@ void BuildSelectUnitNot4(SelectUnitNot4& out, const db::DenyOptionValues& denyOp
     out.kDenyOptions.cDenyPersonalTrade   = static_cast<int8_t>(denyOptions.personalTrade);
     out.kDenyOptions.cDenyRequestCouple   = static_cast<int8_t>(denyOptions.requestCouple);
     out.kDenyOptions.cDenyInvitePracticePVP = static_cast<int8_t>(denyOptions.invitePracticePVP);
+    // vecTutorialDBUnitInfo ← gtutor（原 gup_get_tutor；11~19 級 → 不查詢（原 iTutorialFlag=-1）；
+    //   bIsOnline=false（原 fetch 不填）；ucLevel ← EXP 換算（§0u 政策，非 gunit.Level 欄）；wstrLastDate ← GTutor.LastDate 原樣
+    out.vecTutorialDBUnitInfo.reserve(tutor.size());
+    for (const auto& t : tutor) {
+        unit::TutorialDBUnitInfo ti;
+        ti.kTutorialUnitInfo.iUnitUID = t.unitUID;
+        const int level = exp_table::CheckLevelUp(1, t.exp);
+        ti.kTutorialUnitInfo.ucLevel = static_cast<uint8_t>(level < 0 ? 0 : (level > 255 ? 255 : level));
+        ti.kTutorialUnitInfo.wstrNickName = Utf8ToWide(t.nickname);
+        ti.kTutorialUnitInfo.bIsOnline = false;
+        ti.wstrLastDate = Utf8ToWide(t.lastDate);
+        out.vecTutorialDBUnitInfo.push_back(std::move(ti));
+    }
+    // vecConnectTimeEvent ← gis30min（原 gup_select_30min；bAccountEvent=false（原 fetch 不填））；
+    //   帳號級／累積事件（gup_select_event_account_nor／gup_get_remaintime）表不在倉庫 → vecCumulativeTimeEvent 恆空
+    out.vecConnectTimeEvent.reserve(connectTimeEvents.size());
+    for (const auto& c : connectTimeEvents) {
+        unit::ConnectTimeEventInfo e;
+        e.iEventUID = c.eventUID;
+        e.wstrEventTime = Utf8ToWide(c.eventTime);
+        e.bAccountEvent = false;
+        out.vecConnectTimeEvent.push_back(std::move(e));
+    }
+    // 其餘（推薦／Henir／Messenger／戰場／招募）：無資料源 → 全預設/空（誠實佔位）
 }
 
 void BuildSelectUnitNot3(SelectUnitNot3& out,
@@ -693,7 +727,30 @@ int32_t HandleSelectUnitReq(db::GameStore& gameDb, int64_t userUID, const Select
             ack.iOK = ERR_SELECT_UNIT_05;
             return ack.iOK;
         }
-        BuildSelectUnitNot4(*outNot4, deny);
+        // §0a13：Not4 DB 讀回（黑名單／사제（稱號？不——사제＝師徒）／30 分鐘連線事件）
+        std::vector<db::BlacklistRecord> blacklist;
+        if (!gameDb.GetBlacklist(req.unitUID, blacklist, err)) {
+            err = std::string("get blacklist: ") + err;
+            ack.iOK = ERR_SELECT_UNIT_05;
+            return ack.iOK;
+        }
+        std::vector<db::TutorRecord> tutor;
+        const int unitLevel = exp_table::CheckLevelUp(1, unit.exp);           // 原 kAck.m_kUnitInfo.m_ucLevel（同批資料）
+        if (unitLevel <= 10 || unitLevel >= 20) {                              // UNIT_LEVEL_STUDENT_MAX=10 / UNIT_LEVEL_TEACHER_MIN=20（原 iTutorialFlag，11~19 不查）
+            const bool isTeacher = unitLevel >= 20;
+            if (!gameDb.GetTutorInfo(isTeacher, req.unitUID, tutor, err)) {
+                err = std::string("get tutor info: ") + err;
+                ack.iOK = ERR_SELECT_UNIT_05;
+                return ack.iOK;
+            }
+        }
+        std::vector<db::ConnectTimeEventRecord> timeEvents;
+        if (!gameDb.GetConnectTimeEvents(req.unitUID, timeEvents, err)) {
+            err = std::string("get connect time events: ") + err;
+            ack.iOK = ERR_SELECT_UNIT_05;
+            return ack.iOK;
+        }
+        BuildSelectUnitNot4(*outNot4, deny, blacklist, tutor, timeEvents);
     }
     if (outNot5) BuildSelectUnitNot5(*outNot5);
 

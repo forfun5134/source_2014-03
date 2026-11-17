@@ -358,6 +358,38 @@ tests/test_string_filter.cpp 的字元集閘門斷言改為依 `X2_REGION_*` 分
 - **測試數**：**JP = 1297、TW = 1295、EU = 1293、CN = 1295 passed / 0 failed**。
 - 剩餘未移植：gmo_*_skill（技能 slot 更新）／gup_get_community_opt_unituid（社群選項查詢——V2 改以 gdenyoption 直接讀回近似，§0a9；relationship 6 欄寫入 EGS_UPDATE_COMMUNITY_OPT 已於 §0a10 以 write-through upsert 移植；P_GDenyOption_UPD 仍缺 proc）／class 5..9 技能列（原 proc 不存在）／LogDB；gspirit 的 Flag 完整語意與復活石補充/精力重置已於 §0a8 移植；Flag 並列槽位 UI 亦未建模。
 
+## 0a13. 2026-11-17 附記（SELECT_UNIT_4_NOT：黑名單／師徒（사제）／30 分鐘連線事件讀回；schema v7）
+
+§0h 落地 Not4 時，DB 讀回僅 kDenyOptions（§0a9）。本切片把三個**角色級** DB 源接上（其餘仍為佔位）。
+
+原版（JP；SERV_ALL_RENEWAL_SP 未定義 → legacy proc；SERV_NO_DISCIPLE 未定義 → 師徒路徑啟用；SERV_ADD_EVENT_DB 未定義 → legacy 30min／帳號事件路徑；CUMULATIVE_TIME_EVENT:101 已定義；SERV_ACC_TIME_EVENT:288 已定義）：
+
+- **vecChatBlackList**（GSGameDBThread.cpp:2465–2478）：`gup_select_blacklist`（倉庫 **proc 隨附**）：`SELECT a.BlockUID, b.Nickname FROM GBlackList a, GUnitNickName b WHERE a.MyUID = @iMyUID AND a.blockuid = b.unituid`（comma join = inner join）→ `KChatBlackListUnit{ m_iUnitUID ← BlockUID, m_wstrNickName ← Nickname }`。表：`GBlacklist`（PK(MyUID, BlockUID)；**無 FK**）。
+- **vecTutorialDBUnitInfo**（GSGameDBThread.cpp:2493–2517）：`iTutorialFlag`＝ 等級 ≤ `UNIT_LEVEL_STUDENT_MAX=10` → 0（我是學生）、≥ `UNIT_LEVEL_TEACHER_MIN=20` → 1（我是老師）、11–19 級 → **不查詢**。`gup_get_tutor(flag, unitUID)`：我是學生 → `SELECT a.TeacherUID, b.level, c.Nickname, a.lastdate FROM GTutor a JOIN GUnit b ON a.StudentUID=unit AND a.TeacherUID=b.UnitUID JOIN GUnitNickName c ON a.TeacherUID=c.UnitUID AND a.Deleted=0`；**學生分支原碼還有 `UPDATE GTutor SET LastDate=GETDATE() WHERE StudentUID=unit`**；我是老師 → 對稱。→ `KTutorialDBUnitInfo{ kTutorialUnitInfo{ m_iUnitUID, m_ucLevel ← level, m_wstrNickName ← Nickname, m_bIsOnline=false（fetch 不填） }, m_wstrLastDate ← a.lastdate }`。
+  - 表 `GTutor`：**無 PK**（heap）；`Deleted AS CASE WHEN RegDate = DelDate THEN 0 ELSE 1 END`（計算欄位）；RegDate/DelDate NULL-able；`GIs30Min`：無 PK（heap＋IX_GIs30Min_UnitUID）；FK→GUnit CASCADE。
+- **vecConnectTimeEvent**（GSGameDBThread.cpp:2522–2540 ＋ SERV_ACC_TIME_EVENT 段 2668–2683）：
+  - 角色級：`gup_select_30min`（倉庫 **proc 隨附**）→ `SELECT EventType, RegDate FROM GIs30min WHERE UnitUID=@iUnitUID` → `KConnectTimeEventInfo{ m_iEventUID ← EventType, m_wstrEventTime ← RegDate, m_bAccountEvent=false（fetch 不填） }`。
+  - **帳號級**：`gup_select_event_account_nor`（iUserUID scoped）——**proc 與表均不在倉庫** → 無法移植。
+- **vecCumulativeTimeEvent**（CUMULATIVE_TIME_EVENT，GSGameDBThread.cpp:2697–2745）：角色級 `gup_get_remaintime`、帳號級 `gup_select_event_account_acc`——**proc 與表均不在倉庫** → 容器維持空。
+
+**V2 實作**：
+
+- **Schema v7**（`kGameSchemaVersion` 6→7）：`gblacklist`（PK(MyUID, BlockUID)；FK→gunit CASCADE ×2——原表無 FK，V2 加 CASCADE 純衛生，實際刪除皆為軟刪除不受影響，見偏差聲明）／`gtutor`（**無 PK**（忠實保留 heap）；TeacherUID/StudentUID FK→gunit CASCADE；RegDate/LastDate/DelDate TEXT NOT NULL DEFAULT (datetime('now'))（收斂 NULL-able；生成欄位需可比字串）；`Deleted INTEGER GENERATED ALWAYS AS (CASE WHEN RegDate = DelDate THEN 0 ELSE 1 END) STORED`——**逐字鏡像原計算欄位**；ix_gtutor_teacher/student 索引）／`gis30min`（FK→gunit CASCADE；EventType 0..255；IX→UnitUID）。
+- **GameStore**：`GetBlacklist`（`ORDER BY BlockUID ASC`；nickname NULL → 空字串）／`GetTutorInfo(isTeacher, unitUID)`（`Deleted = 0`；INNER JOIN gunit＋gunit_nickname；`exp` 原樣帶回）／`GetConnectTimeEvents`（`ORDER BY EventType ASC`）。unit 不存在也回空列表 true（原 proc 不檢查）。
+- **`BuildSelectUnitNot4(out, denyOptions, blacklist, tutor, connectTimeEvents)`**（簽名變更）：黑名單／師徒／30 分鐘事件如上；`bIsOnline=false`；**ucLevel ← `exp_table::CheckLevelUp(1, exp)`**（§0u 政策；原讀 b.level 欄——見偏差聲明）；`bAccountEvent=false`。HandleSelectUnitReq：outNot4 非空時依 **`CheckLevelUp(1, unit.exp)`** 求 10/20 閘門（等同原 kUnitInfo.m_ucLevel）。
+- **測試** `tests/test_select_not4_readback.cpp`（schema v7／三表／黑名單 JOIN（暱稱釋放→空字串）／GetTutorInfo（學生/老師雙路徑、Deleted 生成欄位 soft-delete 排除）／GetConnectTimeEvents（ORDER BY）／Not4 整合（三源接線、cumulative 恆空、缺表→ERR_SELECT_UNIT_05、歸屬錯誤））；TestBuildSelectUnitNot4Defaults 同步新簽名。
+- **測試數**：**JP = 1658、TW = 1656、EU = 1654、CN = 1656、US = 1655 passed / 0 failed**。
+- **偏差聲明（逐條）**：
+  1. **學生分支 `UPDATE GTutor SET LastDate=now` 未移植**——V2 SELECT 唯讀；LastDate 保留原值（wire 僅帶回字串）。
+  2. **ucLevel ← EXP 換算**，非 gunit.Level 欄（§0u 政策：gunit.Level 在 V2 不維護）；uint8 截斷 255。
+  3. **帳號級 30 分鐘事件未移植**（`gup_select_event_account_nor`）——proc 與表均不在倉庫；vecConnectTimeEvent 只含角色級 30 分鐘事件。
+  4. **vecCumulativeTimeEvent 恆空**（`gup_get_remaintime`／`gup_select_event_account_acc` 均不在倉庫）。
+  5. **gblacklist 加 FK→gunit CASCADE**（原表無任何 FK）——純資料完整性衛生；V2 刪除皆為軟刪除，CASCADE 不會實際觸發。
+  6. **RegDate/DelDate 收斂 NOT NULL**（原 smalldatetime NULL-able）——生成欄位 Deleted 的字串比較需要可比值；語意不變（預設 now）。
+  7. **ORDER BY**：原 proc 無 ORDER BY；V2 明確排序（輸出確定性）。
+  8. **GTutor 軟刪除為 DelDate > RegDate**（而非「DelDate 非 NULL」）——忠實保留原計算欄位語意（`CASE WHEN RegDate = DelDate THEN 0 ELSE 1 END`）；將來接入 gup_insert_tutor/gup_delete_Tutor 時必須以該語意標記刪除。
+  9. **INNER JOIN 語意**：對手方缺 gunit_nickname 列 → 黑名單／師徒列整個不出現（與原 comma join 一致）。
+
 ## 0a12. 2026-11-17 附記（SELECT_UNIT_3_NOT 稱號/稱號任務讀回：gtitle_complete ∪ gtitle_mission；schema v6）
 
 §0g 落地 Not3 時，V2 game DB 尚無稱號表，vecTitle／vecMission 一律空容器佔位。本切片補上真實資料源（pet 部分維持空佔位，見偏差聲明）。
@@ -451,7 +483,7 @@ tests/test_string_filter.cpp 的字元集閘門斷言改為依 `X2_REGION_*` 分
 
 - **Schema v4 migration**（`kGameSchemaVersion` 3→4）：`gdenyoption.CodeNo` CHECK 由 1..255 放寬為 **0..255**（SQLite 無法在原位改 CHECK，故整表重建於單一 transaction，失敗整體 ROLLBACK）。原 `dbo.GDenyOption` 為 tinyint 且**無範圍限制**；v2 建表時 1..255 會擋掉合法值 DOS_ON=0。v2 CREATE TABLE 一併放寬（新庫直建即正確）。
 - **`GameStore::GetDenyOptions(unitUID)`**：`SELECT QuestionNo, CodeNo FROM gdenyoption WHERE UnitUID = ?`；**缺列 → 全 1（DOS_OFF），非錯誤**（鏡像 `gup_get_community_opt_unituid` 的 missing→1 慣例）；unit 不存在/已刪除 → true（原 proc 不檢查 unit 存在）；未知 QuestionNo 忽略；QN1..6 → friendShip/inviteGuild/party/personalTrade/requestCouple/invitePracticePVP。
-- **`BuildSelectUnitNot4(out, denyOptions)`**：kDenyOptions ← QN1..6 原樣；其餘欄位（黑名單/教學/連線時間/Henir/好友/戰場狀態…）仍全預設/空（誠實佔位）。`HandleSelectUnitReq`：outNot4 非空時查詢 gdenyoption；失敗 → `ERR_SELECT_UNIT_05`（DBE 流程失敗慣例，與 §0a8 spirit/re-read 一致）。
+- **`BuildSelectUnitNot4(out, denyOptions)`**：kDenyOptions ← QN1..6 原樣；其餘欄位（黑名單/教學/連線時間/Henir/好友/戰場狀態…）仍全預設/空（誠實佔位）。**§0a13 已改為 gblacklist／gtutor／gis30min 讀回（vecCumulativeTimeEvent 仍空）**。`HandleSelectUnitReq`：outNot4 非空時查詢 gdenyoption；失敗 → `ERR_SELECT_UNIT_05`（DBE 流程失敗慣例，與 §0a8 spirit/re-read 一致）。
 - **QN=5（RequestCouple）／QN=6（InvitePracticePVP）**：V2 建角副作用（§0a5）鏡像原 `gup_create_unit` 只 INSERT QN1..4 → 缺列 → **恆預設 1**；relationship 路徑才會寫 5/6（客戶端 `EGS_UPDATE_COMMUNITY_OPT`）——§0a9 當時 V2 無該封包處理器（§0a10 已補上 write-through 寫路徑；P_GDenyOption_* 仍缺 proc，以 upsert 近似）。
 - **測試** `tests/test_select_unit_daily_reset.cpp` 新增 `TestDenyOptionReadback`（8 個子情境：建角預設 1×6、Not4 同步讀回、UPDATE 庫→Not4 反映（0/2/1）、QN5/6 補列→讀回、未知 QN 忽略、全刪→全 1 非錯誤、unitUID 不存在→true＋預設值、v4 migration 覆蓋）；`tests/test_select_unit.cpp` `TestBuildSelectUnitNot4Defaults` 同步更新（預設 1、顯式值傳入）。
 - **測試數**：**JP = 1455、TW = 1453、EU = 1451、CN = 1453、US = 1452 passed / 0 failed**。
@@ -794,7 +826,7 @@ V2 目前**原樣保留**協議所需的密碼學直譯，這些本身**不符�
 6. 效能與容量測試；記憶體/句柄洩漏基線（原版以 VLD 除錯，V2 無對應）。
 7. `LoadINIFile`、設定檔格式與部署工具（原 `ReleaseTool`/`.bat` 流程）。
 8. EventIDs 以外的大型表（道具/技能/副本資料）從 `X2/dat/Script` 的轉換管道。
-9. `SELECT_UNIT` 的 REQ/收尾 ACK + 決策層已完成（§0c）；`SELECT_UNIT_1_NOT` codec + 組裝（gunit 表 → Not1，缺資料項佔位）已完成（§0e）；`SELECT_UNIT_2_NOT` codec + 組裝（§0f；任務讀回自 §0a11 ← gquests/gquests_complete/gquests_repeat）已完成（§0f）；`SELECT_UNIT_3_NOT` codec + 組裝（§0g；title/mission 讀回自 §0a12 ← gtitle_complete/gtitle_mission）已完成（§0g）；`SELECT_UNIT_3_NOT` codec + 組裝（§0g；title/mission 讀回自 §0a12 ← gtitle_complete/gtitle_mission；pet 仍空佔位）已完成（§0g）；`SELECT_UNIT_4_NOT` codec + 組裝（Henir/Messenger/戰場狀態無資料源→空容器/零值佔位；kDenyOptions 自 §0a9 起 ← gdenyoption 讀回）已完成（§0h）；`SELECT_UNIT_5_NOT` codec + 組裝（spirit/pshop/henir-reward/cashshop 無資料源→false/0 佔位）已完成（§0i），1_NOT…5_NOT 全數落地；1_NOT…5_NOT 分片 codec 全數移植（§0e…0i）；完整角色資料載入管線未開始。Login 切片打通到 SELECT_UNIT_1_NOT 為止（items/寵物/ED/rating 等無資料來源，值為佔位；spirit 自 GSpirit 讀回，§0a8；任務自 §0a11 起讀 gquests/gquests_complete/gquests_repeat）。
+9. `SELECT_UNIT` 的 REQ/收尾 ACK + 決策層已完成（§0c）；`SELECT_UNIT_1_NOT` codec + 組裝（gunit 表 → Not1，缺資料項佔位）已完成（§0e）；`SELECT_UNIT_2_NOT` codec + 組裝（§0f；任務讀回自 §0a11 ← gquests/gquests_complete/gquests_repeat）已完成（§0f）；`SELECT_UNIT_3_NOT` codec + 組裝（§0g；title/mission 讀回自 §0a12 ← gtitle_complete/gtitle_mission；pet 仍空佔位）已完成（§0g）；`SELECT_UNIT_4_NOT` codec + 組裝（Henir/Messenger/戰場狀態無資料源→空容器/零值佔位；kDenyOptions ← gdenyoption（§0a9）；vecChatBlackList ← gblacklist、vecTutorialDBUnitInfo ← gtutor（≤10 級＝學生／≥20 級＝老師）、vecConnectTimeEvent ← gis30min，§0a13）已完成（§0h）；`SELECT_UNIT_5_NOT` codec + 組裝（spirit/pshop/henir-reward/cashshop 無資料源→false/0 佔位）已完成（§0i），1_NOT…5_NOT 全數落地；1_NOT…5_NOT 分片 codec 全數移植（§0e…0i）；完整角色資料載入管線未開始。Login 切片打通到 SELECT_UNIT_1_NOT 為止（items/寵物/ED/rating 等無資料來源，值為佔位；spirit 自 GSpirit 讀回，§0a8；任務自 §0a11 起讀 gquests/gquests_complete/gquests_repeat；稱號/稱號任務自 §0a12 起讀 gtitle_complete/gtitle_mission；黑名單/師徒/30 分鐘事件自 §0a13 起讀 gblacklist/gtutor/gis30min）。
 11. GDenyOption／GResurrectionStoneCnt／GSkill／GSkillSlot／GSpirit／GQuests——**建立流程副作用已移植（§0a5）；GSpirit 讀回與 gup_select_unit 每日重置／GResurrectionStone 每日補充／PlayDayCnt／LoginCount 登入副作用已移植（§0a8）**；其餘查詢/更新路徑（gup_get_community_opt_unituid——V2 改以 gdenyoption 直接讀回近似，§0a9；EGS_UPDATE_COMMUNITY_OPT 6 欄寫入（§0a10 write-through；P_GDenyOption_UPD 缺 proc，以 upsert 近似）已移植；gup_*_skill、gspirit Flag 語意變體）未實作；建角道具發放（gup_create_unit_set_promotion／P_GItemPeriod_INS，**不隨倉庫提供**）不可移植。
 10. Wire 相容：Login 切片 codec 只有自洽 golden bytes，**缺原 SDK 實機對照向量**（見 §13）。
 

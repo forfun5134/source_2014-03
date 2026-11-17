@@ -505,7 +505,7 @@ static void TestBuildSelectUnitNot4Defaults()
 {
     db::DenyOptionValues deny;   // 預設全 1（DOS_OFF）
     SelectUnitNot4 not4;
-    BuildSelectUnitNot4(not4, deny);
+    BuildSelectUnitNot4(not4, deny, {}, {}, {});
     CHECK(not4.iOK == NET_OK, "not4 builder iOK");
     CHECK(not4.vecChatBlackList.empty() && not4.vecTutorialDBUnitInfo.empty() && not4.vecHenirRanking.empty() &&
           not4.kMessengerInfo.mapFriendInfo.empty() && not4.kGamePlayStatus.vecGamePlayStatus.empty() &&
@@ -518,7 +518,7 @@ static void TestBuildSelectUnitNot4Defaults()
     // 顯式值
     db::DenyOptionValues deny2; deny2 = { 0, 2, 1, 0, 0, 2 };
     SelectUnitNot4 not4b;
-    BuildSelectUnitNot4(not4b, deny2);
+    BuildSelectUnitNot4(not4b, deny2, {}, {}, {});
     CHECK(not4b.kDenyOptions.cDenyFriendShip == 0 && not4b.kDenyOptions.cDenyInviteGuild == 2 &&
           not4b.kDenyOptions.cDenyParty == 1 && not4b.kDenyOptions.cDenyPersonalTrade == 0 &&
           not4b.kDenyOptions.cDenyRequestCouple == 0 && not4b.kDenyOptions.cDenyInvitePracticePVP == 2,

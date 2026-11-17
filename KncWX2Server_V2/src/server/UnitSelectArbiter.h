@@ -43,7 +43,7 @@ namespace x2 { namespace select_unit {
 // outNot1（可為 nullptr）：成功時填入 SELECT_UNIT_1_NOT 的最小合法內容（見 BuildSelectUnitNot1）；
 // outNot2（可為 nullptr）：成功時填入 SELECT_UNIT_2_NOT（見 BuildSelectUnitNot2；vecQuest/vecCompletQuest ← gquests/gquests_complete/gquests_repeat，§0a11；mapRandomQuestList 恆空——SiCXSLQuestManager 無資料源）；
 // outNot3（可為 nullptr）：成功時填入 SELECT_UNIT_3_NOT（見 BuildSelectUnitNot3；vecTitle/vecMission ← gtitle_complete/gtitle_mission，§0a12；pet 無資料源 → 空容器）；
-// outNot4（可為 nullptr）：成功時填入 SELECT_UNIT_4_NOT 的最小合法內容（見 BuildSelectUnitNot4）；
+// outNot4（可為 nullptr）：成功時填入 SELECT_UNIT_4_NOT（見 BuildSelectUnitNot4；kDenyOptions ← gdenyoption（§0a9）、vecChatBlackList ← gblacklist、vecTutorialDBUnitInfo ← gtutor（10 級以下＝學生／20 級以上＝老師）、vecConnectTimeEvent ← gis30min，§0a13；vecCumulativeTimeEvent/Henir/Messenger＝帳號級/未移植 → 空）；
 // outNot5（可為 nullptr）：成功時填入 SELECT_UNIT_5_NOT 的最小合法內容（見 BuildSelectUnitNot5）；
 //   失敗時不動。呼叫端應「先送 1_NOT…5_NOT，再送收尾 ACK」（對照原版 SendSelectUnitACK 的次序）。
 int32_t HandleSelectUnitReq(db::GameStore& gameDb, int64_t userUID, const SelectUnitReq& req,
@@ -197,7 +197,10 @@ size_t HandleGetMyInventoryReq(const std::map<int64_t, unit::InventoryItemInfo>&
 // 誠實說明：V2 game DB 無黑名單/拒絕選項/教學/連線時間/Henir排行/好友/戰場狀態表，
 // kDenyOptions ← gdenyoption 讀回（§0a9；缺列 → 1/DOS_OFF，鏡像原 proc missing→1）；其餘容器一律空、旗標全 false/0
 // （items/tutor/henir/messenger 等無資料來源；不代表角色真實狀態）。iOK=NET_OK。
-void BuildSelectUnitNot4(SelectUnitNot4& out, const db::DenyOptionValues& denyOptions);
+void BuildSelectUnitNot4(SelectUnitNot4& out, const db::DenyOptionValues& denyOptions,
+                         const std::vector<db::BlacklistRecord>& blacklist,
+                         const std::vector<db::TutorRecord>& tutor,
+                         const std::vector<db::ConnectTimeEventRecord>& connectTimeEvents);
 
 // 組裝 SELECT_UNIT_3_NOT（成功路徑的使命/稱號/寵物分片）。
 // 誠實說明：V2 game DB 無 mission/title/pet/petItem 表，這些容器一律空、iSummonedPetUID=0——

@@ -69,7 +69,7 @@ static void TestSchemaV6()
 {
     Fixture fx;
     int v = fx.db.UserVersion(fx.err);
-    CHECK(v == kGameSchemaVersion && kGameSchemaVersion == 6, "schema v6 (user_version == 6)");
+    CHECK(v == kGameSchemaVersion && kGameSchemaVersion == 7, "schema v7 (user_version == 7; gtitle_* created at v6)");
     CHECK(fx.db.Exec("SELECT 1 FROM gtitle_complete LIMIT 0;", fx.err), "gtitle_complete table exists");
     CHECK(fx.db.Exec("SELECT 1 FROM gtitle_mission LIMIT 0;", fx.err), "gtitle_mission table exists");
     GameStore store(fx.db);

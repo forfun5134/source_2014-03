@@ -40,7 +40,7 @@
 
 namespace x2 { namespace db {
 
-inline constexpr int kGameSchemaVersion = 6;
+inline constexpr int kGameSchemaVersion = 7;
 
 // game DB 遷移：v0→v1 建立 guser / gunit / gunit_nickname / gdeleted_nickname_history；冪等
 bool ApplyGameMigrations(Database& db, std::string& err);
@@ -117,6 +117,23 @@ struct TitleMissionRecord
 {
     int32_t titleID = 0;
     int16_t sub[5] = { 0, 0, 0, 0, 0 };   // SubMission1..5（NULL → 0）
+};
+struct BlacklistRecord
+{
+    int64_t blockUnitUID = 0;
+    std::string nickname;                // gunit_nickname.NickName；NULL → 空字串
+};
+struct TutorRecord
+{
+    int64_t     unitUID = 0;
+    int64_t     exp = 0;                 // gunit.Exp（level ← EXP 換算於呼叫端——§0u 政策；原讀 b.level 欄）
+    std::string nickname;                // gunit_nickname.NickName；NULL → 空字串
+    std::string lastDate;                // GTutor.LastDate（'YYYY-MM-DD HH:MM:SS' UTC）；NULL → 空字串
+};
+struct ConnectTimeEventRecord
+{
+    int32_t     eventUID = 0;            // GIs30Min.EventType（原 proc：SELECT EVENTTYPE, REGDATE）
+    std::string eventTime;               // GIs30Min.RegDate；NULL → 空字串
 };
 
 // GDenyOption 讀回 → SELECT_UNIT_4_NOT kDenyOptions（原 gup_select_unit 的 DBE ACK 一併回傳；V2 §0a9）。
@@ -237,6 +254,19 @@ public:
 
     // 讀取稱號任務進度（原 gup_get_title_mission_list；同上）
     bool GetTitleMissionList(int64_t unitUID, std::vector<TitleMissionRecord>& out, std::string& err);
+
+    // 讀取聊天黑名單（原 gup_select_blacklist：GBlackList ∩ gunit_nickname；deleted/無 nickname 列之對手方，暱稱 → 空字串）
+    bool GetBlacklist(int64_t unitUID, std::vector<BlacklistRecord>& out, std::string& err);
+
+    // 讀取稱號（사제）對象（原 gup_get_tutor，isTeacher=false → 讀「我的老師」（我是學生）、true → 「我的學生」（我是老師））：
+    //   gtutor.Deleted = 0（生成欄位，鏡像原 CASE WHEN RegDate = DelDate THEN 0 ELSE 1 END）
+    //   level ← 呼叫端以 gunit.Exp 換算（§0u 政策）；原 proc 於學生分支會 UPDATE GTutor SET LastDate=now——
+    //   V2 SELECT 唯讀，不改寫 LastDate（見 docs §0a13 偏差聲明）
+    bool GetTutorInfo(bool isTeacher, int64_t unitUID, std::vector<TutorRecord>& out, std::string& err);
+
+    // 讀取 30 分鐘連線事件（原 gup_select_30min：GIs30Min WHERE UnitUID=?）；
+    //   帳號級事件（gup_select_event_account_nor／gup_get_remaintime）表不在倉庫 → 不提供（見 docs §0a13）
+    bool GetConnectTimeEvents(int64_t unitUID, std::vector<ConnectTimeEventRecord>& out, std::string& err);
 
     // Upsert GDenyOption QN1..6（EGS_UPDATE_COMMUNITY_OPTION_REQ 的 write-through，§0a10）。
     // unit 不存在/已刪除 → false＋err（鏡像 gup_update_community_opt 的 -1「該 Unit 不存在」）；

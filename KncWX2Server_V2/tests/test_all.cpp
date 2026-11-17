@@ -57,6 +57,7 @@ void RunSelectUnitDailyResetTestsByRef(int& pass, int& fail);
 void RunCommunityOptionTestsByRef(int& pass, int& fail);
 void RunQuestReadbackTestsByRef(int& pass, int& fail);
 void RunTitleReadbackTestsByRef(int& pass, int& fail);
+void RunSelectNot4ReadbackTestsByRef(int& pass, int& fail);
 
 static int g_fail = 0, g_pass = 0;
 #define CHECK(cond, name) do { \
@@ -434,6 +435,7 @@ int main() {
     RunCommunityOptionTestsByRef(g_pass, g_fail);
     RunQuestReadbackTestsByRef(g_pass, g_fail);
     RunTitleReadbackTestsByRef(g_pass, g_fail);
+    RunSelectNot4ReadbackTestsByRef(g_pass, g_fail);
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

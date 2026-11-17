@@ -192,6 +192,38 @@ CREATE TABLE gtitle_mission (
 );
 )SQL";
 
+// GBlackList：主鍵 (MyUID, BlockUID)；原表無 FK/無 Index（V2 加 FK CASCADE——純衛生，原語意無影響：刪除皆為軟刪除）
+// GTutor：原表無 PK（heap）；RegDate/DelDate/LastDate smalldatetime NULL → V2 收斂為 NOT NULL DEFAULT (datetime('now'))（生成欄位 Deleted 需要可比字串）；
+//   Deleted 為生成欄位，逐字鏡像原計算欄位 CASE WHEN [RegDate] = [DelDate] THEN 0 ELSE 1 END
+// GIs30Min：原表無 PK（heap）＋IX_GIs30Min_UnitUID；V2 FK→gunit ON DELETE CASCADE
+static const char* kCreateGBlacklistV7 = R"SQL(
+CREATE TABLE gblacklist (
+    MyUID    INTEGER NOT NULL REFERENCES gunit(UnitUID) ON DELETE CASCADE,
+    BlockUID INTEGER NOT NULL REFERENCES gunit(UnitUID) ON DELETE CASCADE,
+    PRIMARY KEY (MyUID, BlockUID)
+);
+)SQL";
+static const char* kCreateGTutorV7 = R"SQL(
+CREATE TABLE gtutor (
+    TeacherUID INTEGER NOT NULL REFERENCES gunit(UnitUID) ON DELETE CASCADE,
+    StudentUID INTEGER NOT NULL REFERENCES gunit(UnitUID) ON DELETE CASCADE,
+    RegDate    TEXT NOT NULL DEFAULT (datetime('now')),
+    LastDate   TEXT NOT NULL DEFAULT (datetime('now')),
+    DelDate    TEXT NOT NULL DEFAULT (datetime('now')),
+    Deleted    INTEGER GENERATED ALWAYS AS (CASE WHEN RegDate = DelDate THEN 0 ELSE 1 END) STORED
+);
+CREATE INDEX ix_gtutor_teacher ON gtutor(TeacherUID);
+CREATE INDEX ix_gtutor_student ON gtutor(StudentUID);
+)SQL";
+static const char* kCreateGIs30MinV7 = R"SQL(
+CREATE TABLE gis30min (
+    UnitUID   INTEGER NOT NULL REFERENCES gunit(UnitUID) ON DELETE CASCADE,
+    EventType INTEGER NOT NULL CHECK (EventType BETWEEN 0 AND 255),
+    RegDate   TEXT
+);
+CREATE INDEX ix_gis30min_unituid ON gis30min(UnitUID);
+)SQL";
+
 // 'YYYY-MM-DD HH:MM:SS'（SQLite datetime('now') 格式）以 UTC 解析為 epoch 秒（days_from_civil 演算法，平台無關）。
 static bool ParseUtcDatetime(const std::string& s, int64_t& epochOut)
 {
@@ -281,6 +313,14 @@ bool ApplyGameMigrations(Database& db, std::string& err)
             std::string unused;
             db.Rollback(unused);
             err = std::string("game migration v6 failed: ") + err;
+            return false;
+        }
+    }
+    if (v < 7) {
+        if (!db.Exec(kCreateGBlacklistV7, err) || !db.Exec(kCreateGTutorV7, err) || !db.Exec(kCreateGIs30MinV7, err)) {
+            std::string unused;
+            db.Rollback(unused);
+            err = std::string("game migration v7 failed: ") + err;
             return false;
         }
     }
@@ -989,6 +1029,92 @@ bool GameStore::GetTitleMissionList(int64_t unitUID, std::vector<TitleMissionRec
             rec.titleID = static_cast<int32_t>(st.ColumnInt64(0));
             for (int i = 0; i < 5; ++i) rec.sub[i] = static_cast<int16_t>(st.ColumnInt64(1 + i));
             out.push_back(rec);
+        } else {
+            if (!stepErr.empty()) { err = stepErr; return false; }
+            break;
+        }
+    }
+    err.clear();
+    return true;
+}
+
+bool GameStore::GetBlacklist(int64_t unitUID, std::vector<BlacklistRecord>& out, std::string& err)
+{
+    out.clear();
+    Statement st;
+    if (!st.Prepare(m_db,
+            "SELECT bl.BlockUID, n.NickName FROM gblacklist bl"
+            " INNER JOIN gunit_nickname n ON n.UnitUID = bl.BlockUID"
+            " WHERE bl.MyUID = ? ORDER BY bl.BlockUID ASC;", err)) return false;
+    if (!st.BindInt(1, unitUID, err)) return false;
+    std::string stepErr;
+    while (true) {
+        stepErr.clear();
+        if (st.StepRow(stepErr)) {
+            BlacklistRecord rec;
+            rec.blockUnitUID = st.ColumnInt64(0);
+            rec.nickname = st.ColumnIsNull(1) ? std::string() : st.ColumnText(1);
+            out.push_back(std::move(rec));
+        } else {
+            if (!stepErr.empty()) { err = stepErr; return false; }
+            break;
+        }
+    }
+    err.clear();
+    return true;
+}
+
+bool GameStore::GetTutorInfo(bool isTeacher, int64_t unitUID, std::vector<TutorRecord>& out, std::string& err)
+{
+    out.clear();
+    Statement st;
+    const char* sql = isTeacher
+        // 我是老師：讀我的學生（TeacherUID = 我）
+        ? "SELECT a.StudentUID, b.Exp, n.NickName, a.LastDate FROM gtutor a"
+          " JOIN gunit b ON a.TeacherUID = ? AND a.StudentUID = b.UnitUID"
+          " JOIN gunit_nickname n ON n.UnitUID = a.StudentUID"
+          " WHERE a.Deleted = 0 ORDER BY a.StudentUID ASC;"
+        // 我是學生：讀我的老師（StudentUID = 我）
+        : "SELECT a.TeacherUID, b.Exp, n.NickName, a.LastDate FROM gtutor a"
+          " JOIN gunit b ON a.StudentUID = ? AND a.TeacherUID = b.UnitUID"
+          " JOIN gunit_nickname n ON n.UnitUID = a.TeacherUID"
+          " WHERE a.Deleted = 0 ORDER BY a.TeacherUID ASC;";
+    if (!st.Prepare(m_db, sql, err)) return false;
+    if (!st.BindInt(1, unitUID, err)) return false;
+    std::string stepErr;
+    while (true) {
+        stepErr.clear();
+        if (st.StepRow(stepErr)) {
+            TutorRecord rec;
+            rec.unitUID = st.ColumnInt64(0);
+            rec.exp = st.ColumnInt64(1);
+            rec.nickname = st.ColumnIsNull(2) ? std::string() : st.ColumnText(2);
+            rec.lastDate = st.ColumnIsNull(3) ? std::string() : st.ColumnText(3);
+            out.push_back(std::move(rec));
+        } else {
+            if (!stepErr.empty()) { err = stepErr; return false; }
+            break;
+        }
+    }
+    err.clear();
+    return true;
+}
+
+bool GameStore::GetConnectTimeEvents(int64_t unitUID, std::vector<ConnectTimeEventRecord>& out, std::string& err)
+{
+    out.clear();
+    Statement st;
+    if (!st.Prepare(m_db,
+            "SELECT EventType, RegDate FROM gis30min WHERE UnitUID = ? ORDER BY EventType ASC;", err)) return false;
+    if (!st.BindInt(1, unitUID, err)) return false;
+    std::string stepErr;
+    while (true) {
+        stepErr.clear();
+        if (st.StepRow(stepErr)) {
+            ConnectTimeEventRecord rec;
+            rec.eventUID = static_cast<int32_t>(st.ColumnInt64(0));
+            rec.eventTime = st.ColumnIsNull(1) ? std::string() : st.ColumnText(1);
+            out.push_back(std::move(rec));
         } else {
             if (!stepErr.empty()) { err = stepErr; return false; }
             break;
