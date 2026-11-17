@@ -20,9 +20,10 @@
 //                       KAccountOption{bool PlayGuide},
 //                       KAccountBlockInfo{wstring EndTime, wstring BlockReason},
 //                       bool IsRecommend, bool IsGuestUser, wstring OTP,
+//                       wstring RegDate          (SERV_CASH_ITEM_LIST **已定義**，#define 雙空格曾被漏讀)
 //                       wstring LastLogin        (SERV_SECOND_SECURITY)
 //                       int32  ChannelRandomKey  (SERV_DLL_LIST_CHECK_BEFOR_LOADING)
-//                       ← SERV_CASH_ITEM_LIST / SERV_HACKING_USER_CHECK_COUNT 未定義
+//                       ← SERV_HACKING_USER_CHECK_COUNT 未定義
 //   VerifyAccountAck  : int32 OK, AccountInfo, char HackingUserType, wstring AdURL,
 //                       bool Sex, uint32 Age, uint32 NexonSN,
 //                       wstring ClientIP         (SERV_CLIENT_PUBLIC_IP)
@@ -74,6 +75,7 @@ struct AccountInfo
     bool isRecommend = false;
     bool isGuestUser = false;
     std::wstring otp;
+    std::wstring regDate;          // SERV_CASH_ITEM_LIST（#define  雙空格——建置巨集核對必須寬鬆匹配）
     std::wstring lastLogin;        // SERV_SECOND_SECURITY
     int32_t channelRandomKey = 0;  // SERV_DLL_LIST_CHECK_BEFOR_LOADING
 };

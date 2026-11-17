@@ -152,6 +152,7 @@ static void TestVerifyAccountAckRoundTrip()
     ack.accountInfo.isRecommend = true;
     ack.accountInfo.isGuestUser = false;
     ack.accountInfo.otp = L"OTP123";
+    ack.accountInfo.regDate = L"2014-03-01 09:00:00";
     ack.accountInfo.lastLogin = L"2014-03-08 12:00:00";
     ack.accountInfo.channelRandomKey = 0x0A0B0C0D;
     ack.hackingUserType = 7;
@@ -181,6 +182,7 @@ static void TestVerifyAccountAckRoundTrip()
     CHECK(back.accountInfo.authLevel == 3 && back.accountInfo.option.playGuide == true, "rt authLevel/guide");
     CHECK(back.accountInfo.isRecommend == true && back.accountInfo.isGuestUser == false, "rt flags");
     CHECK(back.accountInfo.otp == L"OTP123" && back.accountInfo.lastLogin == L"2014-03-08 12:00:00", "rt otp/lastLogin");
+    CHECK(back.accountInfo.regDate == L"2014-03-01 09:00:00", "rt regDate (SERV_CASH_ITEM_LIST)");
     CHECK(back.accountInfo.channelRandomKey == 0x0A0B0C0D, "rt ack channelRandomKey");
     CHECK(back.hackingUserType == 7, "rt hackingUserType");
     CHECK(back.adURL == L"https://example.invalid/ad", "rt adURL");

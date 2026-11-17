@@ -31,6 +31,7 @@ bool PutAccountInfo(Serializer& ks, const AccountInfo& v)
            ks.Put(v.blockInfo.endTime) && ks.Put(v.blockInfo.blockReason) &&
            ks.Put(v.isRecommend) && ks.Put(v.isGuestUser) &&
            ks.Put(v.otp) &&
+           ks.Put(v.regDate) &&                 // SERV_CASH_ITEM_LIST
            ks.Put(v.lastLogin) &&               // SERV_SECOND_SECURITY
            ks.Put(v.channelRandomKey);          // SERV_DLL_LIST_CHECK_BEFOR_LOADING
 }
@@ -43,6 +44,7 @@ bool GetAccountInfo(Serializer& ks, AccountInfo& v)
            ks.Get(v.blockInfo.endTime) && ks.Get(v.blockInfo.blockReason) &&
            ks.Get(v.isRecommend) && ks.Get(v.isGuestUser) &&
            ks.Get(v.otp) &&
+           ks.Get(v.regDate) &&                 // SERV_CASH_ITEM_LIST
            ks.Get(v.lastLogin) &&
            ks.Get(v.channelRandomKey);
 }

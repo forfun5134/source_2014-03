@@ -27,6 +27,14 @@
 
 ⚠ 誠實聲明：**SELECT_UNIT_1_NOT…5_NOT（KUnitInfo/背包/任務/寵物等，約 20 個巢狀型別）未移植**；成功路徑目前只回 `EGS_SELECT_UNIT_ACK{NET_OK}`，真實客戶端無法進大廳。Golden bytes 未對原 SDK 實機驗證。
 
+## 0d. 2026-11-17 快照（UnitData KUnitInfo 子系列 + Login 線路訂正）
+
+**Login 線路訂正**：`SERV_CASH_ITEM_LIST` 實際**已定義**（`#define  SERV_CASH_ITEM_LIST` 雙空格，先前以單空格 grep 漏讀）→ KAccountInfo wire 必含 `m_wstrRegDate`（wstring），位置在 OTP 與 LastLogin 之間。V2 LoginProtocol 已補上 `regDate` 欄位並更新測試。**凡巨集核對必須用寬鬆樣式 `^#define[[:space:]]+X`，已錯兩次（SERV_CASH_ITEM_LIST、SERV_SERVER_BUFF_SYSTEM）。**
+
+**UnitData**：`src/server/UnitData.{h,cpp}`、`tests/test_unit_data.cpp` 新增：KUnitInfo（JP INT_INTERNAL 組合）及其巢狀型別的 wire codec——KStat、KSkillData、KUnitSkillData（含 EQUIPPED_SKILL_SLOT_COUNT=4、GUILD_SKILL_TEST guildPassiveSkill、SERV_SKILL_NOTE skillNote、SERV_SKILL_PAGE_SYSTEM）、KItemAttributeEnchantInfo、KItemInfo（SERV_ITEM_OPTION_DATA_SIZE→vector<int>、SERV_NEW_ITEM_SYSTEM_2013_05→vector<int>+cItemState、SERV_BATTLE_FIELD_BOSS→expandedSocketNum）、KInventoryItemInfo、KDungeonClearInfo、KTCClearInfo、KUserGuildInfo、KLastPositionInfo（SERV_BATTLE_FIELD_SYSTEM+BOSS ignoreLastTouch）、KBuffBehaviorFactor/KBuffFinalizerFactor/KBuffIdentity/KBuffFactor/KBuffInfo（**KBuffFactor 不序列化 m_uidMesGameUnit/m_bIsMesGameUnitNpc**，與原 PUT 一致，有位元組長度斷言保護）、UnitInfo 完整結構（map<int,…> 三組、vector<KBuffInfo>、SERV_PVP_NEW_SYSTEM+SERV_2012_PVP_SEASON2 欄位、SERV_TITLE_DATA_SIZE int titleID、GUILD_TEST userGuildInfo）。容器格式：DWORD 數量前綴 + 元素，map 元素 = [first][second]（tagging=false）。
+
+⚠ 誠實聲明：golden bytes 為自洽佈局，**未對原 SDK 實機驗證**；UnitInfo 結構已有但 SELECT_UNIT_1_NOT…5_NOT 封包本身與資料載入管線未實作；更換巨集組合佈局即變。
+
 ## 0. 一句話現況
 
 V2 是原 Elsword 韓服伺服器（`X2Project`）的 **C++ 重寫地基**：平台無關的線路格式核心、安全模組已完成並以 golden bytes 測試驗證；最短網路路徑（同步 TCP + 原版 TCP 訊框 + 迴路 echo 整合測試）與 Session 層（SPI 握手換發、驗證失敗踢除、E_HEART_BEAT 丟棄、殭屍檢測、SERV_KEVENT_FROM 標記）已完成並 238 項測試全綠；**遊戲邏輯、非同步網路層未完成；資料庫層已完成 Phase 1（users 表 + 帳號存取層）**。V2 不是可運行的伺服器，不要部署它。

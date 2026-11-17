@@ -108,6 +108,7 @@
     <ClCompile Include="src\db\GameStore.cpp" />
     <ClCompile Include="src\server\SelectUnitProtocol.cpp" />
     <ClCompile Include="src\server\UnitSelectArbiter.cpp" />
+    <ClCompile Include="src\server\UnitData.cpp" />
     <ClCompile Include="src\core\SerBuffer.cpp" />
     <ClCompile Include="src\core\UidType.cpp" />
     <ClCompile Include="src\core\Sha256.cpp" />
@@ -152,6 +153,7 @@
     <ClInclude Include="src\db\GameStore.h" />
     <ClInclude Include="src\server\SelectUnitProtocol.h" />
     <ClInclude Include="src\server\UnitSelectArbiter.h" />
+    <ClInclude Include="src\server\UnitData.h" />
     <ClInclude Include="src\core\NetError.h" />
     <ClInclude Include="src\core\SerBuffer.h" />
     <ClInclude Include="src\core\Serializer.h" />
