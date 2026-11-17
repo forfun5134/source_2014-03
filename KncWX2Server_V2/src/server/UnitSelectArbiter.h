@@ -33,6 +33,7 @@
 #include "CreateTodayCountProtocol.h"
 #include "CheckNicknameProtocol.h"
 #include "ChangeNicknameProtocol.h"
+#include "CharacterListProtocol.h"
 
 namespace x2 { namespace select_unit {
 
@@ -135,6 +136,16 @@ bool HandleCreateNewUnitReq(db::GameStore& gameDb, int64_t userUID, int authLeve
 bool HandleEntryPointDeleteUnitReq(db::GameStore& gameDb, int64_t userUID, int authLevel,
                                    const delete_unit::EntryPointDeleteUnitReq& req,
                                    delete_unit::DeleteUnitAck& ack, std::string& err);
+
+// EGS_CHARACTER_LIST_REQ 決策（原 IMPL_ON_FUNC_NOPARAM(EGS_CHARACTER_LIST_REQ) → DBE_CHARACTER_LIST_REQ → SINGLE_SERVER_GROUP 本地組裝）：
+//   GetOrCreateGUser（userUID, userID）→ ack.mapServerGroupUnitSlot = {{ serverGroupID=0, guser.usSize }}；
+//   ListUnitsByUserUID → mapServerGroupUnitInfo = {{ 0, vec<UnitInfo> }}（逐個 PopulateUnitInfoFromGUnit）；
+//   ack.strUserID = Utf8ToWide(userID)；ack.iOK = NET_OK。DB 失敗 → return false。
+// 誠實偏差：無 EXP/stat 表（沿用 gunit 儲存值，同 PopulateUnitInfoFromGUnit）、無 templet 表（不擋 iClass，原碼缺 templet → ERR_CREATE_UNIT_03=28）、
+//   無 PVP rating 表、無 P2P IP/port（空）、無 server group / 1st+2nd GameDB 會合；SERV_BATTLE_FIELD_BOSS 地圖修正未建模；
+//   handler 不在 2_NOT 鏈上寫 m_setMyUnitUIDList——V2 無此狀態。
+bool HandleCharacterListReq(db::GameStore& gameDb, int64_t userUID, const std::string& userID, int authLevel,
+                            character_list::CharacterListAck& ack, std::string& err);
 
 // EGS_MY_UNIT_AND_INVENTORY_INFO_LIST_REQ（無參數）決策：
 //   guser（GetOrCreateGUser，缺則建，USSize=50）取 nUnitSlot；ListUnitsByUserUID（Deleted=0，UnitUID 升序）

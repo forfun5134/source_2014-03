@@ -186,6 +186,18 @@
 
 **NetError 更正紀錄**：本輪 enum 機讀計數（同 §0m 解析器）實測 `ERR_CREATE_UNIT_11=1289`（舊筆記 1294 錯誤，已更正）、`ERR_ODBC_00=175`、`ERR_ODBC_01=555`。
 
+## 0r. 2026-11-17 快照（CHARACTER_LIST + map 線路慣例統一）
+
+**EGS_CHARACTER_LIST_REQ（1155，NOPARAM）/ _1ST_ACK（1156）/ _2ND_REQ（1157）/ EGS_CHARACTER_LIST_ACK（1158）**：原 `SERV_ENTRY_POINT` 家族；`KEGS_CHARACTER_LIST_1ST_ACK` 為 `KEGS_CHARACTER_LIST_ACK` 的 typedef（同一結構）。wire（ACK）：`{int iOK, map<int,int> mapServerGroupUnitSlot, map<int, vector<KUnitInfo>> mapServerGroupUnitInfo, wstring strUserID}`；PUT 順序機讀自 ClientPacket.cpp:14964。
+
+**新增模組** `src/server/CharacterListProtocol.{h,cpp}`（`x2::character_list`）。**決策層** `HandleCharacterListReq(gameDb, userUID, userID, authLevel, ack, err)`：`GetOrCreateGUser`（取得 `usSize`→`mapServerGroupUnitSlot={{0,usSize}}`）→ `ListUnitsByUserUID` → `mapServerGroupUnitInfo={{0, vec}}`（逐個 `PopulateUnitInfoFromGUnit`）→ `strUserID=Utf8ToWide(userID)`、`iOK=NET_OK`。SINGLE_SERVER_GROUP 語意折疊（無 2nd DB、無會合）；map key=serverGroupID 一律 0 佔位。
+
+**map 線路慣例統一（⚠️ wire 變更）**：V2 的 map wire 慣例（`WireHelpers.h` `detail::PutCountPrefixMap`：count-prefix + 無 tag/wrapper）此前已被 10+ 處使用（SelectUnitProtocol / UnitData / UnitListProtocol…），但 `CreateTodayCountProtocol`（§0n）誤用了 `Serializer::Put(std::map)`（會寫 `eTAG_MAP`+`eTAG_PAIR`）。本輪將其改為 count-prefix 慣例（**wire 自洽佈局，非 SDK 驗證**）。`map<int, vector<KUnitInfo>>` 因 UnitInfo 無 Serializer 模板，改走 `PutCountPrefixMap` + 內層 `PutCountPrefixVec(unit::PutUnitInfo)`。
+
+⚠ 誠實偏差：無 templet 表（原碼缺 templet → `ERR_CREATE_UNIT_03`=28，V2 不擋）、無 EXP/stat 表（沿用 gunit 值）、無 P2P IP/port（空）、無 server group / 1st+2nd GameDB 會合、SERV_BATTLE_FIELD_BOSS 地圖修正未建模、`m_setMyUnitUIDList` 狀態未複製。
+
+**測試**（tests/test_character_list.cpp，14 項）：REQ 空酬載 no-op roundtrip、ACK codec roundtrip（map→map→vector<UnitInfo> 巢狀）、空列表（slot=50、空 vec、strUserID 回顯）→ 建 2 角色→2 筆→他人使用者空列表。測試自 847 → **873 passed / 0 failed**。vcxproj 登記 CharacterListProtocol.{h,cpp}；Loopback 未擴充。
+
 ## 0. 一句話現況
 
 V2 是原 Elsword 韓服伺服器（`X2Project`）的 **C++ 重寫地基**：平台無關的線路格式核心、安全模組已完成並以 golden bytes 測試驗證；最短網路路徑（同步 TCP + 原版 TCP 訊框 + 迴路 echo 整合測試）與 Session 層（SPI 握手換發、驗證失敗踢除、E_HEART_BEAT 丟棄、殭屍檢測、SERV_KEVENT_FROM 標記）已完成並 238 項測試全綠；**遊戲邏輯、非同步網路層未完成；資料庫層已完成 Phase 1（users 表 + 帳號存取層）**。V2 不是可運行的伺服器，不要部署它。

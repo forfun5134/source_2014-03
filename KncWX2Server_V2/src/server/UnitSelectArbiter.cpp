@@ -262,6 +262,34 @@ bool HandleCheckNicknameReq(db::GameStore& gameDb,
     return true;
 }
 
+bool HandleCharacterListReq(db::GameStore& gameDb, int64_t userUID, const std::string& userID, int authLevel,
+                            character_list::CharacterListAck& ack, std::string& err)
+{
+    ack = character_list::CharacterListAck{};
+    db::GUserRecord guser;
+    if (!gameDb.GetOrCreateGUser(userUID, userID, guser, err)) return false;
+
+    std::vector<db::GUnitRecord> units;
+    if (!gameDb.ListUnitsByUserUID(userUID, units, err)) return false;
+
+    std::vector<unit::UnitInfo> infos;
+    infos.reserve(units.size());
+    for (const auto& u : units) {
+        unit::UnitInfo info;
+        PopulateUnitInfoFromGUnit(userUID, authLevel, u, info);
+        infos.push_back(std::move(info));
+    }
+    // V2 無 server group 設定 → serverGroupID 一律 0（誠實佔位）
+    ack.mapServerGroupUnitSlot.clear();
+    ack.mapServerGroupUnitSlot.emplace(0, guser.usSize);
+    ack.mapServerGroupUnitInfo.clear();
+    ack.mapServerGroupUnitInfo.emplace(0, std::move(infos));
+    ack.strUserID = Utf8ToWide(userID);
+    ack.iOK = NET_OK;
+    err.clear();
+    return true;
+}
+
 bool HandleCreateNewUnitReq(db::GameStore& gameDb, int64_t userUID, int authLevel,
                             const create_unit::CreateNewUnitReq& req,
                             create_unit::CreateUnitAck& ack, std::string& err)

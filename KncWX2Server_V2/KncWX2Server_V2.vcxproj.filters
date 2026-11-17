@@ -35,6 +35,7 @@
     <ClCompile Include="src\server\CreateTodayCountProtocol.cpp"><Filter>server</Filter></ClCompile>
     <ClCompile Include="src\server\CheckNicknameProtocol.cpp"><Filter>server</Filter></ClCompile>
     <ClCompile Include="src\server\ChangeNicknameProtocol.cpp"><Filter>server</Filter></ClCompile>
+    <ClCompile Include="src\server\CharacterListProtocol.cpp"><Filter>server</Filter></ClCompile>
     <ClCompile Include="src\server\UnitData.cpp"><Filter>server</Filter></ClCompile>
     <ClCompile Include="src\core\SerBuffer.cpp"><Filter>core</Filter></ClCompile>
     <ClCompile Include="src\core\UidType.cpp"><Filter>core</Filter></ClCompile>
@@ -73,6 +74,7 @@
     <ClInclude Include="src\server\CreateTodayCountProtocol.h"><Filter>server</Filter></ClInclude>
     <ClInclude Include="src\server\CheckNicknameProtocol.h"><Filter>server</Filter></ClInclude>
     <ClInclude Include="src\server\ChangeNicknameProtocol.h"><Filter>server</Filter></ClInclude>
+    <ClInclude Include="src\server\CharacterListProtocol.h"><Filter>server</Filter></ClInclude>
     <ClInclude Include="src\server\UnitData.h"><Filter>server</Filter></ClInclude>
     <ClInclude Include="src\server\WireHelpers.h"><Filter>server</Filter></ClInclude>
     <ClInclude Include="src\core\NetError.h"><Filter>core</Filter></ClInclude>
