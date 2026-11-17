@@ -6,6 +6,7 @@
 #include <string>
 #include <cstring>
 
+#include "../src/core/Region.h"
 #include "../src/db/Sqlite.h"
 #include "../src/db/GameStore.h"
 #include "../src/server/StringFilter.h"
@@ -31,17 +32,37 @@ static void TestCharsetGate()
 {
     // JP 建置預設：A-Z/0-9（含小寫經上轉）、CJK 允許
     CHECK(CheckNickName(L"AbC123") == NickNameCheck::Ok, "ascii alnum ok");
-    CHECK(CheckNickName(L"占位角色") == NickNameCheck::Ok, "CJK unified ok");
-    CHECK(CheckNickName(L"テスト") == NickNameCheck::Ok, "katakana ok");
-    CHECK(CheckNickName(L"ひらがな") == NickNameCheck::Ok, "hiragana ok");
-    CHECK(CheckNickName(L"プレイヤー99") == NickNameCheck::Ok, "katakana + alnum ok");
-    CHECK(CheckNickName(L"プレイヤー９９") == NickNameCheck::InvalidCharset, "fullwidth digits（U+FF19）rejected");
+    CHECK(CheckNickName(L"占位角色") == NickNameCheck::Ok, "CJK unified ok（JP/TWHK/CN 均允）");
+#if defined(X2_REGION_JP)
+    CHECK(CheckNickName(L"テスト") == NickNameCheck::Ok, "katakana ok (JP)");
+    CHECK(CheckNickName(L"ひらがな") == NickNameCheck::Ok, "hiragana ok (JP)");
+    CHECK(CheckNickName(L"プレイヤー99") == NickNameCheck::Ok, "katakana + alnum ok (JP)");
+    CHECK(CheckNickName(L"プレイヤー９９") == NickNameCheck::InvalidCharset, "fullwidth digits（U+FF19）rejected (JP)");
     // '（半形括號）等非法字元
-    CHECK(CheckNickName(L"a'b") == NickNameCheck::InvalidCharset, "apostrophe rejected by charset");
+    CHECK(CheckNickName(L"a'b") == NickNameCheck::InvalidCharset, "apostrophe rejected by charset (JP)");
     CHECK(CheckNickName(L"nick name") == NickNameCheck::ForbiddenToken || CheckNickName(L"nick name") == NickNameCheck::InvalidCharset,
-          "space rejected (forbidden token or charset)");
-    CHECK(CheckNickName(L"한글방") == NickNameCheck::InvalidCharset, "hangul rejected on JP charset");
-    CHECK(CheckNickName(L"bad;name") == NickNameCheck::InvalidCharset, "semicolon rejected");
+          "space rejected (forbidden token or charset) (JP)");
+    CHECK(CheckNickName(L"한글방") == NickNameCheck::InvalidCharset, "hangul rejected (JP charset)");
+    CHECK(CheckNickName(L"bad;name") == NickNameCheck::InvalidCharset, "semicolon rejected (JP)");
+#elif defined(X2_REGION_TW) || defined(X2_REGION_HK) || defined(X2_REGION_CN)
+    CHECK(CheckNickName(L"テスト") == NickNameCheck::InvalidCharset, "katakana rejected (TWHK/CN)");
+    CHECK(CheckNickName(L"ひらがな") == NickNameCheck::InvalidCharset, "hiragana rejected (TWHK/CN)");
+    CHECK(CheckNickName(L"プレイヤー99") == NickNameCheck::InvalidCharset, "katakana rejected (TWHK/CN)");
+    CHECK(CheckNickName(L"プレイヤー９９") == NickNameCheck::InvalidCharset, "fullwidth digits rejected (TWHK/CN)");
+    CHECK(CheckNickName(L"a'b") == NickNameCheck::InvalidCharset, "apostrophe rejected by charset (TWHK/CN)");
+    CHECK(CheckNickName(L"nick name") == NickNameCheck::ForbiddenToken || CheckNickName(L"nick name") == NickNameCheck::InvalidCharset,
+          "space rejected (TWHK/CN)");
+    CHECK(CheckNickName(L"한글방") == NickNameCheck::InvalidCharset, "hangul rejected (TWHK/CN charset)");
+    CHECK(CheckNickName(L"bad;name") == NickNameCheck::InvalidCharset, "semicolon rejected (TWHK/CN)");
+#else
+    // 其餘地區：原碼最終 else → continue（寬鬆字元集；ban list 與禁用標記仍生效）
+    CHECK(CheckNickName(L"テスト") == NickNameCheck::Ok, "katakana ok (permissive)");
+    CHECK(CheckNickName(L"한글방") == NickNameCheck::Ok, "hangul ok (permissive)");
+    CHECK(CheckNickName(L"プレイヤー９９") == NickNameCheck::Ok, "fullwidth digits ok (permissive)");
+    CHECK(CheckNickName(L"a'b") == NickNameCheck::Ok, "apostrophe ok (permissive charset; 注入閘門另擋)");
+    CHECK(CheckNickName(L"bad;name") == NickNameCheck::Ok, "semicolon ok (permissive charset; 注入閘門另擋)");
+    CHECK(CheckNickName(L"nick name") == NickNameCheck::ForbiddenToken, "space rejected (forbidden token, permissive)");
+#endif
 }
 
 static void TestBannedLists()

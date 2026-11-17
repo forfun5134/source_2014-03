@@ -315,6 +315,10 @@ CONNECT → VERIFY → `EGS_CHARACTER_LIST_REQ`(1155，0 角色：slot[0]==50、
 
 測試自 1128 → **1181 passed / 0 failed**。無新模組 → vcxproj 無需登記。
 
+## 0a1. 2026-11-17 附記（StringFilter 測試地區感知）
+
+tests/test_string_filter.cpp 的字元集閘門斷言改為依 `X2_REGION_*` 分支（JP 預設／TW-HK-CN／其他寬鬆），並補上 `#include "../src/core/Region.h"`（未定義時預設 JP 的巨集由 Region.h 設定）。**JP（預設）與 `REGION=TW` 兩種建置皆 1181 passed / 0 failed**；TW 建置以既有 `REGION=TW ./tools/build_and_test.sh` 驗證（StringFilter 行為 TW 語意亦綠）。
+
 ## 0. 一句話現況
 
 V2 是原 Elsword 韓服伺服器（`X2Project`）的 **C++ 重寫地基**：平台無關的線路格式核心、安全模組已完成並以 golden bytes 測試驗證；最短網路路徑（同步 TCP + 原版 TCP 訊框 + 迴路 echo 整合測試）與 Session 層（SPI 握手換發、驗證失敗踢除、E_HEART_BEAT 丟棄、殭屍檢測、SERV_KEVENT_FROM 標記）已完成並 238 項測試全綠；**遊戲邏輯、非同步網路層未完成；資料庫層已完成 Phase 1（users 表 + 帳號存取層）**。V2 不是可運行的伺服器，不要部署它。
