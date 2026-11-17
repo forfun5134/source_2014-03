@@ -44,6 +44,7 @@ void RunEntryPointUnitTestsByRef(int& pass, int& fail);
 void RunCharacterListTestsByRef(int& pass, int& fail);
 void RunChannelListTestsByRef(int& pass, int& fail);
 void RunCreateDeleteFlowTestsByRef(int& pass, int& fail);
+void RunExpTableTestsByRef(int& pass, int& fail);
 
 static int g_fail = 0, g_pass = 0;
 #define CHECK(cond, name) do { \
@@ -408,6 +409,7 @@ int main() {
     RunCharacterListTestsByRef(g_pass, g_fail);
     RunChannelListTestsByRef(g_pass, g_fail);
     RunCreateDeleteFlowTestsByRef(g_pass, g_fail);
+    RunExpTableTestsByRef(g_pass, g_fail);
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

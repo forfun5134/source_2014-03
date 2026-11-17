@@ -220,7 +220,25 @@
 
 測試自 889 → **929 passed / 0 failed**。無新模組 → vcxproj 無需登記。
 
+**⚠ 上方「無 EXP/stat 表（沿用 gunit 值）」已由 §0u 部分解除（EXP 表已移植；stat 表仍未移植）。**
+
 **目前 wire 事件覆蓋總覽**（全部成對，自洽 golden bytes，未對 SDK 實機驗證）：CONNECT/VERIFY、SELECT_UNIT(40/41)、SELECT_UNIT_1..5_NOT(42–46)、GET_MY_INVENTORY(47/48/49)、MY_UNIT_AND_INVENTORY_INFO_LIST(34/35)、CREATE_UNIT(36/37)、DELETE_UNIT(38/39)、CHECK_NICK_NAME(1161/1162)、CHANGE_NICK_NAME(431/432，含 ENTRY_POINT 1168)、ENTRY_POINT_CREATE_NEW_UNIT(1159)/ENTRY_POINT_DELETE_UNIT(1160)、CHARACTER_LIST(1155→1158 折疊）、GET_CREATE_UNIT_TODAY_COUNT(1163→1165 折疊）、GET_CHANNEL_LIST(1166/1167，空表佔位）。
+
+## 0u. 2026-11-17 快照（ExpTable 經驗值→等級換算移植）
+
+**新增模組** `src/server/ExpTable.{h,cpp}`（`x2::exp_table`）＋`src/server/ExpTableData.inc`（**由 tools/gen_exp_table.py 自動產生，勿手改**）。
+
+**資料來源**：本倉庫既有的遊戲官方資料表 `ScriptData/ExpTable.xls`（Sheet1：레벨/필요EXP/총경험치；80 級；產生器同源於原碼 `AddExpTable_LUA` 讀入的 EXP 表）。產生器載入 xls 後做完整性檢查：級別連續 1..80、level 1 = (need 0, total 0)、need 累加＝total（2..80 全表）、total 嚴格遞增；任一不符即中止，不會寫出不一致的 inc。
+
+**API**（語意對齊原碼 `Common/ExpTable.{h,cpp}`）：
+- `GetRequireNeedExpbyLevel(nLevel)` / `GetRequireTotalExpbyLevel(nLevel)`：查無 level 時——若 nLevel ≤ 0 → 0；若 nLevel > 80 → 表頂值（原碼 `rbegin()` 邏輯）；表內直接索引。
+- `CheckLevelUp(nLevel, nExp)`：nLevel<1 夾到 1、nExp<0 夾到 0；自 nLevel 起第一個 `totalExp > nExp` 的層 L；L == nLevel → 回 nLevel，否則回 L-1；nExp ≥ totalExp(80)=866,438,000 → 80。
+
+**UnitInfo 接上**：`PopulateUnitInfoFromGUnit` 現在以 EXP 重算 `level = CheckLevelUp(1, gunit.Exp)`，並填 `nowBaseLevelEXP = GetRequireTotalExpbyLevel(level)`、`nextBaseLevelEXP = GetRequireTotalExpbyLevel(level+1)`（原碼 SELECT_UNIT 路徑同法），取代先前「無 EXP 表、沿用 gunit.Level、now/nextBaseLevelEXP=0 佔位」（STUDIO 偏差）。gunit.Level 欄位本身仍照原值存檔（未於寫入時強制覆寫），讀出時一律以 EXP 換算為準。
+
+⚠ 誠實偏差：(1) 原碼 `SERV_MAX_LEVEL_CHECK` 路徑以 `SiKGameSysVal()->GetLimitsLevel()` 截斷結果；V2 無 GameSysVal → **以 80 為硬上限**（若 JP 實際上限較低，需待 GameSysVal 移植後再收）。(2) `ExpTable.lua` 不存在於本倉庫（資料真源是 xls）；未對照原 Lua 逐列 diff（xls 已自洽驗證）。(3) 等級換算只在「讀 gunit → UnitInfo」時發生；其他寫入路徑（如 CREATE_UNIT 固定 level 1）行為不變。(4) totalExp 最大 866,438,000 < 2^31，int32 安全。
+
+**測試**（tests/test_exp_table.cpp）：表完整性（累加/遞增/抽樣值/表頂溢出/0 與負數）、`CheckLevelUp` 邊界（0/599/600/1899/1900/6700/表頂/溢出/夾層）、`PopulateUnitInfoFromGUnit` 以 `:memory:` 庫改 gunit.Exp=6700 後讀出（level=5、nowBase=6700、nextBase=10500）。測試自 929 → **967 passed / 0 failed**。vcxproj/filters 登記 ExpTable.{h,cpp}＋ExpTableData.inc；Linux 建置腳本以 `ls src/server/*.cpp` 自動納入（無需改登記）。
 
 ## 0. 一句話現況
 

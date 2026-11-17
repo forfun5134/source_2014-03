@@ -1,5 +1,6 @@
 // UnitSelectArbiter.cpp — 見 UnitSelectArbiter.h 的流程對照
 #include "UnitSelectArbiter.h"
+#include "ExpTable.h"
 #include "../core/NetError.h"
 
 #include <string>
@@ -114,15 +115,17 @@ void PopulateUnitInfoFromGUnit(int64_t userUID, int authLevel, const db::GUnitRe
     u.ip = L"";
     u.port = 0;
     u.ed = 0;                                       // GUnit 無 ED 欄位；GamePoint 無對應 wire 槽，刻意不映射
-    u.level = static_cast<uint8_t>(unit.level);
     u.exp = unit.exp;
+    u.level = static_cast<uint8_t>(exp_table::CheckLevelUp(1, unit.exp));   // 原碼 SELECT_UNIT 路徑：level ← CheckLevelUp(1, EXP)
+    u.nowBaseLevelEXP = exp_table::GetRequireTotalExpbyLevel(u.level);      // 原碼同法（SiKExpTable()->GetRequireTotalExpbyLevel）
+    u.nextBaseLevelEXP = exp_table::GetRequireTotalExpbyLevel(static_cast<int>(u.level) + 1);
     // PVP（SERV_PVP_NEW_SYSTEM）：GUnit 無 rating 欄位 → 0
     u.officialMatchCnt = 0; u.rating = 0; u.maxRating = 0; u.rPoint = 0; u.aPoint = 0;
     u.isWinBeforeMatch = false;
     u.rank = 0; u.kFactor = 0.0f; u.isRedistributionUser = false; u.pastSeasonWin = 0;
     u.sPoint = unit.sPoint;
     u.csPoint = 0; u.maxCSPoint = 0; u.csPointEndDate = L"";
-    u.nowBaseLevelEXP = 0; u.nextBaseLevelEXP = 0; u.straightVictories = 0;
+    u.straightVictories = 0;
     u.stat = { unit.baseHP, unit.atkPhysic, unit.atkMagic, unit.defPhysic, unit.defMagic };
     u.gameStat = u.stat;                            // 無獨立 GameStat 來源，鏡射 Stat（誠實佔位）
     u.lastPos = { unit.lastPosition, 0, 0, false }; // lastPos.mapID ← GUnit.LastPosition

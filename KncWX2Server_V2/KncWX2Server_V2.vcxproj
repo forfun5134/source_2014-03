@@ -116,6 +116,7 @@
     <ClCompile Include="src\server\ChangeNicknameProtocol.cpp" />
     <ClCompile Include="src\server\CharacterListProtocol.cpp" />
     <ClCompile Include="src\server\EntryPointChannelListProtocol.cpp" />
+    <ClCompile Include="src\server\ExpTable.cpp" />
     <ClCompile Include="src\server\UnitData.cpp" />
     <ClCompile Include="src\core\SerBuffer.cpp" />
     <ClCompile Include="src\core\UidType.cpp" />
@@ -169,6 +170,8 @@
     <ClInclude Include="src\server\ChangeNicknameProtocol.h" />
     <ClInclude Include="src\server\CharacterListProtocol.h" />
     <ClInclude Include="src\server\EntryPointChannelListProtocol.h" />
+    <ClInclude Include="src\server\ExpTable.h" />
+    <ClInclude Include="src\server\ExpTableData.inc" />
     <ClInclude Include="src\server\UnitData.h" />
     <ClInclude Include="src\server\WireHelpers.h" />
     <ClInclude Include="src\core\NetError.h" />
