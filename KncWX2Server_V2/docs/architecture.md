@@ -358,6 +358,38 @@ tests/test_string_filter.cpp 的字元集閘門斷言改為依 `X2_REGION_*` 分
 - **測試數**：**JP = 1297、TW = 1295、EU = 1293、CN = 1295 passed / 0 failed**。
 - 剩餘未移植：gmo_*_skill（技能 slot 更新）／gup_get_community_opt_unituid（社群選項查詢——V2 改以 gdenyoption 直接讀回近似，§0a9；relationship 6 欄寫入 EGS_UPDATE_COMMUNITY_OPT 已於 §0a10 以 write-through upsert 移植；P_GDenyOption_UPD 仍缺 proc）／class 5..9 技能列（原 proc 不存在）／LogDB；gspirit 的 Flag 完整語意與復活石補充/精力重置已於 §0a8 移植；Flag 並列槽位 UI 亦未建模。
 
+## 0a17. 2026-11-17 附記（SELECT_UNIT_1_NOT：GItemAttribute 合併＋socket 尾端 0 裁剪；schema v11）
+
+**勘誤（續）**：§0a16 稱「`gup_get_attribute` 不在倉庫、attrib 恆預設」——**同樣錯誤**。`gup_get_attribute.proc.sql` 實際存在於 `Database2/Database2/Schema Objects/Stored Procedures/`（Database2/…）。本節將其接上，並回溯修正 §0a16「仍未接」清單。
+
+原版（Query_GetInventory，GSGameDBThread.cpp:3674–3710、3890–3926）：
+
+- **gup_get_attribute**（SERV_ALL_RENEWAL_SP **未定義** → legacy 分支生效）：
+  `SELECT * FROM GItemAttribute WHERE ItemUID IN (SELECT ItemUID FROM GItem WHERE UnitUID=@iUnitUID AND Inventorycategory IN (1,9) AND Deleted=0)`
+  欄位 (ItemUID, SlotNo, Attribute)；依 SlotNo 分派：0→ESI_SLOT_1→`m_kAttribEnchantInfo.m_cAttribEnchant0`，1→`m_cAttribEnchant1`，2→`m_cAttribEnchant2`；其他 SlotNo → log + 忽略（ESI_MAX=3）。僅**裝備類（カテゴリ 1, 9）**。
+- **socket 組裝**（arrSocketOption[4]）：自尾端去除 0 → `m_vecItemSocket`（內嵌 0 保留；全 0 → 空 vector）。
+
+**V2 實作**：
+
+- **Schema v11**：`gitemattribute`（ItemUID/SlotNo/Attribute 三欄全 NULL（保留原 heap＋可空語意）；ItemUID 索引（對應原 IXC_GItemAttribute_ItemUID，SQL Server 為 CLUSTERED → SQLite 普通索引）；無 PK（原無 PK））。FK→gitem ON DELETE CASCADE 依 V10 慣例補上（偏差：原無 constraint 檔）。
+- **GetItemAttributes**：gup_get_attribute 逐字移植（category IN (1,9)、Deleted=0）。**GetInventoryItems** 主查詢後以 `uidToIdx` map 合併（ESI_SLOT 外列忽略——與原 log+drop 一致，V2 不記 log）。原 `SELECT *` 欄位順序含 SlotNo 直接映射，無 SlotNo 過濾。
+- **BuildSelectUnitNot1**：`itemSocket` 尾端 0 裁剪（全 0 → 空 vector）；`attrib` ← rec.attrib（ESI_SLOT_1..3 → cAttribEnchant0..2）。
+- **測試**：TestAttributes（category 過濾、ESI_SLOT 外 SlotNo 忽略、weapon 一槽、Not1 端到端 attrib/socket 裁剪（內嵌 0 保留）、GetItemAttributes 原始列檢視）。
+- **測試數**：**JP = 1786、TW = 1784、EU = 1782、CN = 1784、US = 1783 passed / 0 failed**。
+- **仍未接（確定缺失，本次已全倉庫掃過確認）**：
+  - `gup_get_item_list_seal`／`gup_get_item_list_seal`（sealData 恆 0；GItemSeal 表是否存在**未再驗證**——proc 缺即無法對齊欄位）；
+  - `P_GItemSocket_Random_SEL`（randomSocket 恆空）；
+  - `P_GItem_ItemList_SEL` 等 `P_*`／`*_new` 系 proc（SERV_BATTLE_FIELD_BOSS／SERV_SKILL_PAGE_SYSTEM 路徑——技能／CS／未封印技能全族）；
+  - `GItemInventory` 表（`gup_get_inventory[_by_category]` 的資料源）；
+  - `P_GEnhCount_*`／`gup_get_cash_skill_point_info`／`gup_get_unsealed_skill_info`（現金技能點／未封印技能）；
+  - `messengersn`（account DB，跨庫；Not4 kMessengerInfo 佔位）；
+  - GCharacter_Log 系計數（Not5 mapCharGameCount）；`P_GPShopInfo_SEL_ShopCheck`／GHenir*（Not5）。
+- **偏差聲明**：
+  1. 原 `SELECT *` 欄位**順序**未在 proc 中固定；V2 明確 (ItemUID, SlotNo, Attribute)——與 IXC 一致。
+  2. ESI_SLOT 外 SlotNo：V2 靜默忽略（原 log+cerr）；欄位不外洩為錯誤（與「部分料理跳過」慣例一致）。
+  3. Attribute 值以 int8 截斷（原 char 同）。
+  4. ELevel/Socket/Quantity/Period：§0a16 已接；本節不變。
+
 ## 0a16. 2026-11-17 附記（SELECT_UNIT_1_NOT：物品衛星欄位讀回——修正 §0a14 勘誤；schema v10）
 
 **勘誤**：§0a14 以「衛星表（GItemQuantity/GItemEndurance/GItemEnchant/GItemPeriod/GItemSocket）均不在倉庫」為由，quantity/endurance/enchantLevel/period/sockets 一律填預設。**此結論錯誤**：這些表實際存在於 `Database2/Database2/Schema Objects/Tables/`（`dbo.GItemQuantity.table.sql` 等；keys 目錄含 PKs：ItemUID CLUSTERED PK ＋ FK→GItem ON DELETE CASCADE；GItemSocket 四欄 DF 預設 -1；GItemEnchant.ELevel 為 smallint NULL）。本節將衛星欄位接上真實資料源，並回溯修正 §0a14 的偏差聲明（第 3、4 條作廢）。
@@ -379,7 +411,7 @@ tests/test_string_filter.cpp 的字元集閘門斷言改為依 `X2_REGION_*` 分
 - **Not1 端到端**：quantity/UsageType/period/ExpirationDate（→ Utf8ToWide wstrEndDate）/enchantLevel/itemSocket[4] 經 BuildSelectUnitNot1 進 mapItem；equippedItem 映射同步真實值。
 - **測試**：`tests/test_inventory_readback.cpp` 新增 TestSatellites（兩表同列 UsageType=1 覆寫、NULL ELevel→0、缺列→預設、Not1 端到端 quantity/period/expirationDate/socket/enchant 接線）。
 - **測試數**：**JP = 1765、TW = 1763、EU = 1761、CN = 1763、US = 1762 passed / 0 failed**。
-- **仍未接（資料源不存在/缺失）**：GItemSeal（無 reader proc `gup_get_item_list_seal`；sealData 恆 0）、GItemAttribute（`gup_get_attribute` 不在倉庫；GItemAttribute 表本身存在但無原版 SELECT 可逐欄對齊 → attrib 恆預設、randomSocket 空）、GItemOption/GItemWishList/GItemToolHistory（非 Not1 資料路徑）、`P_GItem_ItemList_SEL`（BOSS 路徑，5 socket；SERV_BATTLE_FIELD_BOSS 已定義但 proc 不在倉庫 → 仍 4 socket）。
+- **仍未接**（已由 §0a17 更新：`gup_get_attribute` 實際存在並已接線；seal/randomSocket/BOSS 路徑仍缺——見 §0a17 清單）。
 - **偏差聲明**：
   1. ELevel：NULL → 0（原 proc 將 NULL 寫入 NOT NULL tinyint 會失敗；V2 以 0 收斂——較寬容，偏差明示）。
   2. ExpirationDate 存字串原樣（smalldatetime 的 V2 儲存格式為 UTC 文本；proto wire 同 §0a14 慣例 Utf8ToWide）。

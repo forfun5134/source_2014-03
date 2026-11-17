@@ -66,7 +66,7 @@ static void TestSchemaV8()
 {
     Fixture fx;
     int v = fx.db.UserVersion(fx.err);
-    CHECK(v == kGameSchemaVersion && kGameSchemaVersion == 10, "schema v10 (user_version == 10)");
+    CHECK(v == kGameSchemaVersion && kGameSchemaVersion == 11, "schema v11 (user_version == 11)");
     CHECK(fx.db.Exec("SELECT 1 FROM gitem LIMIT 0;", fx.err), "gitem exists");
     CHECK(fx.db.Exec("SELECT 1 FROM giteminventorysize LIMIT 0;", fx.err), "giteminventorysize exists");
     CHECK(fx.db.Exec("SELECT 1 FROM gitemquantity LIMIT 0;", fx.err), "gitemquantity exists");
@@ -74,6 +74,7 @@ static void TestSchemaV8()
     CHECK(fx.db.Exec("SELECT 1 FROM gitemenchant LIMIT 0;", fx.err), "gitemenchant exists");
     CHECK(fx.db.Exec("SELECT 1 FROM gitemperiod LIMIT 0;", fx.err), "gitemperiod exists");
     CHECK(fx.db.Exec("SELECT 1 FROM gitemsocket LIMIT 0;", fx.err), "gitemsocket exists");
+    CHECK(fx.db.Exec("SELECT 1 FROM gitemattribute LIMIT 0;", fx.err), "gitemattribute exists");
     const int64_t uid = fx.MakeUnit(777, L"inv.schema");
     CHECK(uid > 0, "unit created");
     CHECK(fx.db.Exec("INSERT INTO gitem (UnitUID, ItemID, InventoryCategory, SlotID) VALUES (" + std::to_string(uid) + ", 1001, 1, 0);", fx.err), "seed item");
@@ -195,6 +196,7 @@ static void TestSelectIntegration()
 }
 
 static void TestSatellites();
+static void TestAttributes();
 
 void RunInventoryReadbackTestsByRef(int& pass, int& fail)
 {
@@ -203,6 +205,7 @@ void RunInventoryReadbackTestsByRef(int& pass, int& fail)
     TestItems();
     TestSelectIntegration();
     TestSatellites();
+    TestAttributes();
     pass += g_pass_inv;
     fail += g_fail_inv;
 }
@@ -275,5 +278,79 @@ static void TestSatellites()
             CHECK(eq->itemInfo.enchantLevel == 7 && eq->itemInfo.itemSocket.size() == 4 &&
                   eq->itemInfo.itemSocket[0] == 11 && eq->itemInfo.itemSocket[3] == 44, "Not1 enchant/socket wired");
         }
+    }
+}
+
+// ── §0a17：GItemAttribute 合併（gup_get_attribute 語義）＋ socket 尾端 0 裁剪 ─────
+static void TestAttributes()
+{
+    Fixture fx;
+    const int64_t uid = fx.MakeUnit(777, L"inv.attr");
+    CHECK(uid > 0, "unit created");
+    CHECK(fx.db.Exec(
+        "INSERT INTO gitem (UnitUID, ItemID, InventoryCategory, SlotID) VALUES "
+        "(" + std::to_string(uid) + ", 40001, 9, 0),"   // 裝備 → attribute 生效
+        "(" + std::to_string(uid) + ", 40002, 3, 1),"   // 素材 → attribute 不生效（proc 過濾 IN (1,9)）
+        "(" + std::to_string(uid) + ", 40003, 1, 2);", fx.err), "seed items");  // 一般裝備 → 生效
+    int e1 = 0, m2 = 0, w3 = 0;
+    {
+        std::vector<InventoryItemRecord> items;
+        CHECK(fx.store.GetInventoryItems(uid, items, fx.err), "items readable");
+        for (const auto& it : items) {
+            if (it.itemID == 40001) e1 = static_cast<int>(it.itemUID);
+            else if (it.itemID == 40002) m2 = static_cast<int>(it.itemUID);
+            else w3 = static_cast<int>(it.itemUID);
+        }
+    }
+    CHECK(e1 > 0 && m2 > 0 && w3 > 0, "items seeded");
+    const std::string a = std::to_string(e1), b = std::to_string(m2), c = std::to_string(w3);
+    // 裝備 40001：三個槽都有值；SlotNo=9（ESI_MAX 外）→ 忽略（原 log+drop）
+    CHECK(fx.db.Exec("INSERT INTO gitemattribute (ItemUID, SlotNo, Attribute) VALUES (" + a + ", 0, 11),(" + a + ", 1, 22),(" + a + ", 2, 33),(" + a + ", 9, 99);", fx.err), "seed attrib equip");
+    // 素材 40002：有值但不該出現在 attribute 合併（proc 只查 1,9）
+    CHECK(fx.db.Exec("INSERT INTO gitemattribute (ItemUID, SlotNo, Attribute) VALUES (" + b + ", 0, 44);", fx.err), "seed attrib material");
+    // weapon 40003：一槽
+    CHECK(fx.db.Exec("INSERT INTO gitemattribute (ItemUID, SlotNo, Attribute) VALUES (" + c + ", 2, 55);", fx.err), "seed attrib weapon");
+    {
+        std::vector<InventoryItemRecord> items;
+        CHECK(fx.store.GetInventoryItems(uid, items, fx.err), "items readable (attrib)");
+        InventoryItemRecord r1{}, r2{}, r3{};
+        for (const auto& it : items) {
+            if (it.itemUID == e1) r1 = it;
+            else if (it.itemUID == m2) r2 = it;
+            else r3 = it;
+        }
+        CHECK(r1.attrib[0] == 11 && r1.attrib[1] == 22 && r1.attrib[2] == 33, "equip attrib merged (ESI_SLOT_1..3)");
+        CHECK(r2.attrib[0] == 0 && r2.attrib[1] == 0 && r2.attrib[2] == 0, "material attrib excluded (category filter)");
+        CHECK(r3.attrib[2] == 55 && r3.attrib[0] == 0, "weapon attrib merged");
+    }
+    // socket 尾端 0 裁剪：(7,0,5,0) → [7,0,5]；全 0 → []；(1,2,3,4) → 4 個
+    CHECK(fx.db.Exec("INSERT INTO gitemsocket (ItemUID, Socket1, Socket2, Socket3, Socket4) VALUES (" + a + ", 7, 0, 5, 0);", fx.err), "seed socket trim case");
+    CHECK(fx.db.Exec("INSERT INTO gitemsocket (ItemUID, Socket1, Socket2, Socket3, Socket4) VALUES (" + c + ", 1, 2, 3, 4);", fx.err), "seed socket full");
+    {
+        SelectUnitNot1 not1{};
+        CHECK(SelectNot1(fx.store, 777, uid, &not1), "select ok");
+        unit::InventoryItemInfo* i1 = nullptr, *i3 = nullptr;
+        for (auto& kv : not1.items) {
+            if (kv.second.itemInfo.itemID == 40001) i1 = &kv.second;
+            else if (kv.second.itemInfo.itemID == 40003) i3 = &kv.second;
+        }
+        CHECK(i1 && i3, "items present");
+        if (i1) {
+            CHECK(i1->itemInfo.itemSocket.size() == 3 && i1->itemInfo.itemSocket[0] == 7 &&
+                  i1->itemInfo.itemSocket[1] == 0 && i1->itemInfo.itemSocket[2] == 5,
+                  "trailing zero trimmed, embedded zero kept");
+            CHECK(i1->itemInfo.attrib.cAttribEnchant0 == 11 && i1->itemInfo.attrib.cAttribEnchant1 == 22 &&
+                  i1->itemInfo.attrib.cAttribEnchant2 == 33,
+                  "Not1 attrib wired");
+        }
+        if (i3) {
+            CHECK(i3->itemInfo.itemSocket.size() == 4 && i3->itemInfo.itemSocket[3] == 4, "full sockets kept");
+        }
+    }
+    // GetItemAttributes 直接檢視：裝備兩件共 4 列（ESI_SLOT 外也在——原 proc 不過濾 SlotNo）
+    {
+        std::vector<std::tuple<int64_t, int32_t, int32_t>> attrs;
+        CHECK(fx.store.GetItemAttributes(uid, attrs, fx.err), "attribute raw readable");
+        CHECK(attrs.size() == 5, "raw rows include out-of-range SlotNo (proc semantics)");
     }
 }

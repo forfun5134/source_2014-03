@@ -295,7 +295,13 @@ void BuildSelectUnitNot1(int64_t userUID, int authLevel, const db::GUnitRecord& 
             it.itemInfo.sealData = 0;
             it.itemInfo.enchantLevel = rec.enchantLevel;
             it.itemInfo.attrib = unit::ItemAttributeEnchantInfo{};
-            it.itemInfo.itemSocket = { rec.socket[0], rec.socket[1], rec.socket[2], rec.socket[3] };
+            it.itemInfo.attrib.cAttribEnchant0 = rec.attrib[0];   // ESI_SLOT_1（gup_get_attribute，§0a17）
+            it.itemInfo.attrib.cAttribEnchant1 = rec.attrib[1];   // ESI_SLOT_2
+            it.itemInfo.attrib.cAttribEnchant2 = rec.attrib[2];   // ESI_SLOT_3
+            // 原碼：arrSocketOption[4] 自尾端去 0 後 push（內嵌 0 保留；全 0 → 空 vector）
+            size_t sockN = 4;
+            while (sockN > 0 && rec.socket[sockN - 1] == 0) --sockN;
+            it.itemInfo.itemSocket.assign(rec.socket, rec.socket + sockN);
             it.itemInfo.randomSocket = {};              // SERV_NEW_ITEM_SYSTEM_2013_05：GItemSocketRandom 表不在倉庫
             it.itemInfo.itemState = 0;
             it.itemInfo.period = rec.period;

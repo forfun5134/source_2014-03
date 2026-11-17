@@ -36,12 +36,13 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <tuple>
 
 #include "Sqlite.h"
 
 namespace x2 { namespace db {
 
-inline constexpr int kGameSchemaVersion = 10;
+inline constexpr int kGameSchemaVersion = 11;
 
 // game DB 遷移：v0→v1 建立 guser / gunit / gunit_nickname / gdeleted_nickname_history；冪等
 bool ApplyGameMigrations(Database& db, std::string& err);
@@ -142,6 +143,7 @@ struct InventoryItemRecord
     int16_t period = 0;                  // GItemPeriod.Period（缺列 → 0）
     std::string expirationDate;          // GItemPeriod.ExpirationDate 原樣（缺列 → ""）
     int32_t socket[4] = { 0, 0, 0, 0 };  // GItemSocket.Socket1..4（缺列 → 全 0，proc 暫存表預設）
+    int8_t  attrib[3] = { 0, 0, 0 };     // GItemAttribute（ESI_SLOT_1..3 → attrib0..2；僅 InventoryCategory IN (1,9)；缺列 → 全 0）
     int8_t  slotCategory = 0;            // gitem.InventoryCategory
     int16_t slotID = 0;                  // gitem.SlotID
 };
@@ -291,6 +293,9 @@ public:
     // 衛星表（GItemQuantity/GItemEndurance/GItemEnchant/GItemPeriod/GItemSocket）不在倉庫 →
     //   quantity=0 / endurance=-1 / enchantLevel=0 / period=0 / sockets=0（gup_get_item_list 暫存表預設值）
     bool GetInventoryItems(int64_t unitUID, std::vector<InventoryItemRecord>& out, std::string& err);
+    // GItemAttribute 讀回（原 gup_get_attribute：category IN (1,9)）：每筆 (ItemUID, ESI_SLOT 0..2, Attribute)。
+    // GetInventoryItems 內部已合併；此方法供需要逐列檢視的呼叫端（測試用）。
+    bool GetItemAttributes(int64_t unitUID, std::vector<std::tuple<int64_t, int32_t, int32_t>>& out, std::string& err);
 
     // Upsert GDenyOption QN1..6（EGS_UPDATE_COMMUNITY_OPTION_REQ 的 write-through，§0a10）。
     // unit 不存在/已刪除 → false＋err（鏡像 gup_update_community_opt 的 -1「該 Unit 不存在」）；

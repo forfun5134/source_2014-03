@@ -277,6 +277,15 @@ CREATE TABLE gitemsocket (
 );
 )SQL";
 
+static const char* kCreateGItemAttributeV11 = R"SQL(
+CREATE TABLE gitemattribute (
+    ItemUID   INTEGER NULL REFERENCES gitem(ItemUID) ON DELETE CASCADE,  -- 原 GItemAttribute 無 PK；ItemUID 可 NULL
+    SlotNo    INTEGER NULL CHECK (SlotNo BETWEEN 0 AND 255),             -- tinyint NULL
+    Attribute INTEGER NULL CHECK (Attribute BETWEEN 0 AND 255)           -- tinyint NULL
+);
+CREATE INDEX ix_gitemattribute_itemuid ON gitemattribute(ItemUID);
+)SQL";
+
 static const char* kCreateGRecommendV9 = R"SQL(
 CREATE TABLE grecommend (
     OldUID        INTEGER NOT NULL,
@@ -407,6 +416,14 @@ bool ApplyGameMigrations(Database& db, std::string& err)
             std::string unused;
             db.Rollback(unused);
             err = std::string("game migration v10 failed: ") + err;
+            return false;
+        }
+    }
+    if (v < 11) {
+        if (!db.Exec(kCreateGItemAttributeV11, err)) {
+            std::string unused;
+            db.Rollback(unused);
+            err = std::string("game migration v11 failed: ") + err;
             return false;
         }
     }
@@ -1277,6 +1294,44 @@ bool GameStore::GetInventoryItems(int64_t unitUID, std::vector<InventoryItemReco
             rec.expirationDate = st.ColumnText(9);
             for (int i = 0; i < 4; ++i) rec.socket[i] = static_cast<int32_t>(st.ColumnInt64(10 + i));
             out.push_back(rec);
+        } else {
+            if (!stepErr.empty()) { err = stepErr; return false; }
+            break;
+        }
+    }
+    // GItemAttribute（gup_get_attribute：僅 InventoryCategory IN (1,9)）：逐列合併；ESI_SLOT_1..3 → attrib[0..2]
+    std::vector<std::tuple<int64_t, int32_t, int32_t>> attrs;
+    if (!GetItemAttributes(unitUID, attrs, err)) return false;
+    std::map<int64_t, int> uidToIdx;
+    for (size_t i = 0; i < out.size(); ++i) uidToIdx.emplace(out[i].itemUID, static_cast<int>(i));
+    for (const auto& a : attrs) {
+        auto it = uidToIdx.find(std::get<0>(a));
+        if (it == uidToIdx.end()) continue;   // 防禦：proc 的 IN (subquery) 與主查詢一致，不該發生
+        const int32_t slotNo = std::get<1>(a);
+        const int32_t attribute = std::get<2>(a);
+        if (slotNo < 0 || slotNo > 2) continue;  // §原碼 log + 忽略（ESI_MAX=3）
+        out[static_cast<size_t>(it->second)].attrib[slotNo] = static_cast<int8_t>(attribute & 0xFF);
+    }
+    err.clear();
+    return true;
+}
+
+bool GameStore::GetItemAttributes(int64_t unitUID, std::vector<std::tuple<int64_t, int32_t, int32_t>>& out, std::string& err)
+{
+    out.clear();
+    Statement st;
+    // 原 gup_get_attribute.proc.sql 逐字移植：SELECT * FROM GItemAttribute WHERE ItemUID IN
+    //   (SELECT ItemUID FROM GItem WHERE UnitUID = @iUnitUID AND Inventorycategory IN (1,9) AND Deleted = 0)
+    if (!st.Prepare(m_db,
+            "SELECT ItemUID, SlotNo, Attribute FROM gitemattribute"
+            " WHERE ItemUID IN (SELECT ItemUID FROM gitem WHERE UnitUID = ? AND InventoryCategory IN (1, 9) AND Deleted = 0);", err)) return false;
+    if (!st.BindInt(1, unitUID, err)) return false;
+    std::string stepErr;
+    while (true) {
+        stepErr.clear();
+        if (st.StepRow(stepErr)) {
+            out.emplace_back(st.ColumnInt64(0), static_cast<int32_t>(st.ColumnInt64(1)),
+                             static_cast<int32_t>(st.ColumnInt64(2)));
         } else {
             if (!stepErr.empty()) { err = stepErr; return false; }
             break;
