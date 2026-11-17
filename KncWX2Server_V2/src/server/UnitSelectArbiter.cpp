@@ -2,6 +2,7 @@
 #include "UnitSelectArbiter.h"
 #include "ExpTable.h"
 #include "StatTable.h"
+#include "StringFilter.h"
 #include "../core/NetError.h"
 
 #include <string>
@@ -242,12 +243,18 @@ bool HandleDeleteUnitReq(db::GameStore& gameDb, int64_t userUID, int authLevel,
 
 bool HandleCheckNicknameReq(db::GameStore& gameDb,
                             const check_nickname::EntryPointCheckNickNameReq& req,
-                            check_nickname::EntryPointCheckNickNameAck& ack, std::string& err)
+                            check_nickname::EntryPointCheckNickNameAck& ack, std::string& err,
+                            int authLevel)
 {
     ack = check_nickname::EntryPointCheckNickNameAck{};
     const std::string nick = WideToUtf8(req.wstrNickName);
     if (nick.empty() || nick.size() > 12) {
         ack.iOK = ERR_RESTORE_NICK_NAME_06;   // 暱稱長度錯誤（原 CP_ACP > 12 bytes）
+        err.clear();
+        return true;
+    }
+    if (authLevel < 2 && !string_filter::IsValidNickName(req.wstrNickName)) {   // 原碼 GetAuthLevel() < UAL_GM(2)
+        ack.iOK = ERR_RESTORE_NICK_NAME_05;   // FT_NICKNAME 過濾（字元集/禁用暱稱/禁用字/標記）
         err.clear();
         return true;
     }
@@ -331,7 +338,8 @@ bool HandleEntryPointDeleteUnitReq(db::GameStore& gameDb, int64_t userUID, int a
 
 bool HandleChangeNicknameReq(db::GameStore& gameDb, int64_t userUID,
                              const change_nickname::ChangeNickNameReq& req,
-                             change_nickname::ChangeNickNameAck& ack, std::string& err)
+                             change_nickname::ChangeNickNameAck& ack, std::string& err,
+                             int authLevel)
 {
     ack = change_nickname::ChangeNickNameAck{};
     ack.iUnitUID = req.iUnitUID;
@@ -341,6 +349,11 @@ bool HandleChangeNicknameReq(db::GameStore& gameDb, int64_t userUID,
     const std::string nick = WideToUtf8(req.wstrNickName);
     if (nick.empty() || nick.size() > 12) {
         ack.iOK = ERR_RESTORE_NICK_NAME_06;   // 暱稱長度錯誤
+        err.clear();
+        return true;
+    }
+    if (authLevel < 2 && !string_filter::IsValidNickName(req.wstrNickName)) {   // 原碼 GetAuthLevel() < UAL_GM(2)
+        ack.iOK = ERR_RESTORE_NICK_NAME_05;   // FT_NICKNAME 過濾（字元集/禁用暱稱/禁用字/標記）
         err.clear();
         return true;
     }
@@ -385,14 +398,15 @@ bool HandleChangeNicknameReq(db::GameStore& gameDb, int64_t userUID,
 
 bool HandleEntryPointChangeNicknameReq(db::GameStore& gameDb, int64_t userUID,
                                        const change_nickname::EntryPointChangeNickNameReq& req,
-                                       change_nickname::ChangeNickNameAck& ack, std::string& err)
+                                       change_nickname::ChangeNickNameAck& ack, std::string& err,
+                                       int authLevel)
 {
     // V2 單一 game DB，忽略 iServerGroup；共用決策（見 HandleChangeNicknameReq 之說明）
     change_nickname::ChangeNickNameReq sub;
     sub.iUnitUID = req.iUnitUID;
     sub.wstrNickName = req.wstrNickName;
     sub.bCheckOnly = req.bCheckOnly;
-    return HandleChangeNicknameReq(gameDb, userUID, sub, ack, err);
+    return HandleChangeNicknameReq(gameDb, userUID, sub, ack, err, authLevel);
 }
 
 bool HandleGetCreateUnitTodayCountReq(db::GameStore& gameDb, int64_t userUID,
@@ -421,6 +435,11 @@ bool HandleCreateUnitReq(db::GameStore& gameDb, int64_t userUID, int authLevel,
         return true;                        // 決策性失敗（非基礎設施錯誤）：仍送 ACK
     }
     // KODBC 注入標記（比照原版 IsInvalidMarkIn 的常見集合；V2 無 KODBC 模組）
+    if (authLevel < 2 && !string_filter::IsValidNickName(req.wstrNickName)) {   // 原碼 GetAuthLevel() < UAL_GM(2)
+        ack.iOK = ERR_CREATE_UNIT_08;   // FT_NICKNAME 過濾（字元集/禁用暱稱/禁用字/標記）
+        err.clear();
+        return true;
+    }
     static const char* const kMarks[] = { ";", "'", "\"", "--", "/*", "*/", "\\" };
     for (const char* m : kMarks) {
         if (nick.find(m) != std::string::npos) {

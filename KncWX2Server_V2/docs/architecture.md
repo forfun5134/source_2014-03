@@ -153,7 +153,7 @@
 
 **決策層** `HandleCheckNicknameReq(gameDb, req, ack, err)`：UTF-8 位元組數 1..12 否則 `ERR_RESTORE_NICK_NAME_06`；KODBC 注入標記 → `ERR_RESTORE_NICK_NAME_05`；`CheckNicknameAvailable` 映射 Available→NET_OK / Taken→02 / InCooldown→03；DB 錯誤 → return false。ack.iUnitUID=0（原碼未填）、wstrNickName=回顯。
 
-⚠ 誠實偏差：無 SiCXSLStringFilter（FT_NICKNAME；原碼對 GetAuthLevel() < UAL_GM 生效）→ 無效暱稱不擋（僅長度+注入兩關）；原碼依 server group 路由 1st/2nd GameDB → V2 單一 game DB，**m_iServerGroup 忽略**；AF_INTERNAL 分支（內部旗標直接放行）未建模；gup_check_nickname 在 NULL SERV_ALL_RENEWAL_SP 下的精確口徑以 V2 兩表查詢近似（與 CreateUnit 的冷卻查詢一致）。SERV_ENTRY_POINT 已定義（ServerDefine.h:4304）故功能可達。
+⚠ 誠實偏差：~~無 SiCXSLStringFilter~~ FT_NICKNAME 已移植（§0w；GetAuthLevel() < UAL_GM(2) 才生效、GM 繞過）；原碼依 server group 路由 1st/2nd GameDB → V2 單一 game DB，**m_iServerGroup 忽略**；AF_INTERNAL 分支（內部旗標直接放行）未建模；gup_check_nickname 在 NULL SERV_ALL_RENEWAL_SP 下的精確口徑以 V2 兩表查詢近似（與 CreateUnit 的冷卻查詢一致）。SERV_ENTRY_POINT 已定義（ServerDefine.h:4304）故功能可達。
 
 **測試**（tests/test_check_nickname.cpp，16 項）：REQ/ACK codec roundtrip（含 CJK）、可用→NET_OK+回顯、空→06、13+ bytes→06（UTF-8 CJK 3B/字邊界）、注入→05、暱稱已存在→02、SoftDeleteUnit 後冷卻→03。測試自 766 → **790 passed / 0 failed**。vcxproj 登記 CheckNicknameProtocol.{h,cpp}；Loopback 未擴充。**註**：首版測試暱稱為 21-byte CJK 誤判（>12）導致 2 FAIL，改用 9-byte 暱稱後全綠——UTF-8 位元組口徑測試需自量長度。
 
@@ -167,7 +167,7 @@
 
 **決策層** `HandleChangeNicknameReq(gameDb, userUID, req, ack, err)`（`HandleEntryPointChangeNicknameReq` 轉發至同一路徑）：UTF-8 1..12 bytes 否則 `_06`；KODBC 注入標記 → `_05`；**擁有權閘門**（GetUnitByUID 不存在/已刪除/非本人 → `_00`；原碼未檢查擁有權——V2 加固，誠實偏差）；`bCheckOnly=true` → `CheckNicknameAvailable(排除自身)`：Available→NET_OK／Taken→02／InCooldown→03；`bCheckOnly=false` → `ChangeUnitNickname`：Ok→NET_OK／UnitNotFoundOrDeleted→00／NotRestorable→01／Taken→02／InCooldown→03／Failure→04／DbError→false。ack 回顯 iUnitUID/wstrNickName/bCheckOnly。
 
-⚠ 誠實偏差：無 SiCXSLStringFilter（FT_NICKNAME）；無 SERV_PVP_NEW_SYSTEM **已定義**之 NPC 名檢查（不擋）；原碼依 server group 路由 1st/2nd GameDB → V2 單一 game DB，**iServerGroup 忽略**；SERV_GUARANTEE_UNIQUENESS_OF_NAME_CN 未定義 → 無 Giant RoleReg 路徑；成功後**無 LogDB**（ELOG_CHANGE_NICK_NAME_NOT）；S_SERVER_SELECT 閘門未建模；舊暱稱 14 天冷卻為 V2 重建（原 stored proc 未隨倉庫提供）。
+⚠ 誠實偏差：~~無 SiCXSLStringFilter~~ FT_NICKNAME 已移植（§0w）；無 SERV_PVP_NEW_SYSTEM **已定義**之 NPC 名檢查（不擋）；原碼依 server group 路由 1st/2nd GameDB → V2 單一 game DB，**iServerGroup 忽略**；SERV_GUARANTEE_UNIQUENESS_OF_NAME_CN 未定義 → 無 Giant RoleReg 路徑；成功後**無 LogDB**（ELOG_CHANGE_NICK_NAME_NOT）；S_SERVER_SELECT 閘門未建模；舊暱稱 14 天冷卻為 V2 重建（原 stored proc 未隨倉庫提供）。
 
 **測試**（tests/test_change_nickname.cpp，18 項）：codec roundtrip（兩種 REQ + ACK）、空→06、注入→05、非本人→00、bCheckOnly 可用/占用他人/**自己的現有名（排除自身）→NET_OK**、實際改名→NET_OK（再讀回 store 為新暱稱；**舊暱稱進 14 天冷卻 → check 回 03**）、改回冷卻中舊暱稱→03、同名改名→NET_OK、ENTRY_POINT 入口共享決策。測試自 790 → **826 passed / 0 failed**。vcxproj 登記 ChangeNicknameProtocol.{h,cpp}；Loopback 未擴充。**修正記錄**：測試首版 fixture「別人的占位」為 15 bytes CJK 被長度閘門擋下（06≠02），改 12 bytes fixture 後全綠（UTF-8 字節口徑需先自量）。
 
@@ -255,6 +255,21 @@
 ⚠ 誠實偏差：(1) 原碼以 `CXSLUnit::UT_END` 範圍閘控 class（2 轉 /100 規則），V2 以「表內存在」為準（等價、更簡單）。(2) StatTable.xls（ScriptData）未解析——資料真源是 Lua（與原碼載入路徑相同）。(3) 2 轉角色 1 級 stat 由「1 級보정 던전」額外補償 80%（HP 100%）之機制（lua 檔頭註解）**未建模**。(4) JP 為預設地區（StatTable.lua 三份相同，無地區差異）。(5) wire 佈局不變（UnitInfo 欄位語意變更，非格式變更）。
 
 **測試**（tests/test_stat_table.cpp，33 項）：已知值（class 1 L1/L80、class 118 L1 DefMagic 77.6→77、class 121 L62 HP x.5 截斷、class 110/80 無空格 lua 列）、miss 語意（110/81、111/99、level 0/81、class 0/-1/999、miss 歸零）、52 class × 1..80 全可查、`:memory:` 遊戲庫（create class-1 → UPDATE Exp=1900 → level 3 → stat = 0 + 表值(1,3)、gameStat 鏡射）。tests/test_select_unit.cpp 的 not1 stat 斷言隨語意更新（0 → 表值(1,1)）。測試自 967 → **1002 passed / 0 failed**。vcxproj/filters 登記 StatTable.{h,cpp}＋StatTableData.inc；Linux 建置腳本以 `ls src/server/*.cpp` 自動納入。
+
+## 0w. 2026-11-17 快照（StringFilter 暱稱過濾移植，FT_NICKNAME 語意）
+
+**新增模組** `src/server/StringFilter.{h,cpp}`（`x2::string_filter`）＋`src/server/StringFilterData.inc`（**由 tools/gen_string_filter.py 自動產生，勿手改**，266+1389 條）。
+
+**資料來源**：本倉庫既有官方資料 `ScriptData/StringFilter.xls`（`NickName` 266 列 → exact ban list；`Word` 1390 列剔除 1 條全空白列 → 1389 條 substring ban list）。6 組（NickName）/27 組（Word）大小寫不敏感重複保留、與兩端空白列保留（原資料如此，僅報告）。xls 無 NICKNAMEWORD／POSTWORD 型別 → **無 NickNameWord／PostWord 列表**（誠實缺口）。禁用字由 DB ScriptDB 動態更新之路徑**未建模**（靜態 xls 快照）。
+
+**語意對齊原碼**（Common/X2Data/XSLStringFilter.cpp `FT_NICKNAME`＋Common/StringFilterManager.cpp `CheckIsValidString`）：
+1) 字元集閘門依建置期地區（`X2_REGION_*` ↔ 原 runtime AuthFlag，V2 無 KSimLayer）：JP（預設）→ {A-Za-z0-9} ∪ 平假名/片假名/片假名擴充/康熙部首/CJK 擴A/CJK 統一/CJK 相容/astral 20000-2A6DF+2F800-2FA1F（原 SERV_COUNTRY_JP 的 SERV_COUNTRY_TWHK|CN 分支）；TW/HK/CN → {A-Za-z0-9} ∪ 4E00-9FA5；其他地區 → 寬鬆（原碼最終 else → continue）。輸入先 ASCII 上轉（原碼 towupper(locale)）。
+2) ASCII 上轉後 exact 命中 nickname ban list → 拒；3) substring 命中 word ban list → 拒；4) 禁用標記子字串（空格／半形引號／`/`／`\`／`(`／`)`／`]`／`[`／`%`／`!`／`GM`）→ 拒（無條件，同原碼）。
+**接線**：CREATE_UNIT（length→filter→injection，filter 拒 → `ERR_CREATE_UNIT_08`）、CHANGE_NICK_NAME 與 CHECK_NICK_NAME（filter 拒 → `ERR_RESTORE_NICK_NAME_05`）；僅 `authLevel < SEnum::UAL_GM(2)` 時生效（GM 以上繞過，同原碼）。`HandleCheckNicknameReq`／`HandleChangeNicknameReq`／`HandleEntryPointChangeNicknameReq` 新增 `authLevel` 參數（**預設 0＝非 GM**）；ENTRY_POINT 變體透傳；CREATE_NEW_UNIT 已由既有 authLevel 透傳。順序與錯誤碼對齊原碼（length→filter→injection；create 的兩關共用 _08、change/check 的兩關共用 _05，無法由外部區辨——與原碼一致）。
+
+⚠ 誠實偏差：(a) 僅 ASCII 上轉（CJK/Hangul 無大小寫，語意等價）；(b) astral 字元——Linux wchar_t=32-bit 可比對；MSVC wchar_t=16-bit → astral 拆 surrogate、逐單元不過字元集閘門（JP 建置下 astral 暱稱被拒，Windows 限定）；(c) 原碼 CJK 上限 9FBF/9FA5 與 Unicode 實際邊界不同，忠實照抄；(d) 原碼 SERV_STRING_FILTER_SCRIPT_REFRESH/DB 動態更新/RefreshSingleton 路徑未建模；(e) 原碼兩套重複實作（XSLStringFilter vs KStringFilterManager，USING_DB 巨集分流）語意相同 → V2 合併為一份；(f) 呼叫端（check/change/entry-point）目前無 session authLevel 來源，預設 0＝套用過濾器（安全預設）。
+
+**測試**（tests/test_string_filter.cpp，50 項）：字元集閘門（alnum CJK 片假名 全形數字拒 半形括號 韓文 JPEG）、banned exact（NEXON 大小寫不敏感）、banned substring（FUCK/18금）、禁用標記（GM 含大小寫、括號、斜線、百分號、驚嘆號…）、CREATE_UNIT 接線（authLevel 1 擋 NEXON→_08、authLevel 2 GM 繞過、a'b→_08）、CHANGE_NICKNAME/CHECK_NICK_NAME 接線（authLevel 1→_05、GM 繞過、entry-point 透傳）。測試自 1002 → **1052 passed / 0 failed**。vcxproj/filters 登記；Linux 建置腳本自動納入；生建器僅需 xlrd。
 
 ## 0. 一句話現況
 

@@ -59,13 +59,15 @@ int32_t HandleSelectUnitReq(db::GameStore& gameDb, int64_t userUID, const Select
 
 // EGS_CREATE_UNIT_REQ 決策（原 GSUserGameCommon::IMPL_ON_FUNC(EGS_CREATE_UNIT_REQ)）：
 //   1) 暱稱驗證：空或 UTF-8 位元組數 > 12 → ERR_CREATE_UNIT_04(29)（原版 CP_ACP 12 bytes；JP 未定義 SERV_NICK_NAME_MINIMUM_CHECK → 無最小長度檢查）
+//   1.5) FT_NICKNAME 過濾（§0w，authLevel ≥ UAL_GM(2) 繞過）→ ERR_CREATE_UNIT_08(33)
 //      含 KODBC 注入標記（; ' " -- /* */ \）→ ERR_CREATE_UNIT_08(33)（「無法使用的暱稱」）
 //   2) GameStore::CreateUnit（guser 不存在/已刪除 → ERR_CREATE_UNIT_00(25)；暱稱重複 → ERR_CREATE_UNIT_01(26)；
 //      槽位達 USSize → ERR_CREATE_UNIT_05(30)；暱稱 14 天冷卻 → ERR_CREATE_UNIT_06(31)；DB 錯誤 → ERR_CREATE_UNIT_02(27)）
 //   3) 成功 → 重讀角色，kUnitInfo ← PopulateUnitInfoFromGUnit(userUID, authLevel, rec)；
 //      vecSkillSlot / wstrEnableDate 原由 AccountDB(DBE_ACCOUNT_CREATE_UNIT_*) 填寫，V2 一律空（誠實佔位）。
+//   （FT_NICKNAME 過濾已移植 §0w：字元集閘門＋禁用暱稱 266＋禁用字 1389＋禁用標記；無 NICKNAMEWORD 子列表、無禁用字 DB 動態更新）
 // 誠實偏差：無職業 templet 表（iClass 僅檢查 tinyint 範圍 0..255，由 GameStore 把關）、
-//   無字串過濾器/PVP NPC 名檢查/每日建立上限（ERR_CREATE_UNIT_03/08/09 的其他路徑未建模）、
+//   無 PVP NPC 名檢查/每日建立上限（ERR_CREATE_UNIT_03/09 的其他路徑未建模）、
 //   原版 S_SERVER_SELECT 狀態閘門與 DBE_ACCOUNT_CREATE_UNIT_REQ 兩段式未建模（V2 單段 game DB）。
 bool HandleCreateUnitReq(db::GameStore& gameDb, int64_t userUID, int authLevel,
                          const create_unit::CreateUnitReq& req,
@@ -97,12 +99,13 @@ bool HandleGetCreateUnitTodayCountReq(db::GameStore& gameDb, int64_t userUID,
 //   3) GameStore::CheckNicknameAvailable → Available→NET_OK；Taken→ERR_RESTORE_NICK_NAME_02(330)（原 -1）；
 //      InCooldown→ERR_RESTORE_NICK_NAME_03(331)（原 -2）；DbError → return false（基礎設施錯誤）
 //   ack.iUnitUID=0（原碼未填）；ack.wstrNickName=回顯。
-// 誠實偏差：無 SiCXSLStringFilter（FT_NICKNAME，原碼對 GetAuthLevel() < UAL_GM 生效）→ 無效暱稱一律不擋（僅 1/2 兩關）；
+//   1.5) FT_NICKNAME 過濾（§0w：字元集閘門＋266 nickname exact＋1389 word substring＋禁用標記；authLevel ≥ UAL_GM(2) 繞過，同原碼）→ ERR_RESTORE_NICK_NAME_05(333)；
 //   原碼依 server group 路由 1st/2nd GameDB → V2 單一 game DB，m_iServerGroup 忽略；
 //   AF_INTERNAL 分支（default: 內部旗標直接放行）未建模——V2 一律走查詢。
 bool HandleCheckNicknameReq(db::GameStore& gameDb,
                             const check_nickname::EntryPointCheckNickNameReq& req,
-                            check_nickname::EntryPointCheckNickNameAck& ack, std::string& err);
+                            check_nickname::EntryPointCheckNickNameAck& ack, std::string& err,
+                            int authLevel = 0);
 
 // EGS_CHANGE_NICK_NAME_REQ / EGS_ENTRY_POINT_CHANGE_NICK_NAME_REQ 決策
 // （原 IMPL_ON_FUNC(EGS_CHANGE_NICK_NAME_REQ) + EGS_ENTRY_POINT_CHANGE_NICK_NAME_REQ，兩者共享 DBE_CHANGE_NICK_NAME_REQ 與 EGS_CHANGE_NICK_NAME_ACK）：
@@ -114,15 +117,18 @@ bool HandleCheckNicknameReq(db::GameStore& gameDb,
 //   4) bCheckOnly=false：GameStore::ChangeUnitNickname（事務化：讀舊暱稱→可用性→舊暱稱入冷卻歷史→UPDATE）
 //      Ok→NET_OK / UnitNotFoundOrDeleted→00(328) / Taken→02 / InCooldown→03 / Failure→04(332) / DbError→false
 // ack 回顯 m_iUnitUID / m_wstrNickName / m_bCheckOnly。
-// 誠實偏差：無 SiCXSLStringFilter（FT_NICKNAME）；無 SERV_PVP_NEW_SYSTEM NPC 名檢查（該巨集已定義）→ 不擋；
+//   1.5) FT_NICKNAME 過濾（§0w）→ ERR_RESTORE_NICK_NAME_05(333)；
+// 誠實偏差：無 SERV_PVP_NEW_SYSTEM NPC 名檢查（該巨集已定義）→ 不擋；
 //   原碼依 server group 路由 1st/2nd GameDB → V2 單一 game DB，iServerGroup 忽略；
 //   SERV_GUARANTEE_UNIQUENESS_OF_NAME_CN 未定義 → 無 Giant RoleReg 路徑；成功後無 LogDB（ELOG_CHANGE_NICK_NAME_NOT）。
 bool HandleChangeNicknameReq(db::GameStore& gameDb, int64_t userUID,
                              const change_nickname::ChangeNickNameReq& req,
-                             change_nickname::ChangeNickNameAck& ack, std::string& err);
+                             change_nickname::ChangeNickNameAck& ack, std::string& err,
+                             int authLevel = 0);
 bool HandleEntryPointChangeNicknameReq(db::GameStore& gameDb, int64_t userUID,
                                        const change_nickname::EntryPointChangeNickNameReq& req,
-                                       change_nickname::ChangeNickNameAck& ack, std::string& err);
+                                       change_nickname::ChangeNickNameAck& ack, std::string& err,
+                                       int authLevel = 0);
 
 // EGS_CREATE_NEW_UNIT_REQ / EGS_ENTRY_POINT_DELETE_UNIT_REQ（EGS_ENTRY_POINT 變體）：
 //   兩者皆忽略 iServerGroup（V2 單一 game DB）後分別共用 HandleCreateUnitReq / HandleDeleteUnitReq 決策。

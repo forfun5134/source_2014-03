@@ -118,6 +118,7 @@
     <ClCompile Include="src\server\EntryPointChannelListProtocol.cpp" />
     <ClCompile Include="src\server\ExpTable.cpp" />
     <ClCompile Include="src\server\StatTable.cpp" />
+    <ClCompile Include="src\server\StringFilter.cpp" />
     <ClCompile Include="src\server\UnitData.cpp" />
     <ClCompile Include="src\core\SerBuffer.cpp" />
     <ClCompile Include="src\core\UidType.cpp" />
@@ -173,6 +174,8 @@
     <ClInclude Include="src\server\EntryPointChannelListProtocol.h" />
     <ClInclude Include="src\server\ExpTable.h" />
     <ClInclude Include="src\server\StatTable.h" />
+    <ClInclude Include="src\server\StringFilter.h" />
+    <ClInclude Include="src\server\StringFilterData.inc" />
     <ClInclude Include="src\server\StatTableData.inc" />
     <ClInclude Include="src\server\ExpTableData.inc" />
     <ClInclude Include="src\server\UnitData.h" />
