@@ -303,6 +303,18 @@ CONNECT → VERIFY（"changenickflow"）→ CREATE_UNIT(L"原創者", class 5) �
 
 測試自 1085 → **1128 passed / 0 failed**。無新模組 → vcxproj 無需登記。
 
+## 0z. 2026-11-17 快照（SERV_ENTRY_POINT 家族迴路整合測試）
+
+**新增** `tests/test_entry_point_flow.cpp`（`RunEntryPointFlowTestsByRef`）：真實 mkstemp account/game 雙庫 + TCP loopback，**authLevel 一律 0**，一次跑完 SERV_ENTRY_POINT 家族主要事件的端到端閉環：
+
+CONNECT → VERIFY → `EGS_CHARACTER_LIST_REQ`(1155，0 角色：slot[0]==50、空 vec、strUserID 回顯) → `EGS_CREATE_NEW_UNIT_REQ`(1159，iClass=5／iServerGroup=1 忽略) → `EGS_CREATE_UNIT_ACK`(37) → CHARACTER_LIST(1155，1 角色，unitUID 一致、level/exp=0/1) → `EGS_ENTRY_POINT_GET_CHANNEL_LIST_REQ`(1166；四張表皆空) → `EGS_GET_CREATE_UNIT_TODAY_COUNT_REQ`(1163；map{0→1}) → `EGS_ENTRY_POINT_DELETE_UNIT_REQ`(1160；回 `EGS_DELETE_UNIT_ACK` 39) → CHARACTER_LIST（0 角色）→ TODAY_COUNT（map{0→0}，`Deleted=0` 過濾驗證）。
+
+意義：SERV_ENTRY_POINT 家族（CHARACTER_LIST／CREATE_NEW_UNIT／ENTRY_POINT_DELETE_UNIT／GET_CHANNEL_LIST／TODAY_COUNT）此前僅有 codec 自洽與記憶體內決策層單元測試；本測試首次以真實 socket + 真實雙庫驗證全家族的 wire→決策→DB 閉環。
+
+⚠ 附帶記錄：`ScriptData/UnitTemplet.mdb`（SELECT_UNIT/CREATE_UNIT 的 templet 來源）嘗試以 PyPI `access-parser` 解析——能開檔列出 Units/UnitClass/UnitType/WeaponType 四表，但 Jet4 variable-length record 解析失敗；純 Python 無法讀此檔、mdbtools C 函式庫不在可達網路（pypi/github/npm 之外無 Ubuntu 倉庫）。**UnitTemplet 維持未實作，CREATE_UNIT 的 class 驗證閘門不變。**
+
+測試自 1128 → **1181 passed / 0 failed**。無新模組 → vcxproj 無需登記。
+
 ## 0. 一句話現況
 
 V2 是原 Elsword 韓服伺服器（`X2Project`）的 **C++ 重寫地基**：平台無關的線路格式核心、安全模組已完成並以 golden bytes 測試驗證；最短網路路徑（同步 TCP + 原版 TCP 訊框 + 迴路 echo 整合測試）與 Session 層（SPI 握手換發、驗證失敗踢除、E_HEART_BEAT 丟棄、殭屍檢測、SERV_KEVENT_FROM 標記）已完成並 238 項測試全綠；**遊戲邏輯、非同步網路層未完成；資料庫層已完成 Phase 1（users 表 + 帳號存取層）**。V2 不是可運行的伺服器，不要部署它。
