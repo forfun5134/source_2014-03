@@ -101,11 +101,11 @@
 
 **新增模組** `src/server/UnitListProtocol.{h,cpp}`（命名空間 `x2::unit_list`）：`MyUnitAndInventoryInfoListReq`（EGS_MY_UNIT_AND_INVENTORY_INFO_LIST_REQ=34，NOPARAM 空 payload）、`MyUnitAndInventoryInfoListAck`（35；{int iOK, int nUnitSlot, vector<KUnitInfo> vecUnitInfo}；SERV_SHARING_BANK_QUEST_CASH / SERV_4TH_ANNIVERSARY_EVENT 皆未定義 → 無額外欄位）。PUT 順序機讀自原 ClientPacket.cpp。
 
-**決策層** `HandleMyUnitAndInventoryInfoListReq(gameDb, userUID, userID, authLevel, ack, err)`（UnitSelectArbiter）：guser 以 GetOrCreateGUser 取/建（USSize=50）→ `ListUnitsByUserUID`（Deleted=0、UnitUID 升序）→ 每個角色以 `PopulateUnitInfoFromGUnit`（**自 BuildSelectUnitNot1 抽取的共用填值函式**，UnitData/SelectUnit 行為不變）填 KUnitInfo；ack.iOK=NET_OK。原版對每個角色衍生 level/nowEXP/nextEXP（EXP 表）、疊加職業/等級 stat（stat 表）、填 P2P IP/port——**V2 無 EXP 表/stat 表/P2P，沿用 gunit 儲存值、IP/port 填空**（誠實偏差）；原版 S_SERVER_SELECT 狀態閘門與二級密碼前置未建模。DB 失敗 → false（呼叫端可回 ERR_SELECT_UNIT_05）。
+**決策層** `HandleMyUnitAndInventoryInfoListReq(gameDb, userUID, userID, authLevel, ack, err)`（UnitSelectArbiter）：guser 以 GetOrCreateGUser 取/建（USSize=50）→ `ListUnitsByUserUID`（Deleted=0、UnitUID 升序）→ 每個角色以 `PopulateUnitInfoFromGUnit`（**自 BuildSelectUnitNot1 抽取的共用填值函式**，UnitData/SelectUnit 行為不變）填 KUnitInfo；ack.iOK=NET_OK。原版對每個角色衍生 level/nowEXP/nextEXP（EXP 表）、疊加職業/等級 stat（stat 表）、填 P2P IP/port——**V2 無 P2P、沿用 gunit 儲存值**（EXP/stat 表已移植 §0u/§0v、IP/port 填空）；原版 S_SERVER_SELECT 狀態閘門與二級密碼前置未建模。DB 失敗 → false（呼叫端可回 ERR_SELECT_UNIT_05）。
 
 **迴路**（雙庫 mkstemp）：CONNECT → VERIFY → **MY_UNIT_LIST REQ → ACK（iOK=NET_OK、nUnitSlot=50、含種子角色「選擇切片」）** → SELECT_UNIT（own）→ 5×NOT → ACK → GET_MY_INVENTORY（合成背包）→ SELECT_UNIT（foreign → ERR_SELECT_UNIT_07）→ SELECT_UNIT（ghost → ERR_SELECT_UNIT_00）。**附帶修正：迴路伺服器事件迴圈上限 6→7**（新增 MY_UNIT_LIST 後原本 6 個事件不夠，ghost 被吃掉；曾以 stdbuf 追出）。另有 `tests/test_unit_list.cpp`（codec roundtrip、guser 自建、ListUnits 過濾其他使用者、空帳號 USSize=50）。測試自 654 → **685 passed / 0 failed**。vcxproj 登記 UnitListProtocol.{h,cpp}。
 
-⚠ 誠實聲明：wire 佈局為自洽 golden bytes，**未對原 SDK 實機驗證**；角色衍生欄位（EXP→level、stat 表疊加、P2P）為佔位/沿用儲存值；nUnitSlot 來自 V2 guser（USSize=50 慣例）；MY_UNIT_LIST 之前的 S_SERVER_SELECT 狀態閘門未建模。
+⚠ 誠實聲明：wire 佈局為自洽 golden bytes，**未對原 SDK 實機驗證**；角色衍生欄位（EXP→level／stat 表疊加已移植 §0u/§0v；P2P）為佔位/沿用儲存值；nUnitSlot 來自 V2 guser（USSize=50 慣例）；MY_UNIT_LIST 之前的 S_SERVER_SELECT 狀態閘門未建模。
 
 ## 0l. 2026-11-17 快照（CREATE_UNIT 流程移植）
 
@@ -194,7 +194,7 @@
 
 **map 線路慣例統一（⚠️ wire 變更）**：V2 的 map wire 慣例（`WireHelpers.h` `detail::PutCountPrefixMap`：count-prefix + 無 tag/wrapper）此前已被 10+ 處使用（SelectUnitProtocol / UnitData / UnitListProtocol…），但 `CreateTodayCountProtocol`（§0n）誤用了 `Serializer::Put(std::map)`（會寫 `eTAG_MAP`+`eTAG_PAIR`）。本輪將其改為 count-prefix 慣例（**wire 自洽佈局，非 SDK 驗證**）。`map<int, vector<KUnitInfo>>` 因 UnitInfo 無 Serializer 模板，改走 `PutCountPrefixMap` + 內層 `PutCountPrefixVec(unit::PutUnitInfo)`。
 
-⚠ 誠實偏差：無 templet 表（原碼缺 templet → `ERR_CREATE_UNIT_03`=28，V2 不擋）、無 EXP/stat 表（沿用 gunit 值）、無 P2P IP/port（空）、無 server group / 1st+2nd GameDB 會合、SERV_BATTLE_FIELD_BOSS 地圖修正未建模、`m_setMyUnitUIDList` 狀態未複製。
+⚠ 誠實偏差：無 templet 表（原碼缺 templet → `ERR_CREATE_UNIT_03`=28，V2 不擋）、~~無 EXP/stat 表~~（已移植 §0u/§0v）、無 P2P IP/port（空）、無 server group / 1st+2nd GameDB 會合、SERV_BATTLE_FIELD_BOSS 地圖修正未建模、`m_setMyUnitUIDList` 狀態未複製。
 
 **測試**（tests/test_character_list.cpp，14 項）：REQ 空酬載 no-op roundtrip、ACK codec roundtrip（map→map→vector<UnitInfo> 巢狀）、空列表（slot=50、空 vec、strUserID 回顯）→ 建 2 角色→2 筆→他人使用者空列表。測試自 847 → **873 passed / 0 failed**。vcxproj 登記 CharacterListProtocol.{h,cpp}；Loopback 未擴充。
 
