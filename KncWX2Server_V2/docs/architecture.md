@@ -358,6 +358,40 @@ tests/test_string_filter.cpp 的字元集閘門斷言改為依 `X2_REGION_*` 分
 - **測試數**：**JP = 1297、TW = 1295、EU = 1293、CN = 1295 passed / 0 failed**。
 - 剩餘未移植：gmo_*_skill（技能 slot 更新）／gup_get_community_opt_unituid（社群選項查詢——V2 改以 gdenyoption 直接讀回近似，§0a9；relationship 6 欄寫入 EGS_UPDATE_COMMUNITY_OPT 已於 §0a10 以 write-through upsert 移植；P_GDenyOption_UPD 仍缺 proc）／class 5..9 技能列（原 proc 不存在）／LogDB；gspirit 的 Flag 完整語意與復活石補充/精力重置已於 §0a8 移植；Flag 並列槽位 UI 亦未建模。
 
+## 0a14. 2026-11-17 附記（SELECT_UNIT_1_NOT：背包格數／物品／裝備映射／復活石量讀回；schema v8）
+
+§0e 落地 Not1 時，`mapInventorySlotSize`/`mapItem`/`iNumResurrectionStone`/`equippedItem` 皆為空/0 佔位。本切片接上**可移植的部分**；衛星表缺失部分恆為 proc 預設值（見偏差聲明）。
+
+原版（JP；SERV_BATTLE_FIELD_BOSS:4257 已定義 → 主物品清單走 `P_GItem_ItemList_SEL`（**5 socket**）；SERV_ALL_RENEWAL_SP 未定義；SERV_ITEM_OPTION_DATA_SIZE:1182 已定義；SERV_NEW_ITEM_SYSTEM_2013_05:3653 已定義；SERV_EXPAND_SLOT_ID_DATA_SIZE:1582 已定義；SERV_GET_INVENTORY_REFAC:487 已定義）：
+
+- **Query_GetInventory**（GSGameDBThread.cpp:3604–）：`gup_get_inventory_size`（倉庫 **proc 隨附**，但 `SELECT InventoryCategory, SUM(NumSlot) FROM GItemInventorySize WHERE UnitUID=@iUnitUID_ GROUP BY NumSlot, InventoryCategory`——**GROUP BY NumSlot 為疑似 bug**：同 category 多列時，`map::insert` 只保留第一列，且 SUM 對 (Category, NumSlot) 群組語意不通）→ `mapInventorySlotSize`。
+- **主物品清單**：BOSS 路徑 `P_GItem_ItemList_SEL`——**proc 不在倉庫**（`gup_get_item_list` 存在，但非本建置路徑）→ 無法逐 byte 對齊 FETCH 欄位；V2 以**表結構**（GItem 存在）＋ **call site 8 欄**（ItemUID, ItemID, InventoryCategory, SlotID＋衛星欄位）為準移植**降級版**：`SELECT ItemUID, ItemID, InventoryCategory, SlotID FROM GItem WHERE UnitUID=? AND Deleted=0 ORDER BY InventoryCategory, SlotID, ItemUID`。
+- **Addl**：`gup_get_item_list_pet`（GItemPet/GItemPetKeep？）、`gup_get_attribute`（GItemAttribute）、`gup_get_item_list_seal`（GItemSeal）、`P_GItemSocket_Random_SEL`——**衛星表/proc 均不在倉庫**。
+- **UnitInfo.m_mapEquippedItem**（GSGameDBThread.cpp:1556–1594）：`mapItem` 中 `m_cSlotCategory == ST_E_EQUIP`（CXSLInventory 枚舉，`ST_NONE=0…ST_BANK=8, ST_E_EQUIP=9`）→ `keyed by m_sSlotID`（SERV_EXPAND_SLOT_ID_DATA_SIZE）插入 UnitInfo.equippedItem。
+- **kNot_1.m_iNumResurrectionStone**（GSGameDBThread.cpp:1596–…）：`gup_get_resurrection_stone`（缺 → 0）。
+- **SendSelectUnitACK**（GSUserFunction.cpp:17970–）：`kNot_1.m_mapInventorySlotSize/m_mapItem` 原樣轉發。
+
+**V2 實作**：
+
+- **Schema v8**：`gitem`（ItemUID INTEGER PK AUTOINCREMENT；UnitUID FK→gunit CASCADE；ItemID；InventoryCategory/SlotID 0..255；RegDate/DelDate NOT NULL；`Deleted AS CASE WHEN RegDate = DelDate THEN 0 ELSE 1 END` 逐字鏡像原計算欄位；IX UnitUID）／`giteminventorysize`（**無 PK**（原 heap 忠實保留）；InventoryCategory/NumSlot 0..255；FK→gunit CASCADE；IX UnitUID）。**衛星表不建**（不存在原 DDL——寧缺毋假）。
+- **GameStore**：`GetInventorySlotSize`（**category GROUP BY SUM(NumSlot)**——修正原 proc 疑似 bug，見偏差聲明；ORDER BY category）／`GetInventoryItems`（`Deleted = 0`；ORDER BY InventoryCategory, SlotID, ItemUID）。unit 不存在 → 空、true。
+- **`SelectUnit1Supplemental`**（header 新增）＋ **`BuildSelectUnitNot1(..., supplemental)`**（尾參、預設 nullptr——舊呼叫點不變）：
+  - `out.inventorySlotSize ← supplemental->inventorySlotSize`；`out.items` ← 以**gup_get_item_list 暫存表預設值**建 `ItemInfo`（quantity=0、usageType=0、endurance=-1、period=0、enchantLevel=0、sockets 全 0、sealData=0、attrib 全 0、randomSocket **空 vector**、itemState=0、expandedSocketNum=0、expirationDate=""）；`equippedItem`：SlotCategory==9 → keyed by SlotID（`map::insert` 保留第一筆，與原碼一致）。
+  - `out.numResurrectionStone ← gresurrectionstone.Quantity`（缺列 → 0）。
+- **HandleSelectUnitReq**：outNot1 非空時於 Spirit 讀回後取得三項；任一失敗 → `ERR_SELECT_UNIT_05`（DBE 慣例）。
+- **測試** `tests/test_inventory_readback.cpp`（schema v8／gitem AUTOINCREMENT／slot size per-category SUM（同 category 多列求和）／items（ORDER BY、軟刪除排除、衛星預設值）／Not1 整合（slot size 接線、equippedItem key=slotID、復活石 3、技能佔位保持）／缺表 → ERR_SELECT_UNIT_05／歸屬錯誤）。TestBuildSelectUnitNot1Defaults 未改（supplemental=nullptr 路徑）。
+- **測試數**：**JP = 1700、TW = 1698、EU = 1696、CN = 1698、US = 1697 passed / 0 failed**。
+- **偏差聲明（逐條）**：
+  1. **`gup_get_inventory_size` 疑似 bug 已修正**：原 proc `GROUP BY NumSlot, InventoryCategory`（每 (Category, NumSlot) 群組一列的 SUM，再靠 `map::insert` 只保留第一列、且同類多列只顯示不定哪列）；V2 以 **category GROUP BY SUM(NumSlot)** 實作（每類格數總和，deterministic）。若原語意（每類僅一列、NumSlot 即總數）成立，兩者結果一致；若 NumSlot 多列（副本/深淵等擴格）——V2 求和，原碼行為未定義。
+  2. **主物品清單以表結構＋call site 為準、proc 降級**：`P_GItem_ItemList_SEL` 不在倉庫（BOSS 路徑、**5 socket**）；V2 以 GItem 8 欄實作，socket 5 欄只建 4（`ItemInfo.itemSocket` 為 SERV_ITEM_OPTION_DATA_SIZE 的 vector，V2 放 4 個 0 對齊常見情形；actual wire 由 client 端 socket 數決定，未對原 SDK 驗證）。
+  3. **衛星欄位恆為預設**：GItemQuantity/GItemEndurance/GItemEnchant/GItemPeriod/GItemSocket 表**均不在倉庫** → quantity=0／usageType=0／endurance=-1／enchantLevel=0／period=0／sockets=0／sealData=0／attribEnchant 全 0／randomSocket=[]／itemState=0／expandedSocketNum=0／expirationDate=""（`gup_get_item_list` 暫存表的 DEFAULT 值，非臆造）。
+  4. **`ucSealData` 恆 0**（GItemSeal 表不在倉庫）。
+  5. **`ItemUID` 為 gitem 自增主鍵**（原 IDENTITY(1,1) bigint → SQLite INTEGER PRIMARY KEY AUTOINCREMENT）；itemUID 由 DB 生成。
+  6. **ORDER BY**：原 `order by inventorycategory`（slotID 順序未定義）；V2 明確 `InventoryCategory, SlotID, ItemUID`。
+  7. **裝備映射** SlotCategory==9（ST_E_EQUIP）；**無跳過 ST_BANK/ST_E_EQUIP**（原 Query_GetInventory 不跳過；MY_UNIT_AND_INVENTORY_INFO_LIST 路徑跳過邏輯未建模）。
+  8. **技能/裝備 Buff 不建模**（技能 proc 缺）；vecUserSkillPageData 仍為 1 頁全預設。
+  9. **GItem 軟刪除語意**：`Deleted` 生成欄位 = `CASE WHEN RegDate = DelDate THEN 0 ELSE 1 END`（原計算欄位逐字對應）；軟刪除為 `DelDate > RegDate`。
+
 ## 0a13. 2026-11-17 附記（SELECT_UNIT_4_NOT：黑名單／師徒（사제）／30 分鐘連線事件讀回；schema v7）
 
 §0h 落地 Not4 時，DB 讀回僅 kDenyOptions（§0a9）。本切片把三個**角色級** DB 源接上（其餘仍為佔位）。
@@ -826,7 +860,7 @@ V2 目前**原樣保留**協議所需的密碼學直譯，這些本身**不符�
 6. 效能與容量測試；記憶體/句柄洩漏基線（原版以 VLD 除錯，V2 無對應）。
 7. `LoadINIFile`、設定檔格式與部署工具（原 `ReleaseTool`/`.bat` 流程）。
 8. EventIDs 以外的大型表（道具/技能/副本資料）從 `X2/dat/Script` 的轉換管道。
-9. `SELECT_UNIT` 的 REQ/收尾 ACK + 決策層已完成（§0c）；`SELECT_UNIT_1_NOT` codec + 組裝（gunit 表 → Not1，缺資料項佔位）已完成（§0e）；`SELECT_UNIT_2_NOT` codec + 組裝（§0f；任務讀回自 §0a11 ← gquests/gquests_complete/gquests_repeat）已完成（§0f）；`SELECT_UNIT_3_NOT` codec + 組裝（§0g；title/mission 讀回自 §0a12 ← gtitle_complete/gtitle_mission；pet 仍空佔位）已完成（§0g）；`SELECT_UNIT_4_NOT` codec + 組裝（Henir/Messenger/戰場狀態無資料源→空容器/零值佔位；kDenyOptions ← gdenyoption（§0a9）；vecChatBlackList ← gblacklist、vecTutorialDBUnitInfo ← gtutor（≤10 級＝學生／≥20 級＝老師）、vecConnectTimeEvent ← gis30min，§0a13）已完成（§0h）；`SELECT_UNIT_5_NOT` codec + 組裝（spirit/pshop/henir-reward/cashshop 無資料源→false/0 佔位）已完成（§0i），1_NOT…5_NOT 全數落地；1_NOT…5_NOT 分片 codec 全數移植（§0e…0i）；完整角色資料載入管線未開始。Login 切片打通到 SELECT_UNIT_1_NOT 為止（items/寵物/ED/rating 等無資料來源，值為佔位；spirit 自 GSpirit 讀回，§0a8；任務自 §0a11 起讀 gquests/gquests_complete/gquests_repeat；稱號/稱號任務自 §0a12 起讀 gtitle_complete/gtitle_mission；黑名單/師徒/30 分鐘事件自 §0a13 起讀 gblacklist/gtutor/gis30min）。
+9. `SELECT_UNIT` 的 REQ/收尾 ACK + 決策層已完成（§0c）；`SELECT_UNIT_1_NOT` codec + 組裝（gunit 表 → Not1，缺資料項佔位；背包 slot size/items/equippedItem 自 §0a14 ← gitem/giteminventorysize；復活石量 ← gresurrectionstone）已完成（§0e）；`SELECT_UNIT_2_NOT` codec + 組裝（§0f；任務讀回自 §0a11 ← gquests/gquests_complete/gquests_repeat）已完成（§0f）；`SELECT_UNIT_3_NOT` codec + 組裝（§0g；title/mission 讀回自 §0a12 ← gtitle_complete/gtitle_mission；pet 仍空佔位）已完成（§0g）；`SELECT_UNIT_4_NOT` codec + 組裝（Henir/Messenger/戰場狀態無資料源→空容器/零值佔位；kDenyOptions ← gdenyoption（§0a9）；vecChatBlackList ← gblacklist、vecTutorialDBUnitInfo ← gtutor（≤10 級＝學生／≥20 級＝老師）、vecConnectTimeEvent ← gis30min，§0a13）已完成（§0h）；`SELECT_UNIT_5_NOT` codec + 組裝（spirit/pshop/henir-reward/cashshop 無資料源→false/0 佔位）已完成（§0i），1_NOT…5_NOT 全數落地；1_NOT…5_NOT 分片 codec 全數移植（§0e…0i）；完整角色資料載入管線未開始。Login 切片打通到 SELECT_UNIT_1_NOT 為止（items/寵物/ED/rating 等無資料來源，值為佔位；spirit 自 GSpirit 讀回，§0a8；任務自 §0a11 起讀 gquests/gquests_complete/gquests_repeat；稱號/稱號任務自 §0a12 起讀 gtitle_complete/gtitle_mission；黑名單/師徒/30 分鐘事件自 §0a13 起讀 gblacklist/gtutor/gis30min）。
 11. GDenyOption／GResurrectionStoneCnt／GSkill／GSkillSlot／GSpirit／GQuests——**建立流程副作用已移植（§0a5）；GSpirit 讀回與 gup_select_unit 每日重置／GResurrectionStone 每日補充／PlayDayCnt／LoginCount 登入副作用已移植（§0a8）**；其餘查詢/更新路徑（gup_get_community_opt_unituid——V2 改以 gdenyoption 直接讀回近似，§0a9；EGS_UPDATE_COMMUNITY_OPT 6 欄寫入（§0a10 write-through；P_GDenyOption_UPD 缺 proc，以 upsert 近似）已移植；gup_*_skill、gspirit Flag 語意變體）未實作；建角道具發放（gup_create_unit_set_promotion／P_GItemPeriod_INS，**不隨倉庫提供**）不可移植。
 10. Wire 相容：Login 切片 codec 只有自洽 golden bytes，**缺原 SDK 實機對照向量**（見 §13）。
 

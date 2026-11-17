@@ -224,6 +224,32 @@ CREATE TABLE gis30min (
 CREATE INDEX ix_gis30min_unituid ON gis30min(UnitUID);
 )SQL";
 
+// GItem：ItemUID IDENTITY(1,1) → INTEGER PRIMARY KEY AUTOINCREMENT；RegDate/DelDate smalldatetime NOT NULL；
+//   Deleted AS CASE WHEN RegDate = DelDate THEN 0 ELSE 1 END（逐字鏡像原計算欄位）
+// GItemInventorySize：無 PK（heap；原表即如此）＋IX_GItemInventorySize_UnitUID；FK→gunit CASCADE
+static const char* kCreateGItemV8 = R"SQL(
+CREATE TABLE gitem (
+    ItemUID          INTEGER PRIMARY KEY AUTOINCREMENT,
+    UnitUID          INTEGER NOT NULL REFERENCES gunit(UnitUID) ON DELETE CASCADE,
+    ItemID           INTEGER NOT NULL,
+    InventoryCategory INTEGER NOT NULL CHECK (InventoryCategory BETWEEN 0 AND 255),
+    SlotID           INTEGER NOT NULL CHECK (SlotID BETWEEN 0 AND 255),
+    RegDate          TEXT NOT NULL DEFAULT (datetime('now')),
+    DelDate          TEXT NOT NULL DEFAULT (datetime('now')),
+    Deleted          INTEGER GENERATED ALWAYS AS (CASE WHEN RegDate = DelDate THEN 0 ELSE 1 END) STORED
+);
+CREATE INDEX ix_gitem_unituid ON gitem(UnitUID);
+)SQL";
+static const char* kCreateGItemInventorySizeV8 = R"SQL(
+CREATE TABLE giteminventorysize (
+    UnitUID           INTEGER NOT NULL REFERENCES gunit(UnitUID) ON DELETE CASCADE,
+    InventoryCategory INTEGER NOT NULL CHECK (InventoryCategory BETWEEN 0 AND 255),
+    NumSlot           INTEGER NOT NULL CHECK (NumSlot BETWEEN 0 AND 255),
+    RegDate           TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX ix_giteminventorysize_unituid ON giteminventorysize(UnitUID);
+)SQL";
+
 // 'YYYY-MM-DD HH:MM:SS'（SQLite datetime('now') 格式）以 UTC 解析為 epoch 秒（days_from_civil 演算法，平台無關）。
 static bool ParseUtcDatetime(const std::string& s, int64_t& epochOut)
 {
@@ -321,6 +347,14 @@ bool ApplyGameMigrations(Database& db, std::string& err)
             std::string unused;
             db.Rollback(unused);
             err = std::string("game migration v7 failed: ") + err;
+            return false;
+        }
+    }
+    if (v < 8) {
+        if (!db.Exec(kCreateGItemV8, err) || !db.Exec(kCreateGItemInventorySizeV8, err)) {
+            std::string unused;
+            db.Rollback(unused);
+            err = std::string("game migration v8 failed: ") + err;
             return false;
         }
     }
@@ -1115,6 +1149,55 @@ bool GameStore::GetConnectTimeEvents(int64_t unitUID, std::vector<ConnectTimeEve
             rec.eventUID = static_cast<int32_t>(st.ColumnInt64(0));
             rec.eventTime = st.ColumnIsNull(1) ? std::string() : st.ColumnText(1);
             out.push_back(std::move(rec));
+        } else {
+            if (!stepErr.empty()) { err = stepErr; return false; }
+            break;
+        }
+    }
+    err.clear();
+    return true;
+}
+
+bool GameStore::GetInventorySlotSize(int64_t unitUID, std::map<int32_t, int32_t>& out, std::string& err)
+{
+    out.clear();
+    Statement st;
+    if (!st.Prepare(m_db,
+            "SELECT InventoryCategory, SUM(NumSlot) FROM giteminventorysize"
+            " WHERE UnitUID = ? GROUP BY InventoryCategory ORDER BY InventoryCategory ASC;", err)) return false;
+    if (!st.BindInt(1, unitUID, err)) return false;
+    std::string stepErr;
+    while (true) {
+        stepErr.clear();
+        if (st.StepRow(stepErr)) {
+            out[static_cast<int32_t>(st.ColumnInt64(0))] = static_cast<int32_t>(st.ColumnInt64(1));
+        } else {
+            if (!stepErr.empty()) { err = stepErr; return false; }
+            break;
+        }
+    }
+    err.clear();
+    return true;
+}
+
+bool GameStore::GetInventoryItems(int64_t unitUID, std::vector<InventoryItemRecord>& out, std::string& err)
+{
+    out.clear();
+    Statement st;
+    if (!st.Prepare(m_db,
+            "SELECT ItemUID, ItemID, InventoryCategory, SlotID FROM gitem"
+            " WHERE UnitUID = ? AND Deleted = 0 ORDER BY InventoryCategory ASC, SlotID ASC, ItemUID ASC;", err)) return false;
+    if (!st.BindInt(1, unitUID, err)) return false;
+    std::string stepErr;
+    while (true) {
+        stepErr.clear();
+        if (st.StepRow(stepErr)) {
+            InventoryItemRecord rec;
+            rec.itemUID = st.ColumnInt64(0);
+            rec.itemID = static_cast<int32_t>(st.ColumnInt64(1));
+            rec.slotCategory = static_cast<int8_t>(st.ColumnInt64(2));
+            rec.slotID = static_cast<int16_t>(st.ColumnInt64(3));
+            out.push_back(rec);
         } else {
             if (!stepErr.empty()) { err = stepErr; return false; }
             break;

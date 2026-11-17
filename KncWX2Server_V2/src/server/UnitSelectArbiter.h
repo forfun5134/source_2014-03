@@ -23,7 +23,9 @@
 #pragma once
 
 #include <cstdint>
+#include <map>
 #include <string>
+#include <vector>
 
 #include "../db/GameStore.h"
 #include "SelectUnitProtocol.h"
@@ -226,16 +228,26 @@ void PopulateUnitInfoFromGUnit(int64_t userUID, int authLevel, const db::GUnitRe
                                const db::SpiritValues* spiritValues = nullptr,
                                int32_t equippedTitleID = 0);
 
-// 由 GUnitRecord（+ GSpirit 讀回）組裝 SELECT_UNIT_1_NOT（成功路徑的角色資料分片，第一手資料）。
-// 誠實說明：items/quests/titles/復活石量/rating 等無資料來源，一律填 0/空容器；spirit 自 GSpirit 讀回
-// （spiritMax 恆 0：SpiritTable.lua 未隨倉庫提供）；該值「不代表」角色實際任務/道具狀態，僅為格式完整的佔位。
+// 由 GUnitRecord（+ GSpirit 讀回 + §0a14 補充：背包/裝備映射/復活石量）組裝 SELECT_UNIT_1_NOT（成功路徑的角色資料分片）。
+// 誠實說明：rating 等無資料來源，一律填 0/空容器；spirit 自 GSpirit 讀回（spiritMax 恆 0）；
+//   items ← gitem（無衛星表 → quantity=0/endurance=-1/period=0/enchant=0/sockets=0）；
+//   inventorySlotSize ← giteminventorysize；equippedItem ← SlotCategory==9 的物品映射（ST_E_EQUIP，keyed by SlotID）。
 // unitCreateDate=regDate、unitLastLoginDate=lastDate、lastPos.mapID=lastPosition、
 // Stat ← gunit 的 BaseHP/Atk*/Def*、win/lose ← GUnit.Win/Lose、exp/level ← GUnit。
 // vecUserSkillPageData 填一頁全預設資料（與 unitSkillData pages=1/1 一致）。
+// SELECT_UNIT_1_NOT 補充資料（§0a14）：handle 於 outNot1 非空、Spirit 讀回之後、進 builder 之前取得。
+struct SelectUnit1Supplemental
+{
+    std::vector<db::InventoryItemRecord> items;    // gitem（Deleted=0，已排序）
+    std::map<int32_t, int32_t> inventorySlotSize;  // giteminventorysize per-category SUM(NumSlot)
+    int32_t numResurrectionStone = 0;              // gresurrectionstone.Quantity（缺列 → 0）
+};
+
 void BuildSelectUnitNot1(int64_t userUID, int authLevel, const db::GUnitRecord& unit,
                          SelectUnitNot1& out,
                          const db::SpiritValues* spiritValues = nullptr,
-                         int32_t equippedTitleID = 0);
+                         int32_t equippedTitleID = 0,
+                         const SelectUnit1Supplemental* supplemental = nullptr);
 
 } // namespace select_unit
 } // namespace x2

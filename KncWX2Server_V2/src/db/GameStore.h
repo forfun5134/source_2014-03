@@ -35,12 +35,13 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include <map>
 
 #include "Sqlite.h"
 
 namespace x2 { namespace db {
 
-inline constexpr int kGameSchemaVersion = 7;
+inline constexpr int kGameSchemaVersion = 8;
 
 // game DB 遷移：v0→v1 建立 guser / gunit / gunit_nickname / gdeleted_nickname_history；冪等
 bool ApplyGameMigrations(Database& db, std::string& err);
@@ -129,6 +130,20 @@ struct TutorRecord
     int64_t     exp = 0;                 // gunit.Exp（level ← EXP 換算於呼叫端——§0u 政策；原讀 b.level 欄）
     std::string nickname;                // gunit_nickname.NickName；NULL → 空字串
     std::string lastDate;                // GTutor.LastDate（'YYYY-MM-DD HH:MM:SS' UTC）；NULL → 空字串
+};
+struct InventoryItemRecord
+{
+    int64_t itemUID = 0;
+    int32_t itemID = 0;
+    int8_t  usageType = 0;               // 無 GItemQuantity/GItemEndurance 表 → 恆 0（proc 預設值）
+    int32_t quantity = 0;                // 同上（gup_get_item_list 暫存表 Quantity 預設 0）
+    int16_t endurance = -1;              // 同上（proc 預設 -1）
+    int8_t  enchantLevel = 0;            // GItemEnchant 表不在倉庫
+    int16_t period = 0;                  // GItemPeriod 表不在倉庫
+    std::string expirationDate;          // GItemPeriod.ExpirationDate；缺 → 空字串
+    int32_t socket[4] = { 0, 0, 0, 0 };  // GItemSocket 表不在倉庫 → 全 0
+    int8_t  slotCategory = 0;            // gitem.InventoryCategory
+    int16_t slotID = 0;                  // gitem.SlotID
 };
 struct ConnectTimeEventRecord
 {
@@ -267,6 +282,15 @@ public:
     // 讀取 30 分鐘連線事件（原 gup_select_30min：GIs30Min WHERE UnitUID=?）；
     //   帳號級事件（gup_select_event_account_nor／gup_get_remaintime）表不在倉庫 → 不提供（見 docs §0a13）
     bool GetConnectTimeEvents(int64_t unitUID, std::vector<ConnectTimeEventRecord>& out, std::string& err);
+
+    // 讀取各類別背包格數（原 gup_get_inventory_size；V2 以 category GROUP BY SUM(NumSlot) 現實語義實作，
+    //   原 proc 的 GROUP BY NumSlot, InventoryCategory 為疑似 bug，見 docs §0a14 偏差聲明）
+    bool GetInventorySlotSize(int64_t unitUID, std::map<int32_t, int32_t>& out, std::string& err);
+
+    // 讀取背包物品（GItem；Deleted=0；ORDER BY InventoryCategory, SlotID 確定性輸出）
+    // 衛星表（GItemQuantity/GItemEndurance/GItemEnchant/GItemPeriod/GItemSocket）不在倉庫 →
+    //   quantity=0 / endurance=-1 / enchantLevel=0 / period=0 / sockets=0（gup_get_item_list 暫存表預設值）
+    bool GetInventoryItems(int64_t unitUID, std::vector<InventoryItemRecord>& out, std::string& err);
 
     // Upsert GDenyOption QN1..6（EGS_UPDATE_COMMUNITY_OPTION_REQ 的 write-through，§0a10）。
     // unit 不存在/已刪除 → false＋err（鏡像 gup_update_community_opt 的 -1「該 Unit 不存在」）；

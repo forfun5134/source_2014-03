@@ -257,7 +257,8 @@ void PopulateUnitInfoFromGUnit(int64_t userUID, int authLevel, const db::GUnitRe
 void BuildSelectUnitNot1(int64_t userUID, int authLevel, const db::GUnitRecord& unit,
                          SelectUnitNot1& out,
                          const db::SpiritValues* spiritValues,
-                         int32_t equippedTitleID)
+                         int32_t equippedTitleID,
+                         const SelectUnit1Supplemental* supplemental)
 {
     out = SelectUnitNot1{};
     out.iOK = NET_OK;
@@ -267,8 +268,42 @@ void BuildSelectUnitNot1(int64_t userUID, int authLevel, const db::GUnitRecord& 
     out.unitCreateDate = Utf8ToWide(unit.regDate);  // SERV_CHAR_LOG
     out.realDataED = 0;                             // SERV_LOGOUT_ED_CHECK（無資料來源）
     out.unitLastLoginDate = Utf8ToWide(unit.lastDate);  // SERV_DAILY_CHAR_FIRST_SELECT
-    // inventorySlotSize / items / resStone：無對應表 → 空/0
-    out.vecUserSkillPageData.push_back(unit::UserSkillPageData{});  // 一頁全預設（pages 1/1 一致）
+    if (supplemental) {
+        // mapInventorySlotSize ← giteminventorysize（§0a14）
+        out.inventorySlotSize = supplemental->inventorySlotSize;
+        // mapItem ← gitem（§0a14）：有值、衛星欄位為預設佔位（見 InventoryItemRecord 說明）
+        out.items.clear();
+        for (const auto& rec : supplemental->items) {
+            unit::InventoryItemInfo it;
+            it.itemUID = rec.itemUID;
+            it.slotCategory = rec.slotCategory;
+            it.slotID = rec.slotID;
+            it.itemInfo.itemID = rec.itemID;
+            it.itemInfo.usageType = rec.usageType;
+            it.itemInfo.quantity = rec.quantity;
+            it.itemInfo.endurance = rec.endurance;
+            it.itemInfo.sealData = 0;
+            it.itemInfo.enchantLevel = rec.enchantLevel;
+            it.itemInfo.attrib = unit::ItemAttributeEnchantInfo{};
+            it.itemInfo.itemSocket = { rec.socket[0], rec.socket[1], rec.socket[2], rec.socket[3] };
+            it.itemInfo.randomSocket = {};              // SERV_NEW_ITEM_SYSTEM_2013_05：GItemSocketRandom 表不在倉庫
+            it.itemInfo.itemState = 0;
+            it.itemInfo.period = rec.period;
+            it.itemInfo.expirationDate = rec.expirationDate.empty() ? std::wstring() : Utf8ToWide(rec.expirationDate);
+            it.itemInfo.expandedSocketNum = 0;          // SERV_BATTLE_FIELD_BOSS：欄位不在倉庫
+            out.items.insert({ rec.itemUID, it });
+        }
+        // 裝備映射：SlotCategory == ST_E_EQUIP(9) → UnitInfo.equippedItem（key = SlotID；SERV_EXPAND_SLOT_ID_DATA_SIZE 已定義）
+        for (const auto& kv : out.items) {
+            if (kv.second.slotCategory == 9) {
+                out.unitInfo.equippedItem.insert({ static_cast<int32_t>(kv.second.slotID), kv.second });   // map::insert：重複 SlotID 保留第一筆（原碼同）
+            }
+        }
+        // numResurrectionStone ← gresurrectionstone.Quantity（缺列 → §0a8 政策 0；§0a14）
+        out.numResurrectionStone = supplemental->numResurrectionStone;
+    }
+    // inventorySlotSize / items / resStone：supplemental 為空（list 路徑等）→ 沿用空/0 佔位
+    out.vecUserSkillPageData.push_back(unit::UserSkillPageData{});  // 一頁全預設（pages 1/1 一致；技能 proc 缺）
     // vecSkillUnsealed / mapSkillNote：空；skillNoteMaxPageNum = 0
     out.relationshipInfo = unit::RelationshipInfo{};  // 無伴侶 → 全預設
 }
@@ -702,7 +737,30 @@ int32_t HandleSelectUnitReq(db::GameStore& gameDb, int64_t userUID, const Select
             ack.iOK = ERR_SELECT_UNIT_05;
             return ack.iOK;
         }
-        if (outNot1) BuildSelectUnitNot1(userUID, authLevel, uRef, *outNot1, &sv, equippedTitleID);
+        SelectUnit1Supplemental sup;
+        if (outNot1) {
+            if (!gameDb.GetInventorySlotSize(req.unitUID, sup.inventorySlotSize, err)) {
+                err = std::string("get inventory slot size: ") + err;
+                ack.iOK = ERR_SELECT_UNIT_05;
+                return ack.iOK;
+            }
+            if (!gameDb.GetInventoryItems(req.unitUID, sup.items, err)) {
+                err = std::string("get inventory items: ") + err;
+                ack.iOK = ERR_SELECT_UNIT_05;
+                return ack.iOK;
+            }
+            db::ResurrectionStoneValues rs;
+            if (!gameDb.GetResurrectionStone(req.unitUID, rs, err)) {
+                if (!err.empty()) {   // 缺列 → 0（非錯誤）；DB 錯誤 → 中斷
+                    err = std::string("get resurrection stone: ") + err;
+                    ack.iOK = ERR_SELECT_UNIT_05;
+                    return ack.iOK;
+                }
+            } else {
+                sup.numResurrectionStone = rs.quantity;
+            }
+        }
+        if (outNot1) BuildSelectUnitNot1(userUID, authLevel, uRef, *outNot1, &sv, equippedTitleID, &sup);
     }
     if (outNot2) {
         std::vector<db::QuestRecord> quests;
