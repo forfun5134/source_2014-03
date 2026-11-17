@@ -63,6 +63,66 @@ CREATE TABLE gdeleted_nickname_history (
 CREATE INDEX ix_gdeleted_nickname ON gdeleted_nickname_history(NickName, RegDate);
 )SQL";
 
+// --- v2（§0a5）：原 gup_create_unit 衛星副作用所需表 ---
+static const char* kCreateGDenyOptionV2 = R"SQL(
+CREATE TABLE gdenyoption (
+    UnitUID    INTEGER NOT NULL REFERENCES gunit(UnitUID),
+    QuestionNo INTEGER NOT NULL CHECK (QuestionNo BETWEEN 1 AND 255),
+    CodeNo     INTEGER NOT NULL CHECK (CodeNo BETWEEN 1 AND 255),
+    PRIMARY KEY (UnitUID, QuestionNo)
+);
+)SQL";
+
+static const char* kCreateGQuestsV2 = R"SQL(
+CREATE TABLE gquests (
+    UnitUID   INTEGER NOT NULL REFERENCES gunit(UnitUID),
+    QuestID   INTEGER NOT NULL,
+    SubQuest0 INTEGER NOT NULL DEFAULT 0 CHECK (SubQuest0 BETWEEN 0 AND 255),
+    SubQuest1 INTEGER NOT NULL DEFAULT 0 CHECK (SubQuest1 BETWEEN 0 AND 255),
+    SubQuest2 INTEGER NOT NULL DEFAULT 0 CHECK (SubQuest2 BETWEEN 0 AND 255),
+    SubQuest3 INTEGER NOT NULL DEFAULT 0 CHECK (SubQuest3 BETWEEN 0 AND 255),
+    SubQuest4 INTEGER NOT NULL DEFAULT 0 CHECK (SubQuest4 BETWEEN 0 AND 255),
+    RegDate   TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (UnitUID, QuestID)
+);
+)SQL";
+
+static const char* kCreateGSkillV2 = R"SQL(
+CREATE TABLE gskill (
+    UnitUID INTEGER NOT NULL REFERENCES gunit(UnitUID),
+    SkillID INTEGER NOT NULL,
+    RegDate TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (UnitUID, SkillID)
+);
+)SQL";
+
+static const char* kCreateGSkillSlotV2 = R"SQL(
+CREATE TABLE gskillslot (
+    UnitUID INTEGER NOT NULL PRIMARY KEY REFERENCES gunit(UnitUID),
+    Slot01  INTEGER NOT NULL,
+    Slot02  INTEGER NOT NULL,
+    Slot03  INTEGER NOT NULL
+);
+)SQL";
+
+static const char* kCreateGSpiritV2 = R"SQL(
+CREATE TABLE gspirit (
+    UnitUID INTEGER NOT NULL PRIMARY KEY REFERENCES gunit(UnitUID),
+    Spirit  INTEGER NOT NULL,
+    RegDate TEXT NOT NULL DEFAULT (datetime('now')),
+    Flag    INTEGER NOT NULL DEFAULT 0 CHECK (Flag IN (0, 1))   -- 原 DF_GSpirit_Flag DEFAULT(0)
+);
+)SQL";
+
+static const char* kCreateGResurrectionStoneCntV2 = R"SQL(
+-- 單列全域設定表（原 dbo.GResurrectionStoneCnt；StartSpirit=GSpirit 起始值來源）。倉庫無 seed 資料 → V2 不預置列。
+CREATE TABLE gresurrectionstonecnt (
+    StartCnt    INTEGER,
+    SupplyCnt   INTEGER,
+    StartSpirit INTEGER
+);
+)SQL";
+
 bool ApplyGameMigrations(Database& db, std::string& err)
 {
     if (!db.IsOpen()) { err = "database not open"; return false; }
@@ -82,8 +142,73 @@ bool ApplyGameMigrations(Database& db, std::string& err)
             return false;
         }
     }
+    if (v < 2) {
+        if (!db.Exec(kCreateGDenyOptionV2, err) ||
+            !db.Exec(kCreateGQuestsV2, err) ||
+            !db.Exec(kCreateGSkillV2, err) ||
+            !db.Exec(kCreateGSkillSlotV2, err) ||
+            !db.Exec(kCreateGSpiritV2, err) ||
+            !db.Exec(kCreateGResurrectionStoneCntV2, err)) {
+            std::string unused;
+            db.Rollback(unused);
+            err = std::string("game migration v2 failed: ") + err;
+            return false;
+        }
+    }
     if (!db.SetUserVersion(kGameSchemaVersion, err)) { std::string unused; db.Rollback(unused); return false; }
     return db.Commit(err);
+}
+
+// 原 gup_create_unit 的衛星副作用（呼叫端已 Begin）：
+//   GQuests：QuestID=13（로우의 호출）, SubQuest0=1（原 proc 對所有職業）
+//   GSkill/GSkillSlot：class 1→10000 / 2→20030 / 3→30000 / 4→40010（**僅 1..4**；原 proc 如此，
+//     5..9 無技能列——忠實照抄）；Slot01=SkillID、Slot02/03=0
+//   GSpirit：StartSpirit ← gresurrectionstonecnt（缺列或 NULL → 0；
+//     原 stored proc 空表時 @iStartSpirit=NULL → Spirit NULL → -21 → 建角整體 ROLLBACK；
+//     V2 以 0 續建並於文件誠實聲明）；Flag=0（原 DF_GSpirit_Flag DEFAULT(0)）
+//   GDenyOption：(1..4, CodeNo=1)
+static bool InsertCreateUnitSideEffects(Database& db, int64_t unitUID, int unitClass, std::string& err)
+{
+    auto insert = [&db, unitUID, &err](const char* sql, const char* what, int64_t bind2 = -1, bool hasBind2 = false) -> bool {
+        Statement st;
+        if (!st.Prepare(db, sql, err)) { err = std::string(what) + " prepare: " + err; return false; }
+        if (!st.BindInt(1, unitUID, err)) { err = std::string(what) + " bind: " + err; return false; }
+        if (hasBind2 && !st.BindInt(2, bind2, err)) { err = std::string(what) + " bind2: " + err; return false; }
+        std::string stepErr;
+        if (st.StepRow(stepErr)) { err = std::string(what) + ": unexpected row"; return false; }
+        if (!stepErr.empty()) { err = std::string(what) + ": " + stepErr; return false; }
+        return true;
+    };
+
+    if (!insert("INSERT INTO gquests (UnitUID, QuestID, SubQuest0, SubQuest1, SubQuest2, SubQuest3, SubQuest4)"
+                " VALUES (?, 13, 1, 0, 0, 0, 0);", "gquests")) return false;
+
+    static const int kClassSkill[5] = { 0, 10000, 20030, 30000, 40010 };
+    if (unitClass >= 1 && unitClass <= 4) {
+        const int64_t skillID = kClassSkill[unitClass];
+        if (!insert("INSERT INTO gskill (UnitUID, SkillID) VALUES (?, ?);", "gskill", skillID, true)) return false;
+        if (!insert("INSERT INTO gskillslot (UnitUID, Slot01, Slot02, Slot03) VALUES (?, ?, 0, 0);",
+                    "gskillslot", skillID, true)) return false;
+    }
+
+    {
+        int64_t startSpirit = 0;   // 缺列 / NULL → 0（見標頭說明）
+        Statement st;
+        if (!st.Prepare(db, "SELECT StartSpirit FROM gresurrectionstonecnt LIMIT 1;", err)) return false;
+        std::string stepErr;
+        if (st.StepRow(stepErr)) {
+            if (!st.ColumnIsNull(0)) startSpirit = st.ColumnInt64(0);
+            err.clear();
+        } else if (!stepErr.empty()) { err = stepErr; return false; }
+        if (!insert("INSERT INTO gspirit (UnitUID, Spirit, Flag) VALUES (?, ?, 0);",
+                    "gspirit", startSpirit, true)) return false;
+    }
+
+    for (int q = 1; q <= 4; ++q) {
+        if (!insert("INSERT INTO gdenyoption (UnitUID, QuestionNo, CodeNo) VALUES (?, ?, 1);",
+                    "gdenyoption", q, true)) return false;
+    }
+    return true;
 }
 
 static bool ReadGUserRow(Statement& st, GUserRecord& out)
@@ -302,6 +427,11 @@ CreateUnitResult GameStore::CreateUnit(int64_t userUID, const std::string& nickn
         std::string stepErr;
         if (in.StepRow(stepErr)) { std::string u; m_db.Rollback(u); err = "unexpected row from INSERT"; return CreateUnitResult::DbError; }
         if (!stepErr.empty()) { std::string u; m_db.Rollback(u); err = stepErr; return CreateUnitResult::DbError; }
+    }
+
+    // 5.5) 原 gup_create_unit 衛星副作用（GQuests/GSkill/GSkillSlot/GSpirit/GDenyOption）；失敗 → 整體 ROLLBACK
+    if (!InsertCreateUnitSideEffects(m_db, unitUIDOut, unitClass, err)) {
+        std::string u; m_db.Rollback(u); return CreateUnitResult::DbError;
     }
 
     if (!m_db.Commit(err)) return CreateUnitResult::DbError;

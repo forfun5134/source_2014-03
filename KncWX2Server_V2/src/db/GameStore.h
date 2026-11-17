@@ -39,7 +39,7 @@
 
 namespace x2 { namespace db {
 
-inline constexpr int kGameSchemaVersion = 1;
+inline constexpr int kGameSchemaVersion = 2;
 
 // game DB 遷移：v0→v1 建立 guser / gunit / gunit_nickname / gdeleted_nickname_history；冪等
 bool ApplyGameMigrations(Database& db, std::string& err);
@@ -108,6 +108,9 @@ public:
     // gup_create_unit 對應；成功回傳 Ok 且 unitUID 有效。
     //  nickname 長度檢查 1..16（原 nvarchar(16)），違反視為 DbError？否——回傳 NicknameTaken 語意外故
     //  以參數驗證先行：nickname/unitClass 不符 → false + err（程式錯誤，非業務拒絕）。
+    //  副作用（§0a5，同一 transaction，失敗整體 ROLLBACK → DbError）：gquests(QuestID=13,SubQuest0=1，所有職業)、
+    //  gskill/gskillslot（僅 class 1..4：SkillID 10000/20030/30000/40010；class 5..9 忠實原碼——無技能列）、
+    //  gspirit（Spirit←gresurrectionstonecnt 第一列 StartSpirit；缺列/NULL → 0；Flag=0）、gdenyoption(QuestionNo 1..4, CodeNo=1)。
     CreateUnitResult CreateUnit(int64_t userUID, const std::string& nickname, int unitClass,
                                 int64_t& unitUIDOut, std::string& err);
 

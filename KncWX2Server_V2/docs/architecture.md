@@ -16,7 +16,7 @@
 
 ## 0b. 2026-11-17 快照（game DB Phase 2a）
 
-`src/db/GameStore.{h,cpp}`、`tests/test_game_store.cpp` 新增：game DB（對應原 Database2）的 `guser`／`gunit`／`gunit_nickname`／`gdeleted_nickname_history` 四表 schema（v1，`Deleted` 生成欄、partial index）+ 存取層：`GetOrCreateGUser`（對應 gup_get_user_info，USSize=50）、`CreateUnit`（對應 gup_create_unit：usSize 上限／暱稱唯一／14 天刪除冷卻／事務化插入 gunit+gunit_nickname，LastPosition=20000、SPoint=1）、`ListUnitsByUserUID`／`GetUnitByUID`（JOIN 暱稱）、`SoftDeleteUnit`（DelDate=now + 釋放暱稱 NULL + 寫入冷卻歷史，事務化、冪等）、`RecordUnitLogin`。
+`src/db/GameStore.{h,cpp}`、`tests/test_game_store.cpp` 新增：game DB（對應原 Database2）的 `guser`／`gunit`／`gunit_nickname`／`gdeleted_nickname_history` 四表 schema（v1，`Deleted` 生成欄、partial index）+ 存取層：`GetOrCreateGUser`（對應 gup_get_user_info，USSize=50）、`CreateUnit`（對應 gup_create_unit：usSize 上限／暱稱唯一／14 天刪除冷卻／事務化插入 gunit+gunit_nickname，LastPosition=20000、SPoint=1；衛星副作用已於 §0a5 補齊：gquests/gskill/gskillslot/gspirit/gdenyoption，GameDB schema v2）、`ListUnitsByUserUID`／`GetUnitByUID`（JOIN 暱稱）、`SoftDeleteUnit`（DelDate=now + 釋放暱稱 NULL + 寫入冷卻歷史，事務化、冪等）、`RecordUnitLogin`。
 
 ⚠ 範圍誠實聲明：GDenyOption／GResurrectionStoneCnt／GSkill／GQuests／GItem 等衛星表**未實作**；SoftDeleteUnit 只處理 gunit 本身（原 proc 還會級聯 GTutor/GItem）；LastPosition 寫死 20000 為原 proc 預設；game DB 與 account DB 是兩個獨立 SQLite 檔，跨庫 UserUID↔LoginUID 無 FK（與原版一致）。
 ⚠ wire 層尚未消費此 store（SELECT_UNIT_ACK 未動）。
@@ -347,6 +347,26 @@ tests/test_string_filter.cpp 的字元集閘門斷言改為依 `X2_REGION_*` 分
 - **測試** `tests/test_pvp_npc_names.cpp`：謂詞（地區 fixture，含 case-insensitive 反證：`bendaboss` 不命中／`BenDaBoss` 命中；TW=Ancel——**注意命名 fixture 須先確認不命中 StringFilter**：'Aleron' 命中 ban word 子字串）＋決策層（CREATE_UNIT 命中→26、GM authLevel=9 亦 26、正常名→NET_OK；CHANGE_NICK_NAME 命中→26、bCheckOnly→26、GM→26）。build_and_test.sh 的 REGION 巨集**僅經 -D 傳入**，Region.h 的 JP 預設 fallback 只在 `#include Region.h` 處生效——PvpNpcNames.cpp 與測試檔均須顯式包含之（否則 #if 分支誤走 #else 空表，實測 1256→1238＋7 FAIL 才察覺）。
 - **測試數**：**JP = 1256、TW = 1254、EU = 1252、CN = 1254、US = 1253 passed / 0 failed**（US 順帶驗證）。verify_generated.sh 擴充為 8 個 .inc 全數防漂移。
 
+## 0a5. 2026-11-17 附記（CREATE_UNIT gup_create_unit 衛星表副作用）
+
+原 `gup_create_unit`（DataBase/Database2/Database2/Schema Objects/Stored Procedures/dbo.gup_create_unit.proc.sql）除 gunit/gunit_nickname 外還會：`GQuests`（QuestID=13「로우의 호출」、SubQuest0=1，所有職業）、`GSkill`/`GSkillSlot`（**僅 class 1..4**：1→10000／2→20030／3→30000／4→40010，Slot01=SkillID、Slot02/03=0——class 5..9 在原 proc 中無技能列，忠實照抄）、`GSpirit`（Spirit ← `GResurrectionStoneCnt.StartSpirit`，Flag 由 DF_GSpirit_Flag 預設 0）、`GDenyOption`（QuestionNo 1..4、CodeNo=1）。任一 insert 失敗 → 整體 ROLLBACK（原 iOK=-14..-21 → V2 映射為 DbError → ERR_CREATE_UNIT_02=27）。
+
+- **Schema v2 migration**（`kGameSchemaVersion` 1→2）：新增 `gdenyoption`（PK(UnitUID,QuestionNo)）、`gquests`（PK(UnitUID,QuestID)）、`gskill`（PK(UnitUID,SkillID)）、`gskillslot`（PK(UnitUID)）、`gspirit`（PK(UnitUID)、Flag DEFAULT 0）、`gresurrectionstonecnt`（StartCnt/SupplyCnt/StartSpirit，單列全域設定）。v1 建表不動；既有 v1 庫升級僅跑新表。
+- **GameStore::CreateUnit 改動**：`gunit_nickname` INSERT 後、COMMIT 前，呼叫 `InsertCreateUnitSideEffects`（gquests→gskill/gskillslot（class 1..4 才有）→gspirit→gdenyoption）；任一步失敗 → ROLLBACK 回 DbError。
+- **⚠ StartSpirit 起始值**：原 production DB 的 `GResurrectionStoneCnt` 有列（值不在倉庫）；原 stored proc 空表時 `@iStartSpirit` 保持 NULL → Spirit NULL → -21 → 建角整體失敗。**V2 以 0 續建**（誠實偏差；倉庫無 seed 資料，無法重現任何原值）。測試以 `INSERT INTO gresurrectionstonecnt … (StartSpirit=100)` 覆蓋「有列」路徑；「空表」路徑斷言 Spirit=0。
+- **測試** `tests/test_create_unit_satellite.cpp`（41 項）：class 1..4 SkillID 對應／class 5 無 gskill・gskillslot（忠實）／GQuests 所有職業 QuestID=13・SubQuest0=1／GDenyOption 4 列 CodeNo=1／GSpirit（空表→0、Flag=0；有列→100）／**副作用失敗 → 整體 ROLLBACK**（`DROP TABLE gskillslot` 後 create → ack=ERR_CREATE_UNIT_02、gunit/gunit_nickname/gquests 皆 0 列）。
+- **測試數**：**JP = 1297、TW = 1295、EU = 1293、CN = 1295 passed / 0 failed**。
+- 剩餘未移植：gmo_*_skill（技能 slot 更新）／gup_get_community_opt_unituid（社群選項查詢）／class 5..9 技能列（原 proc 不存在）／LogDB；gspirit 的 Flag 並列槽位 UI 亦未建模。
+
+## 0a6. 2026-11-17 附記（每日建立上限考察——原版無伺服器端閘門）
+
+先前筆記一直記著「每日建立上限未建模（ERR_CREATE_UNIT_03/09 其他路徑）」。本輪徹查：
+
+- 原 `gup_create_unit` proc 內的每日上限檢查（`= 4`，即 `CREATE_UNIT_MAX_NUMBER_SERVER`）**已被註解掉**——原伺服器**不攔截** CREATE_UNIT。
+- `P_GUnit_CreateCNT_GET`（DBE_GET_CREATE_UNIT_TODAY_COUNT）僅供客戶端**顯示**今日已建立數（V2 §0n/§0 已移植，GET_CREATE_UNIT_TODAY_COUNT_ACK，map{0→count}）。
+- 唯一真正的 4 次/日（或 `FIX_REFORM_ENTRY_POINT_CREATE_UNIT_UNLIMITED` 下 50 次/日）限制在**客戶端** `X2Lib/X2StateCreateUnit.cpp`（`TODAY_CREATE_UNIT_MAX_NUMBER_SERVER`，`#ifdef REFORM_ENTRY_POINT`，停用 Gaia/Soles 兩個按鈕——純 UI 閘門，伺服器不驗證）。
+- **V2 不擋：與原版伺服器語意一致**；客戶端 UI 限制不在本伺服器重寫範圍（也不是 `SERV_*` 旗標）。`ERR_CREATE_UNIT_03`(28) 在 V2 僅保留給「建立後讀不回」的內部斷言路徑；`ERR_CREATE_UNIT_09` 未映射。
+
 ## 0. 一句話現況
 
 V2 是原 Elsword 韓服伺服器（`X2Project`）的 **C++ 重寫地基**：平台無關的線路格式核心、安全模組已完成並以 golden bytes 測試驗證；最短網路路徑（同步 TCP + 原版 TCP 訊框 + 迴路 echo 整合測試）與 Session 層（SPI 握手換發、驗證失敗踢除、E_HEART_BEAT 丟棄、殭屍檢測、SERV_KEVENT_FROM 標記）已完成並 238 項測試全綠；**遊戲邏輯、非同步網路層未完成；資料庫層已完成 Phase 1（users 表 + 帳號存取層）**。V2 不是可運行的伺服器，不要部署它。
@@ -639,7 +659,7 @@ V2 目前**原樣保留**協議所需的密碼學直譯，這些本身**不符�
 7. `LoadINIFile`、設定檔格式與部署工具（原 `ReleaseTool`/`.bat` 流程）。
 8. EventIDs 以外的大型表（道具/技能/副本資料）從 `X2/dat/Script` 的轉換管道。
 9. `SELECT_UNIT` 的 REQ/收尾 ACK + 決策層已完成（§0c）；`SELECT_UNIT_1_NOT` codec + 組裝（gunit 表 → Not1，缺資料項佔位）已完成（§0e）；`SELECT_UNIT_2_NOT` codec + 組裝（任務無資料源→空容器佔位）已完成（§0f）；`SELECT_UNIT_3_NOT` codec + 組裝（mission/title/pet 無資料源→空容器佔位）已完成（§0g）；`SELECT_UNIT_4_NOT` codec + 組裝（社交/Henir/Messenger/戰場狀態無資料源→空容器/零值佔位）已完成（§0h）；`SELECT_UNIT_5_NOT` codec + 組裝（spirit/pshop/henir-reward/cashshop 無資料源→false/0 佔位）已完成（§0i），1_NOT…5_NOT 全數落地；1_NOT…5_NOT 分片 codec 全數移植（§0e…0i）；完整角色資料載入管線未開始。Login 切片打通到 SELECT_UNIT_1_NOT 為止（items/任務/寵物/ED/rating 等無資料來源，值為佔位）。
-11. GDenyOption（社群拒絕選項）／GResurrectionStoneCnt／角色技能與任務衛星表未實作；帳號→角色建立的完整 `gup_create_unit` 副作用不完整。
+11. GDenyOption／GResurrectionStoneCnt／GSkill／GSkillSlot／GSpirit／GQuests——**建立流程副作用已移植（§0a5）**；其查詢/更新路徑（gup_get_community_opt_unituid、gup_*_skill、gspirit Flag 完整語意）未實作；其餘建角副作用（GTutor 新手教學進度、GItem 建角發放道具）未實作。
 10. Wire 相容：Login 切片 codec 只有自洽 golden bytes，**缺原 SDK 實機對照向量**（見 §13）。
 
 ## 13. 風險

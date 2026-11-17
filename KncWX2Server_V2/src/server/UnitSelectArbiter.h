@@ -64,7 +64,8 @@ int32_t HandleSelectUnitReq(db::GameStore& gameDb, int64_t userUID, const Select
 //   1.6) IsExistPvpNpcName 閘門（§0a4，無 GM 繞過）：暱稱命中 PvP NPC 保留名單 → ERR_CREATE_UNIT_01(26)
 //      含 KODBC 注入標記（; ' " -- /* */ \）→ ERR_CREATE_UNIT_08(33)（「無法使用的暱稱」）
 //   2) GameStore::CreateUnit（guser 不存在/已刪除 → ERR_CREATE_UNIT_00(25)；暱稱重複 → ERR_CREATE_UNIT_01(26)；
-//      槽位達 USSize → ERR_CREATE_UNIT_05(30)；暱稱 14 天冷卻 → ERR_CREATE_UNIT_06(31)；DB 錯誤 → ERR_CREATE_UNIT_02(27)）
+//      槽位達 USSize → ERR_CREATE_UNIT_05(30)；暱稱 14 天冷卻 → ERR_CREATE_UNIT_06(31)；DB 錯誤 → ERR_CREATE_UNIT_02(27)；
+//      §0a5：gunit+gunit_nickname 與衛星副作用（gquests/gskill/gskillslot/gspirit/gdenyoption）同一 transaction）
 //   3) 成功 → 重讀角色，kUnitInfo ← PopulateUnitInfoFromGUnit(userUID, authLevel, rec)；
 //      vecSkillSlot / wstrEnableDate 原由 AccountDB(DBE_ACCOUNT_CREATE_UNIT_*) 填寫，V2 一律空（誠實佔位）。
 //   （FT_NICKNAME 過濾已移植 §0w：字元集閘門＋禁用暱稱 266＋禁用字 1389＋禁用標記；無 NICKNAMEWORD 子列表、無禁用字 DB 動態更新）
