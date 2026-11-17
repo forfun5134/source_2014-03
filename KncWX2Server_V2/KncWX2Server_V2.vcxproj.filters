@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="Current" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="core">
+      <UniqueIdentifier>{A1B20000-1001-4A11-8A00-000000000001}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="security">
+      <UniqueIdentifier>{A1B20000-1001-4A11-8A00-000000000002}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="third_party\miniz">
+      <UniqueIdentifier>{A1B20000-1001-4A11-8A00-000000000003}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="third_party\sqlite">
+      <UniqueIdentifier>{A1B20000-1001-4A11-8A00-000000000004}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="net">
+      <UniqueIdentifier>{A1B20000-1001-4A11-8A00-000000000005}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="src\core\Event.cpp"><Filter>core</Filter></ClCompile>
+    <ClCompile Include="src\core\Region.cpp"><Filter>core</Filter></ClCompile>
+    <ClCompile Include="src\net\Socket.cpp"><Filter>net</Filter></ClCompile>
+    <ClCompile Include="src\net\Session.cpp"><Filter>net</Filter></ClCompile>
+    <ClCompile Include="src\db\Sqlite.cpp"><Filter>db</Filter></ClCompile>
+    <ClCompile Include="src\db\UserStore.cpp"><Filter>db</Filter></ClCompile>
+    <ClCompile Include="src\server\LoginProtocol.cpp"><Filter>server</Filter></ClCompile>
+    <ClCompile Include="src\server\LoginArbiter.cpp"><Filter>server</Filter></ClCompile>
+    <ClCompile Include="src\db\GameStore.cpp"><Filter>db</Filter></ClCompile>
+    <ClCompile Include="src\server\SelectUnitProtocol.cpp"><Filter>server</Filter></ClCompile>
+    <ClCompile Include="src\server\UnitSelectArbiter.cpp"><Filter>server</Filter></ClCompile>
+    <ClCompile Include="src\core\SerBuffer.cpp"><Filter>core</Filter></ClCompile>
+    <ClCompile Include="src\core\UidType.cpp"><Filter>core</Filter></ClCompile>
+    <ClCompile Include="src\core\Sha256.cpp"><Filter>core</Filter></ClCompile>
+    <ClCompile Include="src\security\Des.cpp"><Filter>security</Filter></ClCompile>
+    <ClCompile Include="src\security\Md5.cpp"><Filter>security</Filter></ClCompile>
+    <ClCompile Include="src\security\SADatabase.cpp"><Filter>security</Filter></ClCompile>
+    <ClCompile Include="src\security\SecureBuffer.cpp"><Filter>security</Filter></ClCompile>
+    <ClCompile Include="src\security\SecurityAssociation.cpp"><Filter>security</Filter></ClCompile>
+    <ClCompile Include="third_party\miniz\miniz.c"><Filter>third_party\miniz</Filter></ClCompile>
+    <ClCompile Include="third_party\miniz\miniz_tdef.c"><Filter>third_party\miniz</Filter></ClCompile>
+    <ClCompile Include="third_party\miniz\miniz_tinfl.c"><Filter>third_party\miniz</Filter></ClCompile>
+    <ClCompile Include="third_party\sqlite\sqlite3.c"><Filter>third_party\sqlite</Filter></ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="src\core\ByteOrder.h"><Filter>core</Filter></ClInclude>
+    <ClInclude Include="src\core\Event.h"><Filter>core</Filter></ClInclude>
+    <ClInclude Include="src\core\EventIDs.h"><Filter>core</Filter></ClInclude>
+    <ClInclude Include="src\core\Logger.h"><Filter>core</Filter></ClInclude>
+    <ClInclude Include="src\core\Platform.h"><Filter>core</Filter></ClInclude>
+    <ClInclude Include="src\core\Region.h"><Filter>core</Filter></ClInclude>
+    <ClInclude Include="src\net\Socket.h"><Filter>net</Filter></ClInclude>
+    <ClInclude Include="src\net\PacketIO.h"><Filter>net</Filter></ClInclude>
+    <ClInclude Include="src\net\Session.h"><Filter>net</Filter></ClInclude>
+    <ClInclude Include="src\core\Sha256.h"><Filter>core</Filter></ClInclude>
+    <ClInclude Include="src\db\Sqlite.h"><Filter>db</Filter></ClInclude>
+    <ClInclude Include="src\db\UserStore.h"><Filter>db</Filter></ClInclude>
+    <ClInclude Include="src\server\LoginProtocol.h"><Filter>server</Filter></ClInclude>
+    <ClInclude Include="src\server\LoginArbiter.h"><Filter>server</Filter></ClInclude>
+    <ClInclude Include="src\db\GameStore.h"><Filter>db</Filter></ClInclude>
+    <ClInclude Include="src\server\SelectUnitProtocol.h"><Filter>server</Filter></ClInclude>
+    <ClInclude Include="src\server\UnitSelectArbiter.h"><Filter>server</Filter></ClInclude>
+    <ClInclude Include="src\core\NetError.h"><Filter>core</Filter></ClInclude>
+    <ClInclude Include="src\core\SerBuffer.h"><Filter>core</Filter></ClInclude>
+    <ClInclude Include="src\core\Serializer.h"><Filter>core</Filter></ClInclude>
+    <ClInclude Include="src\core\Tags.h"><Filter>core</Filter></ClInclude>
+    <ClInclude Include="src\core\UidType.h"><Filter>core</Filter></ClInclude>
+    <ClInclude Include="src\security\ByteStream.h"><Filter>security</Filter></ClInclude>
+    <ClInclude Include="src\security\Des.h"><Filter>security</Filter></ClInclude>
+    <ClInclude Include="src\security\Hmac.h"><Filter>security</Filter></ClInclude>
+    <ClInclude Include="src\security\Md5.h"><Filter>security</Filter></ClInclude>
+    <ClInclude Include="src\security\SADatabase.h"><Filter>security</Filter></ClInclude>
+    <ClInclude Include="src\security\SecureBuffer.h"><Filter>security</Filter></ClInclude>
+    <ClInclude Include="src\security\SecurityAssociation.h"><Filter>security</Filter></ClInclude>
+    <ClInclude Include="third_party\miniz\miniz.h"><Filter>third_party\miniz</Filter></ClInclude>
+    <ClInclude Include="third_party\miniz\miniz_common.h"><Filter>third_party\miniz</Filter></ClInclude>
+    <ClInclude Include="third_party\miniz\miniz_export.h"><Filter>third_party\miniz</Filter></ClInclude>
+    <ClInclude Include="third_party\miniz\miniz_tdef.h"><Filter>third_party\miniz</Filter></ClInclude>
+    <ClInclude Include="third_party\miniz\miniz_tinfl.h"><Filter>third_party\miniz</Filter></ClInclude>
+    <ClInclude Include="third_party\sqlite\sqlite3.h"><Filter>third_party\sqlite</Filter></ClInclude>
+    <ClInclude Include="third_party\sqlite\sqlite3ext.h"><Filter>third_party\sqlite</Filter></ClInclude>
+  </ItemGroup>
+</Project>

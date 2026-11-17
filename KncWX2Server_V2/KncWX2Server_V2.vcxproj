@@ -1,0 +1,180 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  KncWX2Server_V2 — Visual Studio 2026 (VC++ /std:c++latest) + SQLite 項目骨架
+  注意：本檔未在 Windows 主機上實際建置驗證（開發環境為 Linux）。
+  若本機未安裝 v145 工具組，請於 IDE 開啟時 retarget 至已安裝的最新 MSVC。
+  /std:c++latest 對應「VC++26」世代；程式碼目前以 C++17 語法開發，
+  待 Windows 工具鏈可用後再逐步採用 C++26 特性（例如 std::execution、反射等，視 VS2026 實際支援為準）。
+-->
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>18.0</VCProjectVersion>
+    <Keyword>Win32Proj</Keyword>
+    <ProjectGuid>{A1B2C3D4-1001-4A11-8A00-000000000002}</ProjectGuid>
+    <RootNamespace>KncWX2Server_V2</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <ProjectName>KncWX2Server_V2</ProjectName>
+  </PropertyGroup>
+
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+  </PropertyGroup>
+
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+
+  <PropertyGroup>
+    <OutDir>$(SolutionDir)build\$(Configuration)\</OutDir>
+    <IntDir>$(SolutionDir)build\obj\$(Configuration)\</IntDir>
+  </PropertyGroup>
+
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <LanguageStandard>stdcpplatest</LanguageStandard>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
+      <!-- region: 預設 JP（= 原 SERV_INT_INTERNAL）；換區請加 X2_REGION_TW 等（擇一）；release 一般建置請設 X2_INTERNAL_BUILD=0 -->
+      <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(ProjectDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <LanguageStandard>stdcpplatest</LanguageStandard>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(ProjectDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+    </Link>
+  </ItemDefinitionGroup>
+
+  <ItemGroup>
+    <ClCompile Include="src\core\Event.cpp" />
+    <ClCompile Include="src\core\Region.cpp" />
+    <ClCompile Include="src\net\Socket.cpp" />
+    <ClCompile Include="src\net\Session.cpp" />
+    <ClCompile Include="src\db\Sqlite.cpp" />
+    <ClCompile Include="src\db\UserStore.cpp" />
+    <ClCompile Include="src\server\LoginProtocol.cpp" />
+    <ClCompile Include="src\server\LoginArbiter.cpp" />
+    <ClCompile Include="src\db\GameStore.cpp" />
+    <ClCompile Include="src\server\SelectUnitProtocol.cpp" />
+    <ClCompile Include="src\server\UnitSelectArbiter.cpp" />
+    <ClCompile Include="src\core\SerBuffer.cpp" />
+    <ClCompile Include="src\core\UidType.cpp" />
+    <ClCompile Include="src\core\Sha256.cpp" />
+    <ClCompile Include="src\security\Des.cpp" />
+    <ClCompile Include="src\security\Md5.cpp" />
+    <ClCompile Include="src\security\SADatabase.cpp" />
+    <ClCompile Include="src\security\SecureBuffer.cpp" />
+    <ClCompile Include="src\security\SecurityAssociation.cpp" />
+    <!-- 內建 SQLite 合體版（C 編譯） -->
+    <ClCompile Include="third_party\sqlite\sqlite3.c">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <CompileAs>CompileAsC</CompileAs>
+      <PreprocessorDefinitions>SQLITE_THREADSAFE=2;SQLITE_ENABLE_FTS5;SQLITE_ENABLE_JSON1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <!-- miniz（C 編譯）：zlib 格式相容，取代原 zlib 依賴（kbuff 壓縮格式相容） -->
+    <ClCompile Include="third_party\miniz\miniz.c">
+      <CompileAs>CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Include="third_party\miniz\miniz_tdef.c">
+      <CompileAs>CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Include="third_party\miniz\miniz_tinfl.c">
+      <CompileAs>CompileAsC</CompileAs>
+    </ClCompile>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ClInclude Include="src\core\ByteOrder.h" />
+    <ClInclude Include="src\core\Event.h" />
+    <ClInclude Include="src\core\EventIDs.h" />
+    <ClInclude Include="src\core\Logger.h" />
+    <ClInclude Include="src\core\Platform.h" />
+    <ClInclude Include="src\core\Region.h" />
+    <ClInclude Include="src\net\Socket.h" />
+    <ClInclude Include="src\net\PacketIO.h" />
+    <ClInclude Include="src\net\Session.h" />
+    <ClInclude Include="src\core\Sha256.h" />
+    <ClInclude Include="src\db\Sqlite.h" />
+    <ClInclude Include="src\db\UserStore.h" />
+    <ClInclude Include="src\server\LoginProtocol.h" />
+    <ClInclude Include="src\server\LoginArbiter.h" />
+    <ClInclude Include="src\db\GameStore.h" />
+    <ClInclude Include="src\server\SelectUnitProtocol.h" />
+    <ClInclude Include="src\server\UnitSelectArbiter.h" />
+    <ClInclude Include="src\core\NetError.h" />
+    <ClInclude Include="src\core\SerBuffer.h" />
+    <ClInclude Include="src\core\Serializer.h" />
+    <ClInclude Include="src\core\Tags.h" />
+    <ClInclude Include="src\core\UidType.h" />
+    <ClInclude Include="src\security\ByteStream.h" />
+    <ClInclude Include="src\security\Des.h" />
+    <ClInclude Include="src\security\Hmac.h" />
+    <ClInclude Include="src\security\Md5.h" />
+    <ClInclude Include="src\security\SADatabase.h" />
+    <ClInclude Include="src\security\SecureBuffer.h" />
+    <ClInclude Include="src\security\SecurityAssociation.h" />
+    <ClInclude Include="third_party\miniz\miniz.h" />
+    <ClInclude Include="third_party\miniz\miniz_common.h" />
+    <ClInclude Include="third_party\miniz\miniz_export.h" />
+    <ClInclude Include="third_party\miniz\miniz_tdef.h" />
+    <ClInclude Include="third_party\miniz\miniz_tinfl.h" />
+    <ClInclude Include="third_party\sqlite\sqlite3.h" />
+    <ClInclude Include="third_party\sqlite\sqlite3ext.h" />
+  </ItemGroup>
+
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>
