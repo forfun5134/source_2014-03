@@ -112,6 +112,8 @@ public:
     // 軟刪除：DelDate=now（Deleted 生成欄隨之變 1）+ 暱稱寫入 GDeletedNickNameHistory；事務化。
     // 已刪除（DelDate≠RegDate）→ found=false 回傳 true（冪等）；不存在 → false + err
     bool SoftDeleteUnit(int64_t unitUID, std::string& err);
+    // 原 P_GUnit_CreateCNT_GET：計算本使用者「今日」建立（未刪除）的角色數。今日=本機 UTC 日（server day）。
+    bool CountUnitsCreatedTodayByUser(int64_t userUID, int& count, std::string& err);
 
     // 角色登入：LoginCount+1、LastDate=now（不修改 PlayDayCnt——原版對應邏輯分散於多個 proc，未移植）
     bool RecordUnitLogin(int64_t unitUID, std::string& err);

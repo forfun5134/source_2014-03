@@ -32,6 +32,7 @@
     <ClCompile Include="src\server\UnitListProtocol.cpp"><Filter>server</Filter></ClCompile>
     <ClCompile Include="src\server\CreateUnitProtocol.cpp"><Filter>server</Filter></ClCompile>
     <ClCompile Include="src\server\DeleteUnitProtocol.cpp"><Filter>server</Filter></ClCompile>
+    <ClCompile Include="src\server\CreateTodayCountProtocol.cpp"><Filter>server</Filter></ClCompile>
     <ClCompile Include="src\server\UnitData.cpp"><Filter>server</Filter></ClCompile>
     <ClCompile Include="src\core\SerBuffer.cpp"><Filter>core</Filter></ClCompile>
     <ClCompile Include="src\core\UidType.cpp"><Filter>core</Filter></ClCompile>
@@ -67,6 +68,7 @@
     <ClInclude Include="src\server\UnitListProtocol.h"><Filter>server</Filter></ClInclude>
     <ClInclude Include="src\server\CreateUnitProtocol.h"><Filter>server</Filter></ClInclude>
     <ClInclude Include="src\server\DeleteUnitProtocol.h"><Filter>server</Filter></ClInclude>
+    <ClInclude Include="src\server\CreateTodayCountProtocol.h"><Filter>server</Filter></ClInclude>
     <ClInclude Include="src\server\UnitData.h"><Filter>server</Filter></ClInclude>
     <ClInclude Include="src\server\WireHelpers.h"><Filter>server</Filter></ClInclude>
     <ClInclude Include="src\core\NetError.h"><Filter>core</Filter></ClInclude>

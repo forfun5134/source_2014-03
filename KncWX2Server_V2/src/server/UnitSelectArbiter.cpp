@@ -231,6 +231,20 @@ bool HandleDeleteUnitReq(db::GameStore& gameDb, int64_t userUID, int authLevel,
     return true;
 }
 
+bool HandleGetCreateUnitTodayCountReq(db::GameStore& gameDb, int64_t userUID,
+                                      today_count::GetCreateUnitTodayCountAck& ack, std::string& err)
+{
+    ack = today_count::GetCreateUnitTodayCountAck{};
+    int count = 0;
+    if (!gameDb.CountUnitsCreatedTodayByUser(userUID, count, err)) return false;
+    ack.iUserUID = userUID;
+    ack.mapCreateCharCountToday.clear();
+    // V2 無 server group 設定 → serverGroupID 一律 0（誠實佔位；原碼以 KBaseServer::GetKObj()->GetServerGroupID() 取得）
+    ack.mapCreateCharCountToday.emplace(0, count);
+    err.clear();
+    return true;
+}
+
 bool HandleCreateUnitReq(db::GameStore& gameDb, int64_t userUID, int authLevel,
                          const create_unit::CreateUnitReq& req,
                          create_unit::CreateUnitAck& ack, std::string& err)

@@ -354,6 +354,25 @@ bool GameStore::GetUnitByUID(int64_t unitUID, GUnitRecord& out, bool& found, std
     return true;
 }
 
+bool GameStore::CountUnitsCreatedTodayByUser(int64_t userUID, int& count, std::string& err)
+{
+    Statement st;
+    if (!st.Prepare(m_db,
+            "SELECT count(*) FROM gunit WHERE UserUID = ? AND Deleted = 0 AND RegDate >= datetime('now', 'start of day');", err))
+        return false;
+    if (!st.BindInt(1, userUID, err)) return false;
+    std::string stepErr;
+    if (st.StepRow(stepErr)) {
+        count = static_cast<int>(st.ColumnInt64(0));
+        err.clear();
+        return true;
+    }
+    if (!stepErr.empty()) { err = stepErr; return false; }
+    count = 0;
+    err.clear();
+    return true;
+}
+
 bool GameStore::SoftDeleteUnit(int64_t unitUID, std::string& err)
 {
     if (!m_db.Begin(err)) return false;

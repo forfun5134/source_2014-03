@@ -131,6 +131,18 @@
 
 **測試**（tests/test_delete_unit.cpp，15 項）：codec roundtrip（含 SERV_CHAR_LOG 欄位）、成功刪除→NET_OK 且 ListUnitsByUserUID 不再可見、重複刪除→00、幽靈角色→00、擁有者 888 合法刪除→NET_OK、非本人（userUID 不符）→00 且受害角色仍在。測試自 713 → **744 passed / 0 failed**。vcxproj 登記 DeleteUnitProtocol.{h,cpp}；EventIDs 38/39 既有。**Loopback 未擴充**（同 CREATE_UNIT 理由；以 list 副作用斷言替代）。
 
+## 0n. 2026-11-17 快照（GET_CREATE_UNIT_TODAY_COUNT 流程移植）
+
+**GameStore**：新增 `CountUnitsCreatedTodayByUser(userUID, &count, err)`——`count(*) FROM gunit WHERE UserUID=? AND Deleted=0 AND RegDate >= datetime('now','start of day')`（今日=本機 UTC 日；原 `P_GUnit_CreateCNT_GET` stored proc 口徑未隨倉庫提供，V2 採此口徑並於此誠實聲明）。
+
+**新增模組** `src/server/CreateTodayCountProtocol.{h,cpp}`（命名空間 `x2::today_count`）：`GetCreateUnitTodayCountReq`（EGS_GET_CREATE_UNIT_TODAY_COUNT_REQ=1163，**無酬載**——原碼 `IMPL_ON_FUNC_NOPARAM`）、`GetCreateUnitTodayCountAck`（**1165**；`{int64 iUserUID, map<int32,int32> mapCreateCharCountToday}`——first=server group, second=當日建立數；1ST_ACK=1164 與最終 ACK 結構相同，**折疊為單段**：原碼 SINGLE_SERVER_GROUP 直接回 Client、DOUBLE_SERVER_GROUP 轉 2nd GameDB；V2 無 server group / 2nd GameDB）。REQ 的 PUT/GET 為 no-op true。**原版外部 Serializer SDK 的 std::map wire 編碼無法從本倉庫驗證**；V2 復用內建 eTAG_MAP 模板（count-prefixed），自洽 golden bytes，**未對原 SDK 實機驗證**。SERV_ENTRY_POINT 已定義（ServerDefine.h:4304）故功能可達；map key（serverGroupID）一律 0 佔位（原碼取 `KBaseServer::GetKObj()->GetServerGroupID()`）。
+
+**決策層** `HandleGetCreateUnitTodayCountReq(gameDb, userUID, ack, err)`（UnitSelectArbiter）：`ack={}` → `CountUnitsCreatedTodayByUser` → `iUserUID=userUID`、`map={{0,count}}`；DB 失敗回傳 false。
+
+**測試**（tests/test_create_today_count.cpp，13 項）：REQ 空酬載 no-op roundtrip、ACK roundtrip（含 map 兩組）、初始計數 0、建立 2 角色→計數 2、他人計數 0、刪除 1 個→計數 1。測試自 744 → **766 passed / 0 failed**。vcxproj 登記 CreateTodayCountProtocol.{h,cpp}；Loopback 未擴充。
+
+**累計事件覆蓋（REQ/ACK 成對）**：CREATE(36/37)、DELETE(38/39)、SELECT(40/41)、SELECT_UNIT 1~5_NOT(42~46)、GET_MY_INVENTORY(47/48/49)、MY_UNIT_AND_INVENTORY_INFO_LIST(34/35)、GET_CREATE_UNIT_TODAY_COUNT(1163→1165)。
+
 ## 0. 一句話現況
 
 V2 是原 Elsword 韓服伺服器（`X2Project`）的 **C++ 重寫地基**：平台無關的線路格式核心、安全模組已完成並以 golden bytes 測試驗證；最短網路路徑（同步 TCP + 原版 TCP 訊框 + 迴路 echo 整合測試）與 Session 層（SPI 握手換發、驗證失敗踢除、E_HEART_BEAT 丟棄、殭屍檢測、SERV_KEVENT_FROM 標記）已完成並 238 項測試全綠；**遊戲邏輯、非同步網路層未完成；資料庫層已完成 Phase 1（users 表 + 帳號存取層）**。V2 不是可運行的伺服器，不要部署它。

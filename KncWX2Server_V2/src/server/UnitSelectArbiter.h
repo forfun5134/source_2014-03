@@ -30,6 +30,7 @@
 #include "UnitListProtocol.h"
 #include "CreateUnitProtocol.h"
 #include "DeleteUnitProtocol.h"
+#include "CreateTodayCountProtocol.h"
 
 namespace x2 { namespace select_unit {
 
@@ -76,6 +77,15 @@ bool HandleCreateUnitReq(db::GameStore& gameDb, int64_t userUID, int authLevel,
 bool HandleDeleteUnitReq(db::GameStore& gameDb, int64_t userUID, int authLevel,
                          const delete_unit::DeleteUnitReq& req,
                          delete_unit::DeleteUnitAck& ack, std::string& err);
+
+// EGS_GET_CREATE_UNIT_TODAY_COUNT_REQ 決策（原 IMPL_ON_FUNC_NOPARAM → DBE_GET_CREATE_UNIT_TODAY_COUNT_REQ → gup 今日建立數）：
+//   ack.iUserUID = userUID；mapCreateCharCountToday = {{ serverGroupID=0, count } }，count 由
+//   GameStore::CountUnitsCreatedTodayByUser 取得（今日=本機 UTC 日）。
+// 誠實偏差：V2 無 server group / 2nd GameDB → SINGLE_SERVER_GROUP 語意折疊為單段；1ST_ACK 與最終 ACK 結構相同，折疊為一段；
+//   map key（serverGroupID）一律 0；P_GUnit_CreateCNT_GET 的精確口徑（是否排除 Deleted？）原 stored proc 未隨倉庫提供，
+//   V2 採「Deleted=0 且 RegDate >= 本機 UTC 今日 00:00」口徑，與 gup_create_unit 的 14 天冷卻查詢風格一致。
+bool HandleGetCreateUnitTodayCountReq(db::GameStore& gameDb, int64_t userUID,
+                                      today_count::GetCreateUnitTodayCountAck& ack, std::string& err);
 
 // EGS_MY_UNIT_AND_INVENTORY_INFO_LIST_REQ（無參數）決策：
 //   guser（GetOrCreateGUser，缺則建，USSize=50）取 nUnitSlot；ListUnitsByUserUID（Deleted=0，UnitUID 升序）
