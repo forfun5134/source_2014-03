@@ -319,6 +319,13 @@ CONNECT → VERIFY → `EGS_CHARACTER_LIST_REQ`(1155，0 角色：slot[0]==50、
 
 tests/test_string_filter.cpp 的字元集閘門斷言改為依 `X2_REGION_*` 分支（JP 預設／TW-HK-CN／其他寬鬆），並補上 `#include "../src/core/Region.h"`（未定義時預設 JP 的巨集由 Region.h 設定）。**JP（預設）與 `REGION=TW` 兩種建置皆 1181 passed / 0 failed**；TW 建置以既有 `REGION=TW ./tools/build_and_test.sh` 驗證（StringFilter 行為 TW 語意亦綠）。
 
+## 0a2. 2026-11-17 附記（SELECT_UNIT 1_NOT 線路級驗證 + 生成物防漂移）
+
+- tests/test_select_unit.cpp 的 SELECT_UNIT loopback：在 1_NOT 接收處新增 **wire 級**斷言——`level`（由 gunit.Exp 換算）、`stat == gunit(0) + StatTable(class 2, level 1)`、`now/nextBaseLevelEXP`（EXP 表）。§0u/§0v 的接線自此不僅有單元測試，也有實際線路覆蓋。
+- 新增 tools/verify_generated.sh：重跑 `gen_exp_table.py`／`gen_stat_table.py`／`gen_string_filter.py` 並 `cmp` 比對三個 .inc（防漂移；需 python3 + xlrd）。**實測三個 .inc 與產生器輸出一致。**
+- 地區建置矩陣：`JP`（預設）= 1185、`REGION=TW` = 1185、`REGION=EU` = 1183（permissive 分支測項較少）、`REGION=CN` = 1185——**全部 0 failed**（EU permissive 分支首次納入驗證）。
+- 註：system-level pip installs（xlrd 等）不跨 turn 保留——verify_generated.sh 使用前需 `pip install --break-system-packages xlrd`。
+
 ## 0. 一句話現況
 
 V2 是原 Elsword 韓服伺服器（`X2Project`）的 **C++ 重寫地基**：平台無關的線路格式核心、安全模組已完成並以 golden bytes 測試驗證；最短網路路徑（同步 TCP + 原版 TCP 訊框 + 迴路 echo 整合測試）與 Session 層（SPI 握手換發、驗證失敗踢除、E_HEART_BEAT 丟棄、殭屍檢測、SERV_KEVENT_FROM 標記）已完成並 238 項測試全綠；**遊戲邏輯、非同步網路層未完成；資料庫層已完成 Phase 1（users 表 + 帳號存取層）**。V2 不是可運行的伺服器，不要部署它。

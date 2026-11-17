@@ -7,6 +7,7 @@
 //   golden bytes 為自洽佈局，未對原 SDK 實機驗證。
 #include <cstdio>
 #include "../src/server/StatTable.h"
+#include "../src/server/ExpTable.h"
 #include <cstring>
 #include <string>
 #include <vector>
@@ -867,6 +868,19 @@ static void TestSelectUnitLoopback()
         CHECK(GetSelectUnitNot1(ksNot, not1), "decode 1_NOT");
         ksNot.EndReading();
         CHECK(not1.iOK == NET_OK && not1.unitInfo.unitUID == unitUID && not1.unitInfo.nickName == L"選擇切片", "1_NOT carries selected unit");
+        // §0u/§0v 端到端驗證：level 由 EXP 換算；stat = gunit(0) + StatTable(class 2, level 1)；EXP 邊界由表填入
+        {
+            stat_table::UnitStatInfo sv{};
+            CHECK(stat_table::GetUnitStat(2, 1, sv), "stat table has class 2 level 1");
+            CHECK(not1.unitInfo.level == 1 && not1.unitInfo.exp == 0, "1_NOT level from exp (wire)");
+            CHECK(not1.unitInfo.stat.baseHP == static_cast<int32_t>(sv.hp) &&
+                  not1.unitInfo.stat.atkPhysic == sv.atkPhysic && not1.unitInfo.stat.atkMagic == sv.atkMagic &&
+                  not1.unitInfo.stat.defPhysic == sv.defPhysic && not1.unitInfo.stat.defMagic == sv.defMagic,
+                  "1_NOT stat == gunit(0) + table(class 2, level 1) (wire)");
+            CHECK(not1.unitInfo.nowBaseLevelEXP == exp_table::GetRequireTotalExpbyLevel(1) &&
+                  not1.unitInfo.nextBaseLevelEXP == exp_table::GetRequireTotalExpbyLevel(2),
+                  "1_NOT EXP boundaries from exp table (wire)");
+        }
         Event not2Ev;
         CHECK(client.RecvEvent(not2Ev, 5000) == Session::RecvResult::Event, "select 2_NOT received");
         CHECK(not2Ev.eventID == kSelectUnit2NotID, "select 2_NOT id == 43");
