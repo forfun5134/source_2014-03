@@ -142,7 +142,7 @@ bool HandleEntryPointDeleteUnitReq(db::GameStore& gameDb, int64_t userUID, int a
 //   GetOrCreateGUser（userUID, userID）→ ack.mapServerGroupUnitSlot = {{ serverGroupID=0, guser.usSize }}；
 //   ListUnitsByUserUID → mapServerGroupUnitInfo = {{ 0, vec<UnitInfo> }}（逐個 PopulateUnitInfoFromGUnit）；
 //   ack.strUserID = Utf8ToWide(userID)；ack.iOK = NET_OK。DB 失敗 → return false。
-// 誠實偏差：無 EXP/stat 表（沿用 gunit 儲存值，同 PopulateUnitInfoFromGUnit）、無 templet 表（不擋 iClass，原碼缺 templet → ERR_CREATE_UNIT_03=28）、
+// 誠實偏差：EXP/stat 表已移植（§0u/§0v：stat=DB+表、level ← CheckLevelUp(1, EXP)）、無 templet 表（不擋 iClass，原碼缺 templet → ERR_CREATE_UNIT_03=28）、
 //   無 PVP rating 表、無 P2P IP/port（空）、無 server group / 1st+2nd GameDB 會合；SERV_BATTLE_FIELD_BOSS 地圖修正未建模；
 //   handler 不在 2_NOT 鏈上寫 m_setMyUnitUIDList——V2 無此狀態。
 bool HandleCharacterListReq(db::GameStore& gameDb, int64_t userUID, const std::string& userID, int authLevel,
@@ -156,8 +156,8 @@ bool HandleGetChannelListReq(channel_list::GetChannelListAck& ack);
 // EGS_MY_UNIT_AND_INVENTORY_INFO_LIST_REQ（無參數）決策：
 //   guser（GetOrCreateGUser，缺則建，USSize=50）取 nUnitSlot；ListUnitsByUserUID（Deleted=0，UnitUID 升序）
 //   取角色清單並逐個以 PopulateUnitInfoFromGUnit 填 KUnitInfo；ack.iOK=NET_OK。
-// 誠實偏差：原版以 EXP 表換算 level/nowEXP/nextEXP、以職業/等級 stat 表疊加 stat、填 P2P IP/port——
-//   V2 無這些表/系統，沿用 gunit 儲存值、IP/port 填空（見 architecture §0k）。原版 S_SERVER_SELECT 狀態閘門未建模。
+// 誠實偏差：EXP/stat 表已移植（§0u/§0v）；仍缺 P2P IP/port——
+//   EXP/stat 已由表疊加（gunit 儲存值 + 表值）；P2P IP/port 仍空（見 architecture §0u/§0v）。原版 S_SERVER_SELECT 狀態閘門未建模。
 // 失敗：GetOrCreateGUser 或 ListUnitsByUserUID 出錯 → false（ack.iOK 由呼叫端定，err 有訊息）。
 bool HandleMyUnitAndInventoryInfoListReq(db::GameStore& gameDb, int64_t userUID, const std::string& userID,
                                          int authLevel,

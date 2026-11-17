@@ -15,7 +15,7 @@
 // ⚠ 線路佈局為自洽 golden bytes，未對原 SDK 實機驗證。
 // ⚠ 原版成功路徑對每個角色再衍生 m_ucLevel/m_nNowBaseLevelEXP/m_nNextBaseLevelEXP（EXP 表）、
 //   m_kStat（職業/等級 stat 表）、m_iOwnerUserUID/m_wstrIP/m_usPort（P2P）——
-//   V2 無 EXP 表/stat 表/P2P，PopulateUnitInfoFromGUnit 沿用 gunit 儲存值並把 IP/port 填空（見 architecture §0k）。
+//   stat = gunit 儲存值 + stat_table（EXP 表 §0u / stat 表 §0v）；P2P 仍空（見 architecture §0k/§0u/§0v）。
 #pragma once
 
 #include <cstdint>

@@ -1,6 +1,7 @@
 // UnitSelectArbiter.cpp — 見 UnitSelectArbiter.h 的流程對照
 #include "UnitSelectArbiter.h"
 #include "ExpTable.h"
+#include "StatTable.h"
 #include "../core/NetError.h"
 
 #include <string>
@@ -126,7 +127,12 @@ void PopulateUnitInfoFromGUnit(int64_t userUID, int authLevel, const db::GUnitRe
     u.sPoint = unit.sPoint;
     u.csPoint = 0; u.maxCSPoint = 0; u.csPointEndDate = L"";
     u.straightVictories = 0;
-    u.stat = { unit.baseHP, unit.atkPhysic, unit.atkMagic, unit.defPhysic, unit.defMagic };
+    // 原碼 OnAccountSelectUnitAck：stat ← DB 值 + SiKStatTable()->GetUnitStat(class, level)（查無 → 加 0）
+    stat_table::UnitStatInfo sZero;
+    stat_table::GetUnitStat(static_cast<int>(u.unitClass), static_cast<int>(u.level), sZero);   // 失敗 → 全 0（原碼同）
+    u.stat = { unit.baseHP + static_cast<int32_t>(sZero.hp), unit.atkPhysic + sZero.atkPhysic,
+               unit.atkMagic + sZero.atkMagic, unit.defPhysic + sZero.defPhysic,
+               unit.defMagic + sZero.defMagic };
     u.gameStat = u.stat;                            // 無獨立 GameStat 來源，鏡射 Stat（誠實佔位）
     u.lastPos = { unit.lastPosition, 0, 0, false }; // lastPos.mapID ← GUnit.LastPosition
     // buffInfo / dungeonClear / tcClear / equippedItem：無對應表，保持空容器

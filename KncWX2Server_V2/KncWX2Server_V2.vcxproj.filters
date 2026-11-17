@@ -38,6 +38,7 @@
     <ClCompile Include="src\server\CharacterListProtocol.cpp"><Filter>server</Filter></ClCompile>
     <ClCompile Include="src\server\EntryPointChannelListProtocol.cpp"><Filter>server</Filter></ClCompile>
     <ClCompile Include="src\server\ExpTable.cpp"><Filter>server</Filter></ClCompile>
+    <ClCompile Include="src\server\StatTable.cpp"><Filter>server</Filter></ClCompile>
     <ClCompile Include="src\server\UnitData.cpp"><Filter>server</Filter></ClCompile>
     <ClCompile Include="src\core\SerBuffer.cpp"><Filter>core</Filter></ClCompile>
     <ClCompile Include="src\core\UidType.cpp"><Filter>core</Filter></ClCompile>
@@ -79,6 +80,8 @@
     <ClInclude Include="src\server\CharacterListProtocol.h"><Filter>server</Filter></ClInclude>
     <ClInclude Include="src\server\EntryPointChannelListProtocol.h"><Filter>server</Filter></ClInclude>
     <ClInclude Include="src\server\ExpTable.h"><Filter>server</Filter></ClInclude>
+    <ClInclude Include="src\server\StatTable.h"><Filter>server</Filter></ClInclude>
+    <ClInclude Include="src\server\StatTableData.inc"><Filter>server</Filter></ClInclude>
     <ClInclude Include="src\server\ExpTableData.inc"><Filter>server</Filter></ClInclude>
     <ClInclude Include="src\server\UnitData.h"><Filter>server</Filter></ClInclude>
     <ClInclude Include="src\server\WireHelpers.h"><Filter>server</Filter></ClInclude>

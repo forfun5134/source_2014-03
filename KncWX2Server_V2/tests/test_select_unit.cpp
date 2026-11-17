@@ -6,6 +6,7 @@
 //   EGS_GET_MY_INVENTORY_REQ/ACK 與 EGS_SELECT_UNIT_INVENTORY_INFO_NOT（合成背包資料）。
 //   golden bytes 為自洽佈局，未對原 SDK 實機驗證。
 #include <cstdio>
+#include "../src/server/StatTable.h"
 #include <cstring>
 #include <string>
 #include <vector>
@@ -274,7 +275,12 @@ static void TestBuildSelectUnitNot1FromGUnit()
     CHECK(not1.unitInfo.authLevel == 5, "not1 authLevel from account");
     CHECK(not1.unitInfo.nickName == L"選擇測試", "not1 nickname utf8->wide");
     CHECK(not1.unitInfo.level == 1 && not1.unitInfo.exp == 0, "not1 level/exp from gunit");
-    CHECK(not1.unitInfo.stat.baseHP == 0 && not1.unitInfo.lastPos.mapID == 20000, "not1 stat/lastpos");
+    {   // stat 現為 gunit(0) + StatTable(class 1, level 1)（§0v）；lastPos 不變
+        stat_table::UnitStatInfo sv{};
+        CHECK(stat_table::GetUnitStat(1, 1, sv), "stat table lookup class 1 level 1");
+        CHECK(not1.unitInfo.stat.baseHP == static_cast<int32_t>(sv.hp) && not1.unitInfo.lastPos.mapID == 20000,
+              "not1 stat=gunit+table / lastpos");
+    }
     CHECK(!not1.unitCreateDate.empty() && not1.unitCreateDate == not1.unitLastLoginDate, "not1 dates filled from gunit");
     CHECK(not1.vecUserSkillPageData.size() == 1, "not1 one default skill page");
     // 空資料誠實佔位

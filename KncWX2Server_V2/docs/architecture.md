@@ -220,7 +220,7 @@
 
 測試自 889 → **929 passed / 0 failed**。無新模組 → vcxproj 無需登記。
 
-**⚠ 上方「無 EXP/stat 表（沿用 gunit 值）」已由 §0u 部分解除（EXP 表已移植；stat 表仍未移植）。**
+**⚠ 上方「無 EXP/stat 表（沿用 gunit 值）」已由 §0u/§0v 解除（EXP 表與 stat 表皆已移植）。**
 
 **目前 wire 事件覆蓋總覽**（全部成對，自洽 golden bytes，未對 SDK 實機驗證）：CONNECT/VERIFY、SELECT_UNIT(40/41)、SELECT_UNIT_1..5_NOT(42–46)、GET_MY_INVENTORY(47/48/49)、MY_UNIT_AND_INVENTORY_INFO_LIST(34/35)、CREATE_UNIT(36/37)、DELETE_UNIT(38/39)、CHECK_NICK_NAME(1161/1162)、CHANGE_NICK_NAME(431/432，含 ENTRY_POINT 1168)、ENTRY_POINT_CREATE_NEW_UNIT(1159)/ENTRY_POINT_DELETE_UNIT(1160)、CHARACTER_LIST(1155→1158 折疊）、GET_CREATE_UNIT_TODAY_COUNT(1163→1165 折疊）、GET_CHANNEL_LIST(1166/1167，空表佔位）。
 
@@ -239,6 +239,22 @@
 ⚠ 誠實偏差：(1) 原碼 `SERV_MAX_LEVEL_CHECK` 路徑以 `SiKGameSysVal()->GetLimitsLevel()` 截斷結果；V2 無 GameSysVal → **以 80 為硬上限**（若 JP 實際上限較低，需待 GameSysVal 移植後再收）。(2) `ExpTable.lua` 不存在於本倉庫（資料真源是 xls）；未對照原 Lua 逐列 diff（xls 已自洽驗證）。(3) 等級換算只在「讀 gunit → UnitInfo」時發生；其他寫入路徑（如 CREATE_UNIT 固定 level 1）行為不變。(4) totalExp 最大 866,438,000 < 2^31，int32 安全。
 
 **測試**（tests/test_exp_table.cpp）：表完整性（累加/遞增/抽樣值/表頂溢出/0 與負數）、`CheckLevelUp` 邊界（0/599/600/1899/1900/6700/表頂/溢出/夾層）、`PopulateUnitInfoFromGUnit` 以 `:memory:` 庫改 gunit.Exp=6700 後讀出（level=5、nowBase=6700、nextBase=10500）。測試自 929 → **967 passed / 0 failed**。vcxproj/filters 登記 ExpTable.{h,cpp}＋ExpTableData.inc；Linux 建置腳本以 `ls src/server/*.cpp` 自動納入（無需改登記）。
+
+## 0v. 2026-11-17 快照（StatTable 等級→基礎屬性表移植）
+
+**新增模組** `src/server/StatTable.{h,cpp}`（`x2::stat_table`）＋`src/server/StatTableData.inc`（**由 tools/gen_stat_table.py 自動產生，勿手改**，180 KB / 4160 列）。
+
+**資料來源**：本倉庫既有的遊戲官方資料 `ServerResource/JP/StatTable.lua`（與 KR 原碼 Lua 同源；**JP/TW/root 三份 md5 一致** = 25d523bb711baf638fd65270ea3312d6）。產生器解析 `ReserveMemory(class, 80)`（52 個 class）與 `SetUnitStat(class, level, {AtkPhysic=…, AtkMagic=…, DefPhysic=…, DefMagic=…, HP=…})`（4198 列），並做完整性檢查：僅保留 level ≤ ReserveMemory 容量者、每保留 class 恰好 1..80 各一列、無重複、數值非負、**Lua→UINT 截斷**（720 列 HP 帶 .5、唯一 DefMagic=77.6→77、class 121 L62 HP 114187.5→114187）。
+
+**容量外丟棄**：class 110/111 的 level 81..99 共 **38 列**，原碼 `SetUnitStat` 的 JIF 容量檢查（vector 容量 81、dummy 0）本來就寫不進去；產生器比照丟棄並於 inc 標頭註記——**與原碼行為一致**，非資料缺漏。
+
+**API**：`bool GetUnitStat(int unitClass, int unitLevel, UnitStatInfo& out)`（binary search；查無（未知 class／level<1／level>80）→ false 且 out 歸零）。
+
+**UnitInfo 接上**：`PopulateUnitInfoFromGUnit` 現在以 `level = CheckLevelUp(1, Exp)`（§0u）查 stat 表，`u.stat = {gunit.BaseHP + s.hp, gunit.AtkPhysic + s.atkPhysic, gunit.AtkMagic + s.atkMagic, gunit.DefPhysic + s.defPhysic, gunit.DefMagic + s.defMagic}`——**逐欄 "+= 表值"**，對齊原碼 `OnAccountSelectUnitAck`（GSUserFunction.cpp:4742，查無時 sUnitStat 保持 0）。gunit 未知 class 或攻擊屬性 seed 為 0 → 新建角色之 UnitInfo stat 恰為表值。`gameStat` 仍鏡射 `stat`（佔位不變）。
+
+⚠ 誠實偏差：(1) 原碼以 `CXSLUnit::UT_END` 範圍閘控 class（2 轉 /100 規則），V2 以「表內存在」為準（等價、更簡單）。(2) StatTable.xls（ScriptData）未解析——資料真源是 Lua（與原碼載入路徑相同）。(3) 2 轉角色 1 級 stat 由「1 級보정 던전」額外補償 80%（HP 100%）之機制（lua 檔頭註解）**未建模**。(4) JP 為預設地區（StatTable.lua 三份相同，無地區差異）。(5) wire 佈局不變（UnitInfo 欄位語意變更，非格式變更）。
+
+**測試**（tests/test_stat_table.cpp，33 項）：已知值（class 1 L1/L80、class 118 L1 DefMagic 77.6→77、class 121 L62 HP x.5 截斷、class 110/80 無空格 lua 列）、miss 語意（110/81、111/99、level 0/81、class 0/-1/999、miss 歸零）、52 class × 1..80 全可查、`:memory:` 遊戲庫（create class-1 → UPDATE Exp=1900 → level 3 → stat = 0 + 表值(1,3)、gameStat 鏡射）。tests/test_select_unit.cpp 的 not1 stat 斷言隨語意更新（0 → 表值(1,1)）。測試自 967 → **1002 passed / 0 failed**。vcxproj/filters 登記 StatTable.{h,cpp}＋StatTableData.inc；Linux 建置腳本以 `ls src/server/*.cpp` 自動納入。
 
 ## 0. 一句話現況
 
