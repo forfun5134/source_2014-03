@@ -35,6 +35,9 @@ inline constexpr int ERR_SELECT_UNIT_04 = 38;  // Nexon Messenger CharacterSN �
 inline constexpr int ERR_SELECT_UNIT_05 = 39;  // 角色選擇過程 DB 錯誤
 inline constexpr int ERR_SELECT_UNIT_06 = 40;  // 暱稱需要變更
 inline constexpr int ERR_SELECT_UNIT_07 = 1081; // 非正常的角色選擇（實測編譯值）
+// NetError_def.h enum 計數機讀核對（無 #ifdef，純連續 enum；與上列實測值吻合）
+inline constexpr int ERR_COMMUNITY_OPT_01 = 240;  // 없는 상태 값을 업데이트 하려고 하였습니다.（無效的拒絕選項值）
+inline constexpr int ERR_COMMUNITY_OPT_02 = 241;  // 커뮤니티 옵션 값을 받아오지 못했습니다.（CommunityOpt DB 失敗）
 // NetError_def.h enum 計數機讀核對（前綴均連續 enum，已驗證 CREATE_UNIT_00=25/SELECT_UNIT_05=39/SELECT_UNIT_07=1081 顯式值等與既有常數一致）
 inline constexpr int ERR_RESTORE_NICK_NAME_00 = 328; // 無法找到角色（gup_restore_nickname -1）
 inline constexpr int ERR_RESTORE_NICK_NAME_01 = 329; // 非暱稱復原對象（gup_restore_nickname -2）

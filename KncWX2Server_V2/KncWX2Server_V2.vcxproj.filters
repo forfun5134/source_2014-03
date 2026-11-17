@@ -28,6 +28,7 @@
     <ClCompile Include="src\server\LoginArbiter.cpp"><Filter>server</Filter></ClCompile>
     <ClCompile Include="src\db\GameStore.cpp"><Filter>db</Filter></ClCompile>
     <ClCompile Include="src\server\SelectUnitProtocol.cpp"><Filter>server</Filter></ClCompile>
+    <ClCompile Include="src\server\UpdateCommunityOptionProtocol.cpp"><Filter>server</Filter></ClCompile>
     <ClCompile Include="src\server\UnitSelectArbiter.cpp"><Filter>server</Filter></ClCompile>
     <ClCompile Include="src\server\UnitListProtocol.cpp"><Filter>server</Filter></ClCompile>
     <ClCompile Include="src\server\CreateUnitProtocol.cpp"><Filter>server</Filter></ClCompile>
@@ -73,6 +74,7 @@
     <ClInclude Include="src\server\LoginArbiter.h"><Filter>server</Filter></ClInclude>
     <ClInclude Include="src\db\GameStore.h"><Filter>db</Filter></ClInclude>
     <ClInclude Include="src\server\SelectUnitProtocol.h"><Filter>server</Filter></ClInclude>
+    <ClInclude Include="src\server\UpdateCommunityOptionProtocol.h"><Filter>server</Filter></ClInclude>
     <ClInclude Include="src\server\UnitSelectArbiter.h"><Filter>server</Filter></ClInclude>
     <ClInclude Include="src\server\UnitListProtocol.h"><Filter>server</Filter></ClInclude>
     <ClInclude Include="src\server\CreateUnitProtocol.h"><Filter>server</Filter></ClInclude>

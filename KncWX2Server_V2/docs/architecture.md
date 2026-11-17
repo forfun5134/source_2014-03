@@ -356,7 +356,33 @@ tests/test_string_filter.cpp 的字元集閘門斷言改為依 `X2_REGION_*` 分
 - **⚠ StartSpirit 起始值**：原 production DB 的 `GResurrectionStoneCnt` 有列（值不在倉庫）；原 stored proc 空表時 `@iStartSpirit` 保持 NULL → Spirit NULL → -21 → 建角整體失敗。**V2 以 0 續建**（誠實偏差；倉庫無 seed 資料，無法重現任何原值）。測試以 `INSERT INTO gresurrectionstonecnt … (StartSpirit=100)` 覆蓋「有列」路徑；「空表」路徑斷言 Spirit=0。
 - **測試** `tests/test_create_unit_satellite.cpp`（41 項）：class 1..4 SkillID 對應／class 5 無 gskill・gskillslot（忠實）／GQuests 所有職業 QuestID=13・SubQuest0=1／GDenyOption 4 列 CodeNo=1／GSpirit（空表→0、Flag=0；有列→100）／**副作用失敗 → 整體 ROLLBACK**（`DROP TABLE gskillslot` 後 create → ack=ERR_CREATE_UNIT_02、gunit/gunit_nickname/gquests 皆 0 列）。
 - **測試數**：**JP = 1297、TW = 1295、EU = 1293、CN = 1295 passed / 0 failed**。
-- 剩餘未移植：gmo_*_skill（技能 slot 更新）／gup_get_community_opt_unituid（社群選項查詢——V2 改以 gdenyoption 直接讀回近似，§0a9；relationship 6 欄寫入 EGS_UPDATE_COMMUNITY_OPT 未實作）／class 5..9 技能列（原 proc 不存在）／LogDB；gspirit 的 Flag 完整語意與復活石補充/精力重置已於 §0a8 移植；Flag 並列槽位 UI 亦未建模。
+- 剩餘未移植：gmo_*_skill（技能 slot 更新）／gup_get_community_opt_unituid（社群選項查詢——V2 改以 gdenyoption 直接讀回近似，§0a9；relationship 6 欄寫入 EGS_UPDATE_COMMUNITY_OPT 已於 §0a10 以 write-through upsert 移植；P_GDenyOption_UPD 仍缺 proc）／class 5..9 技能列（原 proc 不存在）／LogDB；gspirit 的 Flag 完整語意與復活石補充/精力重置已於 §0a8 移植；Flag 並列槽位 UI 亦未建模。
+
+## 0a10. 2026-11-17 附記（EGS_UPDATE_COMMUNITY_OPTION_REQ/ACK：社群選項寫路徑；write-through）
+
+§0a9 已把 Not4 的 kDenyOptions 接上 gdenyoption 讀回，但當時 V2 **無任何寫路徑**——客戶端改不了這些值。本切片補上 `EGS_UPDATE_COMMUNITY_OPTION_REQ`（365）/`ACK`（366，V2 EventIDs.h 既有生成值）。
+
+原版語意（2014 JP，`SERV_RELATIONSHIP_SYSTEM` 已定義）：
+
+- `IMPL_ON_FUNC(EGS_UPDATE_COMMUNITY_OPTION_REQ)`（GSUserGameCommon.cpp:2981）：VERIFY_STATE（S_FIELD_MAP/S_ROOM）→ `KUserGameOption::SetDenyOptions`（UserGameOption.cpp:35）驗證 → 寫入**記憶體** → `SendToLoginServer(ELG_UPDATE_DENY_FRIEND_SHIP_NOT, { m_bDenyFriendShip })` → 送 ACK（iOK=NET_OK）。**DB 不在此處寫**——延遲到副本結束（`DBE_UPDATE_UNIT_INFO_REQ → Query_UpdateCommunityOption`，GSGameDBThread.cpp:6030）：relationship 路徑呼叫 `P_GDenyOption_UPD`（**不隨倉庫提供**）；legacy 非 relationship 路徑呼叫 `gup_update_community_opt`（**隨倉庫提供**——unit 不存在→-1；無列→INSERT 4 列／有列→CASE UPDATE；`@@ROWCOUNT<>4`→-2/-3）。
+- 驗證（SetDenyOptions 原碼）：**不對稱上限**——cDenyFriendShip ∈ [0, DOS_OFF=1]（原碼不接受 DOS_ONLY_FRIEND=2）；其餘五欄 ∈ [0, DOS_ONLY_FRIEND=2]；失敗 → `ERR_COMMUNITY_OPT_01`，**ACK 仍送出**（原版此時 m_kDenyOptions 未初始化——wire 洩漏堆疊內容）。
+- 選角時（GSUserFunction.cpp:5119）`m_kUserGameOption.SetDenyOptions(kAck_.m_kDenyOptions)` 把 DBE_SELECT_UNIT_ACK 的 6 值灌入記憶體。
+
+**V2 實作**：
+
+- **新模組** `UpdateCommunityOptionProtocol.{h,cpp}`（`x2::community_option`）：REQ/ACK codec（REQ=6×char；ACK=int32 BE iOK→6×char，與 KDenyOptions wire 佈局一致）＋ `ValidateDenyOptions`（照抄原不對稱上限）＋ `HandleUpdateCommunityOptionReq(gameDb, unitUID, req, ack, err)`（`unitUID` 對應原 `GetCharUID()`，由呼叫端傳入；驗證通過立即 write-through）。
+- **Schema**：沿用 §0a9 的 v4（`gdenyoption.CodeNo` 0..255）。
+- **GameStore::UpdateDenyOptions(unitUID, v, err)**：同一 transaction——`unit 存在且 Deleted=0` 否則 false＋err（鏡像 `gup_update_community_opt` 的 -1）→ 逐 QN(1..6) `INSERT ... ON CONFLICT(UnitUID, QuestionNo) DO UPDATE SET CodeNo=excluded.CodeNo`（SQLite 3.54.1 支援 UPSERT；語意＝原 proc「無列→INSERT／有列→UPDATE」雙分支的 6 欄擴充；QN5/6 無對應原 proc，同模式處理，**誠實缺口**）；CodeNo 負數/>255 → 拒絕（原表 tinyint 無範圍限制，V2 僅擋明顯非法值）。
+- **NetError**：新增 `ERR_COMMUNITY_OPT_01=240`／`ERR_COMMUNITY_OPT_02=241`（`NetError_def.h` 純連續列舉無 #ifdef；機讀計數法重現既有全部實測值——SELECT_UNIT_05=39、SELECT_UNIT_07=1081、RESTORE_NICK_NAME_00=328、DELETE_UNIT_00=986、VERIFY_21=578、CREATE_UNIT_11=1289——故 240/241 可信）。
+- **與 §0a9 連動**：測試斷言更新後 `HandleSelectUnitReq(..., outNot4)` 帶出的 kDenyOptions 反映新值（DB 即真值，write-through 後無快取不一致）。
+- **測試** `tests/test_community_option.cpp`（codec golden bytes×3、事件 ID、ValidateDenyOptions 邊界、GameStore upsert 全部分支（含缺列重插、全刪重建、負數/>255、unit 不存在/已刪除）、Handler 決策（01 驗證失敗不動 DB／02 unit 不存在／NET_OK 回顯）、SELECT_UNIT_4_NOT 連動、wire 迴路）；`test_all.cpp` 登記 `RunCommunityOptionTestsByRef`；**vcxproj 登記 UpdateCommunityOptionProtocol.{h,cpp}**（tests/ 不進 Windows 工程，與既有慣例一致）。
+- **測試數**：**JP = 1514、TW = 1512、EU = 1510、CN = 1512、US = 1511 passed / 0 failed**。
+- **偏差聲明（逐條）**：
+  1. **write-through vs 延遲寫**：原版成功僅改記憶體、DB 於副本結束才寫；V2 無 session option 物件、亦無副本結束路徑 → 驗證通過立即 transaction upsert。行為差異：客戶端收到 ACK 成功時，原版 DB 可能尚未更新（crash 即遺失），V2 保證已落盤。
+  2. **ELG_UPDATE_DENY_FRIEND_SHIP_NOT 未移植**：V2 無 LoginServer 通道；好友拒絕狀態不同步到登入伺服器（好友系統整體未移植）。
+  3. **VERIFY_STATE（S_FIELD_MAP/S_ROOM）不適用**：V2 無 FSM。
+  4. **unit 不存在/已刪除 → ERR_COMMUNITY_OPT_02**（原版無此檢查，in-memory 必成功）；原版副本結束延遲寫失敗時 ACK 不回報——V2 write-through 必須當場回報，故借用原「CommunityOpt DB 失敗」碼。
+  5. **失敗路徑 ACK 歸零**（原版 m_kDenyOptions 未初始化）；**QN5/6 upsert 無對應原 proc**；若將來補上副本結束延遲寫路徑（DBE_UPDATE_UNIT_INFO_REQ 家族），應改為在該處呼叫本寫入並移除 write-through。
 
 ## 0a9. 2026-11-17 附記（SELECT_UNIT_4_NOT kDenyOptions ← GDenyOption 讀回；schema v4）
 
@@ -364,14 +390,14 @@ tests/test_string_filter.cpp 的字元集閘門斷言改為依 `X2_REGION_*` 分
 
 - `GSUserFunction::SendSelectUnitACK`（GSUserFunction.cpp:18085–18117）把 DBE ACK 的 `m_kDenyOptions` 放進 `EGS_SELECT_UNIT_4_NOT`；ACK 的 deny options 來自 `DBE_GAME_SELECT_UNIT_REQ → Query_SelectUnit` 流程（GSGameDBThread.cpp）中的 `P_GDenyOption_SEL`——**`P_GDenyOption_SEL`／`P_GDenyOption_UPD`／`P_GDenyOption_MER` 均不隨倉庫提供**（find/grep 皆無）。6 欄（`KDenyOptions`：cDenyFriendShip／cDenyInviteGuild／cDenyParty／cDenyPersonalTrade／cDenyRequestCouple／cDenyInvitePracticePVP；`DenyOptionState`：**DOS_ON=0／DOS_OFF=1／DOS_ONLY_FRIEND=2**，CommonPacket.h）。
 - relationship 之前的舊路徑 `gup_get_community_opt_unituid.proc.sql`（4 值、QuestionNo 1–4 各查一次、**缺列 → CodeNo=1**、`SELECT 1,2,3,4`、NOLOCK）**隨倉庫提供**，但非本建置啟用路徑——V2 僅借用它的「缺列→1」慣例與欄序語意。
-- `gup_update_community_opt.proc.sql`（4 參數 @iInsertFriendDeny_/@iManToManChatDeny_/@iPartyDeny_/@iPrivateDealDeny_；unit 不存在→-1；無列→INSERT 4 列／有列→CASE UPDATE；`@@ROWCOUNT<>4`→-2/-3）**隨倉庫提供**（舊版 `EGS_UPDATE_COMMUNITY_OPT` 路徑）。V2 **目前無 `EGS_UPDATE_COMMUNITY_OPT` 處理器**——客戶端該請求無法改變 V2 的這些值（QN5/6 恆為預設 1，見下）。
+- `gup_update_community_opt.proc.sql`（4 參數 @iInsertFriendDeny_/@iManToManChatDeny_/@iPartyDeny_/@iPrivateDealDeny_；unit 不存在→-1；無列→INSERT 4 列／有列→CASE UPDATE；`@@ROWCOUNT<>4`→-2/-3）**隨倉庫提供**（舊版 `EGS_UPDATE_COMMUNITY_OPT` 路徑）。V2 於 §0a9 落地時尚無寫路徑（§0a10 已補上 write-through；relationship `P_GDenyOption_UPD` 仍缺 proc）。
 
 **V2 實作**：
 
 - **Schema v4 migration**（`kGameSchemaVersion` 3→4）：`gdenyoption.CodeNo` CHECK 由 1..255 放寬為 **0..255**（SQLite 無法在原位改 CHECK，故整表重建於單一 transaction，失敗整體 ROLLBACK）。原 `dbo.GDenyOption` 為 tinyint 且**無範圍限制**；v2 建表時 1..255 會擋掉合法值 DOS_ON=0。v2 CREATE TABLE 一併放寬（新庫直建即正確）。
 - **`GameStore::GetDenyOptions(unitUID)`**：`SELECT QuestionNo, CodeNo FROM gdenyoption WHERE UnitUID = ?`；**缺列 → 全 1（DOS_OFF），非錯誤**（鏡像 `gup_get_community_opt_unituid` 的 missing→1 慣例）；unit 不存在/已刪除 → true（原 proc 不檢查 unit 存在）；未知 QuestionNo 忽略；QN1..6 → friendShip/inviteGuild/party/personalTrade/requestCouple/invitePracticePVP。
 - **`BuildSelectUnitNot4(out, denyOptions)`**：kDenyOptions ← QN1..6 原樣；其餘欄位（黑名單/教學/連線時間/Henir/好友/戰場狀態…）仍全預設/空（誠實佔位）。`HandleSelectUnitReq`：outNot4 非空時查詢 gdenyoption；失敗 → `ERR_SELECT_UNIT_05`（DBE 流程失敗慣例，與 §0a8 spirit/re-read 一致）。
-- **QN=5（RequestCouple）／QN=6（InvitePracticePVP）**：V2 建角副作用（§0a5）鏡像原 `gup_create_unit` 只 INSERT QN1..4 → 缺列 → **恆預設 1**；relationship 路徑才會寫 5/6（客戶端 `EGS_UPDATE_COMMUNITY_OPT`）——V2 無該封包處理器 → 5/6 恆為預設 1，**誠實缺口**（與 P_GDenyOption_* 缺 proc 的不可移植面一致）。
+- **QN=5（RequestCouple）／QN=6（InvitePracticePVP）**：V2 建角副作用（§0a5）鏡像原 `gup_create_unit` 只 INSERT QN1..4 → 缺列 → **恆預設 1**；relationship 路徑才會寫 5/6（客戶端 `EGS_UPDATE_COMMUNITY_OPT`）——§0a9 當時 V2 無該封包處理器（§0a10 已補上 write-through 寫路徑；P_GDenyOption_* 仍缺 proc，以 upsert 近似）。
 - **測試** `tests/test_select_unit_daily_reset.cpp` 新增 `TestDenyOptionReadback`（8 個子情境：建角預設 1×6、Not4 同步讀回、UPDATE 庫→Not4 反映（0/2/1）、QN5/6 補列→讀回、未知 QN 忽略、全刪→全 1 非錯誤、unitUID 不存在→true＋預設值、v4 migration 覆蓋）；`tests/test_select_unit.cpp` `TestBuildSelectUnitNot4Defaults` 同步更新（預設 1、顯式值傳入）。
 - **測試數**：**JP = 1455、TW = 1453、EU = 1451、CN = 1453、US = 1452 passed / 0 failed**。
 - **偏差聲明**：NOT 逐欄忠實 relationship 啟用路徑（`P_GDenyOption_SEL` 缺 proc）；以「gdenyoption 直接讀回＋缺列→1 舊版慣例」近似；QN5/6 無資料來源恆為 1。
@@ -714,7 +740,7 @@ V2 目前**原樣保留**協議所需的密碼學直譯，這些本身**不符�
 7. `LoadINIFile`、設定檔格式與部署工具（原 `ReleaseTool`/`.bat` 流程）。
 8. EventIDs 以外的大型表（道具/技能/副本資料）從 `X2/dat/Script` 的轉換管道。
 9. `SELECT_UNIT` 的 REQ/收尾 ACK + 決策層已完成（§0c）；`SELECT_UNIT_1_NOT` codec + 組裝（gunit 表 → Not1，缺資料項佔位）已完成（§0e）；`SELECT_UNIT_2_NOT` codec + 組裝（任務無資料源→空容器佔位）已完成（§0f）；`SELECT_UNIT_3_NOT` codec + 組裝（mission/title/pet 無資料源→空容器佔位）已完成（§0g）；`SELECT_UNIT_4_NOT` codec + 組裝（Henir/Messenger/戰場狀態無資料源→空容器/零值佔位；kDenyOptions 自 §0a9 起 ← gdenyoption 讀回）已完成（§0h）；`SELECT_UNIT_5_NOT` codec + 組裝（spirit/pshop/henir-reward/cashshop 無資料源→false/0 佔位）已完成（§0i），1_NOT…5_NOT 全數落地；1_NOT…5_NOT 分片 codec 全數移植（§0e…0i）；完整角色資料載入管線未開始。Login 切片打通到 SELECT_UNIT_1_NOT 為止（items/任務/寵物/ED/rating 等無資料來源，值為佔位；spirit 自 GSpirit 讀回，§0a8）。
-11. GDenyOption／GResurrectionStoneCnt／GSkill／GSkillSlot／GSpirit／GQuests——**建立流程副作用已移植（§0a5）；GSpirit 讀回與 gup_select_unit 每日重置／GResurrectionStone 每日補充／PlayDayCnt／LoginCount 登入副作用已移植（§0a8）**；其餘查詢/更新路徑（gup_get_community_opt_unituid——V2 改以 gdenyoption 直接讀回近似，§0a9；EGS_UPDATE_COMMUNITY_OPT 6 欄寫入未實作；gup_*_skill、gspirit Flag 語意變體）未實作；建角道具發放（gup_create_unit_set_promotion／P_GItemPeriod_INS，**不隨倉庫提供**）不可移植。
+11. GDenyOption／GResurrectionStoneCnt／GSkill／GSkillSlot／GSpirit／GQuests——**建立流程副作用已移植（§0a5）；GSpirit 讀回與 gup_select_unit 每日重置／GResurrectionStone 每日補充／PlayDayCnt／LoginCount 登入副作用已移植（§0a8）**；其餘查詢/更新路徑（gup_get_community_opt_unituid——V2 改以 gdenyoption 直接讀回近似，§0a9；EGS_UPDATE_COMMUNITY_OPT 6 欄寫入（§0a10 write-through；P_GDenyOption_UPD 缺 proc，以 upsert 近似）已移植；gup_*_skill、gspirit Flag 語意變體）未實作；建角道具發放（gup_create_unit_set_promotion／P_GItemPeriod_INS，**不隨倉庫提供**）不可移植。
 10. Wire 相容：Login 切片 codec 只有自洽 golden bytes，**缺原 SDK 實機對照向量**（見 §13）。
 
 ## 13. 風險

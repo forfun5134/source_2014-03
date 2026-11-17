@@ -195,6 +195,12 @@ public:
     // 讀取 GDenyOption（缺列 → 全 1（DOS_OFF），非錯誤；不存在檢查——原 proc 亦不檢查）
     bool GetDenyOptions(int64_t unitUID, DenyOptionValues& out, std::string& err);
 
+    // Upsert GDenyOption QN1..6（EGS_UPDATE_COMMUNITY_OPTION_REQ 的 write-through，§0a10）。
+    // unit 不存在/已刪除 → false＋err（鏡像 gup_update_community_opt 的 -1「該 Unit 不存在」）；
+    // 缺列 → INSERT，有列 → UPDATE CodeNo；6 列於同一 transaction（原 proc 的
+    // 「無列 → INSERT 4 列／有列 → CASE UPDATE」雙分支之擴充，擴至 QN1..6）。
+    bool UpdateDenyOptions(int64_t unitUID, const DenyOptionValues& v, std::string& err);
+
     // 讀取 GResurrectionStone（缺列 → false，非錯誤；供測試/除錯）
     bool GetResurrectionStone(int64_t unitUID, ResurrectionStoneValues& out, std::string& err);
 

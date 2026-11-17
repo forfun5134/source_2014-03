@@ -750,6 +750,59 @@ bool GameStore::GetDenyOptions(int64_t unitUID, DenyOptionValues& out, std::stri
     return true;
 }
 
+bool GameStore::UpdateDenyOptions(int64_t unitUID, const DenyOptionValues& v, std::string& err)
+{
+    // 參數檢查：CodeNo 必須是合法的 tinyint-ish 值（0=DOS_ON / 1=DOS_OFF / 2=DOS_ONLY_FRIEND；原表無範圍限制，V2 僅擋負數）
+    const int code[6] = { v.friendShip, v.inviteGuild, v.party, v.personalTrade, v.requestCouple, v.invitePracticePVP };
+    for (int i = 0; i < 6; ++i) {
+        if (code[i] < 0 || code[i] > 255) { err = "deny option CodeNo out of range"; return false; }
+    }
+
+    if (!m_db.Begin(err)) return false;
+
+    auto rollback = [this, &err]() {
+        std::string unused;
+        m_db.Rollback(unused);
+        return false;
+    };
+
+    // unit 存在性檢查（原 gup_update_community_opt：該 Unit 不存在 → -1）
+    {
+        Statement st;
+        if (!st.Prepare(m_db, "SELECT 1 FROM gunit WHERE UnitUID = ? AND Deleted = 0;", err)) return rollback();
+        if (!st.BindInt(1, unitUID, err)) return rollback();
+        std::string stepErr;
+        if (!st.StepRow(stepErr)) {
+            if (!stepErr.empty()) { err = stepErr; return rollback(); }
+            err = "unit not found (or deleted)";
+            return rollback();
+        }
+    }
+
+    // upsert 6 列（缺列 → INSERT，有列 → UPDATE；同一 transaction）
+    static const char* kUpsert =
+        "INSERT INTO gdenyoption (UnitUID, QuestionNo, CodeNo) VALUES (?, ?, ?) "
+        "ON CONFLICT(UnitUID, QuestionNo) DO UPDATE SET CodeNo = excluded.CodeNo;";
+    for (int qn = 1; qn <= 6; ++qn) {
+        Statement st;
+        if (!st.Prepare(m_db, kUpsert, err)) return rollback();
+        if (!st.BindInt(1, unitUID, err)) return rollback();
+        if (!st.BindInt(2, qn, err)) return rollback();
+        if (!st.BindInt(3, code[qn - 1], err)) return rollback();
+        std::string stepErr;
+        if (st.StepRow(stepErr)) { err = "upsert: unexpected row"; return rollback(); }
+        if (!stepErr.empty()) { err = stepErr; return rollback(); }
+    }
+
+    if (!m_db.Commit(err)) {
+        std::string unused;
+        m_db.Rollback(unused);
+        return false;
+    }
+    err.clear();
+    return true;
+}
+
 bool GameStore::GetResurrectionStone(int64_t unitUID, ResurrectionStoneValues& out, std::string& err)
 {
     out = ResurrectionStoneValues{};

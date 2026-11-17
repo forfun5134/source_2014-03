@@ -107,6 +107,7 @@
     <ClCompile Include="src\server\LoginArbiter.cpp" />
     <ClCompile Include="src\db\GameStore.cpp" />
     <ClCompile Include="src\server\SelectUnitProtocol.cpp" />
+    <ClCompile Include="src\server\UpdateCommunityOptionProtocol.cpp" />
     <ClCompile Include="src\server\UnitSelectArbiter.cpp" />
     <ClCompile Include="src\server\UnitListProtocol.cpp" />
     <ClCompile Include="src\server\CreateUnitProtocol.cpp" />
@@ -165,6 +166,7 @@
     <ClInclude Include="src\server\LoginArbiter.h" />
     <ClInclude Include="src\db\GameStore.h" />
     <ClInclude Include="src\server\SelectUnitProtocol.h" />
+    <ClInclude Include="src\server\UpdateCommunityOptionProtocol.h" />
     <ClInclude Include="src\server\UnitSelectArbiter.h" />
     <ClInclude Include="src\server\UnitListProtocol.h" />
     <ClInclude Include="src\server\CreateUnitProtocol.h" />
