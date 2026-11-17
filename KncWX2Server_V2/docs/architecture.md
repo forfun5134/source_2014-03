@@ -115,7 +115,7 @@
 
 **決策層** `HandleCreateUnitReq(gameDb, userUID, authLevel, req, ack, err)`（UnitSelectArbiter）：暱稱 UTF-8 位元組數 1..12（>12 或空 → ERR_CREATE_UNIT_04=29；JP 未定義 SERV_NICK_NAME_MINIMUM_CHECK → 無最小長度）；含 KODBC 注入標記（`;` `'` `"` `--` `/*` `*/` `\`）→ ERR_CREATE_UNIT_08=33；`GameStore::CreateUnit` 結果映射：Ok→NET_OK、UserNotFoundOrDeleted→ERR_CREATE_UNIT_00=25、NicknameTaken→ERR_CREATE_UNIT_01=26、CapacityReached→ERR_CREATE_UNIT_05=30、NicknameInCooldown→ERR_CREATE_UNIT_06=31、DbError→ERR_CREATE_UNIT_02=27；成功後重讀角色，`kUnitInfo ← PopulateUnitInfoFromGUnit`；**vecSkillSlot / wstrEnableDate 原由 AccountDB（DBE_ACCOUNT_CREATE_UNIT_*）填寫，V2 一律空**（誠實佔位）。
 
-⚠ 誠實偏差：無職業 templet 表（iClass 由 GameStore tinyint 範圍把關；IsInitNormalJob 閘門已移植 §0a3）、~~無字串過濾器/PVP NPC 名檢查~~（FT_NICKNAME §0w／PvP NPC 名 §0a4 已移植）/每日建立上限仍未建模、原版兩段式（DBE_GAME_CREATE_UNIT_* → DBE_ACCOUNT_CREATE_UNIT_*）未建模（V2 單段 game DB）、S_SERVER_SELECT 狀態閘門未建模；wire 佈局為自洽 golden bytes，**未對原 SDK 實機驗證**。`WideToUtf8`（含代理對合併）與 `Utf8ToWide` 互為逆運算（均為 Linux wchar_t=4 下的 UTF-16 代理對路徑，供線路互通）。
+⚠ 誠實偏差：職業 templet 以 **enum 模型**近似（原 templet 源 `UnitTemplet.lua` 未隨倉庫提供、`UnitTemplet.mdb` 經徹查為樣板期資料——見 §0a7；templet 存在性閘門已移植，IsInitNormalJob 閘門 §0a3）、~~無字串過濾器/PVP NPC 名檢查~~（FT_NICKNAME §0w／PvP NPC 名 §0a4 已移植）/每日建立上限仍未建模、原版兩段式（DBE_GAME_CREATE_UNIT_* → DBE_ACCOUNT_CREATE_UNIT_*）未建模（V2 單段 game DB）、S_SERVER_SELECT 狀態閘門未建模；wire 佈局為自洽 golden bytes，**未對原 SDK 實機驗證**。`WideToUtf8`（含代理對合併）與 `Utf8ToWide` 互為逆運算（均為 Linux wchar_t=4 下的 UTF-16 代理對路徑，供線路互通）。
 
 **測試**（tests/test_create_unit.cpp）：codec roundtrip（含 CJK 暱稱/skillSlot/enableDate）、空暱稱→04、13+ bytes→04（UTF-8 CJK 3B/字邊界）、恰好 12 bytes→成功、重複暱稱→01、注入標記→08、guser 不存在→00、建立後 ListUnitsByUserUID 可見。測試自 685 → **713 passed / 0 failed**。vcxproj 登記 CreateUnitProtocol.{h,cpp}。**Loopback 未擴充 CREATE_UNIT**（會牽動 MY_UNIT_LIST/ghost 斷言鏈；codec roundtrip + 記憶體內決策層已覆蓋，create→list 副作用以 ListUnitsByUserUID 斷言替代）。
 
@@ -176,7 +176,7 @@
 原 `SERV_ENTRY_POINT`（ServerDefine.h:4304）家族的兩個變體事件完成移植。兩者皆為 EGS_ENTRY_POINT 版本，沿用既有後端決策：
 
 **EGS_CREATE_NEW_UNIT_REQ（1159）**＝{wstrNickName, iClass, iServerGroup}（PUT 順序機讀自 ClientPacket.cpp:15012 起），回覆 **EGS_CREATE_UNIT_ACK（37）**。`HandleCreateNewUnitReq` 忽略 iServerGroup 並轉發至 `HandleCreateUnitReq`。
-原碼特有閘門：`SiCXSLUnitManager()->GetUnitTemplet` 驗證 iClass（無 templet → `ERR_CREATE_UNIT_03`=28）**仍未建模**；`SiKPvpMatchManager()->IsExistPvpNpcName`（→ERR_CREATE_UNIT_01=26）**已於 §0a4 移植**（CREATE_UNIT 共用決策：length→StringFilter→本閘門→注入；原碼 CHANGE_NICK_NAME 順序為 StringFilter→注入→本閘門，V2 各 handler 對齊各自原碼順序）。`IsInitNormalJob`（→ `ERR_CREATE_UNIT_11`，**enum 機讀實測＝1289**）**已於 §0a3 移植**（先於 length 檢查；templet 存在性/名稱閘門未建模，iClass=200 等一律以 1289 拒絕，原碼為 28）。注入分支原碼用 `ERR_ODBC_00=175`（與 EGS_CREATE_UNIT_REQ 的 ERR_CREATE_UNIT_08=33 不同）。V2 共用決策（長度→04／注入→08）與誠實偏差聲明不變。
+原碼特有閘門：`SiCXSLUnitManager()->GetUnitTemplet` 驗證 iClass（無 templet → `ERR_CREATE_UNIT_03`=28）**已於 §0a7 以 enum 模型移植**（原碼順序：templet(03) → IsInitNormalJob(1289)）；`SiKPvpMatchManager()->IsExistPvpNpcName`（→ERR_CREATE_UNIT_01=26）**已於 §0a4 移植**（CREATE_UNIT 共用決策：length→StringFilter→本閘門→注入；原碼 CHANGE_NICK_NAME 順序為 StringFilter→注入→本閘門，V2 各 handler 對齊各自原碼順序）。`IsInitNormalJob`（→ `ERR_CREATE_UNIT_11`，**enum 機讀實測＝1289**）**已於 §0a3 移植**（templet 存在性閘門 §0a7 已先行移植，失敗為 28、通過後才進 IsInitNormalJob）。注入分支原碼用 `ERR_ODBC_00=175`（與 EGS_CREATE_UNIT_REQ 的 ERR_CREATE_UNIT_08=33 不同）。V2 共用決策（長度→04／注入→08）與誠實偏差聲明不變。
 
 **EGS_ENTRY_POINT_DELETE_UNIT_REQ（1160）**＝{iUnitUID, iUserUID, iServerGroup}（PUT 順序機讀自 :15028 起），回覆 **EGS_DELETE_UNIT_ACK（39）**。`HandleEntryPointDeleteUnitReq` 忽略 iServerGroup 並轉發至 `HandleDeleteUnitReq`（擁有權閘門等語意同前）。
 
@@ -194,7 +194,7 @@
 
 **map 線路慣例統一（⚠️ wire 變更）**：V2 的 map wire 慣例（`WireHelpers.h` `detail::PutCountPrefixMap`：count-prefix + 無 tag/wrapper）此前已被 10+ 處使用（SelectUnitProtocol / UnitData / UnitListProtocol…），但 `CreateTodayCountProtocol`（§0n）誤用了 `Serializer::Put(std::map)`（會寫 `eTAG_MAP`+`eTAG_PAIR`）。本輪將其改為 count-prefix 慣例（**wire 自洽佈局，非 SDK 驗證**）。`map<int, vector<KUnitInfo>>` 因 UnitInfo 無 Serializer 模板，改走 `PutCountPrefixMap` + 內層 `PutCountPrefixVec(unit::PutUnitInfo)`。
 
-⚠ 誠實偏差：無 templet 表（原碼缺 templet → `ERR_CREATE_UNIT_03`=28；V2 以 `IsInitNormalJob` 閘門替代，§0a3）、~~無 EXP/stat 表~~（已移植 §0u/§0v）、無 P2P IP/port（空）、無 server group / 1st+2nd GameDB 會合、SERV_BATTLE_FIELD_BOSS 地圖修正未建模、`m_setMyUnitUIDList` 狀態未複製。
+⚠ 誠實偏差：templet 以 enum 模型近似（§0a7；原碼缺 templet → `ERR_CREATE_UNIT_03`=28，V2 無 templet 模型未命中同樣回 28）、~~無 EXP/stat 表~~（已移植 §0u/§0v）、無 P2P IP/port（空）、無 server group / 1st+2nd GameDB 會合、SERV_BATTLE_FIELD_BOSS 地圖修正未建模、`m_setMyUnitUIDList` 狀態未複製。
 
 **測試**（tests/test_character_list.cpp，14 項）：REQ 空酬載 no-op roundtrip、ACK codec roundtrip（map→map→vector<UnitInfo> 巢狀）、空列表（slot=50、空 vec、strUserID 回顯）→ 建 2 角色→2 筆→他人使用者空列表。測試自 847 → **873 passed / 0 failed**。vcxproj 登記 CharacterListProtocol.{h,cpp}；Loopback 未擴充。
 
@@ -311,7 +311,7 @@ CONNECT → VERIFY → `EGS_CHARACTER_LIST_REQ`(1155，0 角色：slot[0]==50、
 
 意義：SERV_ENTRY_POINT 家族（CHARACTER_LIST／CREATE_NEW_UNIT／ENTRY_POINT_DELETE_UNIT／GET_CHANNEL_LIST／TODAY_COUNT）此前僅有 codec 自洽與記憶體內決策層單元測試；本測試首次以真實 socket + 真實雙庫驗證全家族的 wire→決策→DB 閉環。
 
-⚠ 附帶記錄：`ScriptData/UnitTemplet.mdb`（SELECT_UNIT/CREATE_UNIT 的 templet 來源）嘗試以 PyPI `access-parser` 解析——能開檔列出 Units/UnitClass/UnitType/WeaponType 四表，但 Jet4 variable-length record 解析失敗；純 Python 無法讀此檔、mdbtools C 函式庫不在可達網路（pypi/github/npm 之外無 Ubuntu 倉庫）。**UnitTemplet 維持未實作，CREATE_UNIT 的 class 驗證閘門不變。**
+⚠ 附帶記錄（已由 §0a7 取代）：`ScriptData/UnitTemplet.mdb`（SELECT_UNIT/CREATE_UNIT 的 templet 來源）當時嘗試以 PyPI `access-parser` 解析——能開檔列出 Units/UnitClass/UnitType/WeaponType 四表，但 Jet4 variable-length record 解析失敗；純 Python 無法讀此檔、mdbtools C 函式庫不在可達網路。**後續徹查（§0a7）證實此檔為樣板期資料且缺 UnitTemplet.lua，templet 存在性閘門已以 enum 模型移植；名稱/IsFirstChangeJob 仍未建模。**
 
 測試自 1128 → **1181 passed / 0 failed**。無新模組 → vcxproj 無需登記。
 
@@ -333,8 +333,8 @@ tests/test_string_filter.cpp 的字元集閘門斷言改為依 `X2_REGION_*` 分
 - **NetError_def.h 機讀 enum 計數實測**：ERR_CREATE_UNIT_10=**687**、ERR_CREATE_UNIT_11=**1289**（先前 1294 為 enum 位序反推、錯誤；docs §0u 原已正確記錄 1289）。`src/core/NetError.h` 已納入 `ERR_CREATE_UNIT_11 = 1289`。
 - **新模組** `src/server/UnitTemplet.{h,cpp}`（namespace `x2::unit_templet`）：僅移植 `IsInitNormalJob(iClass)` 謂詞（1..9 → true）。
 - **UnitSelectArbiter.cpp**：HandleCreateUnitReq 於長度檢查**之前**插入閘門：`!x2::unit_templet::IsInitNormalJob(req.iClass)` → ack.iOK = ERR_CREATE_UNIT_11、err.clear()、return true。ENTRY_POINT_CREATE_NEW_UNIT 共用閘門同步生效。
-- **已知偏差（誠實聲明）**：`ScriptData/UnitTemplet.mdb` 無法解析（access-parser Jet4 崩潰、mdbtools 不可達，見 §0a1 附近記錄）→ templet 存在性／名稱閘門未建模。iClass=100/121/122/200/255 等在原碼可能先被 templet 查詢擋下（ERR_CREATE_UNIT_03=28）；V2 一律以 ERR_CREATE_UNIT_11=1289 拒絕。iClass 1..9 以外且 2nd-class（≥1000 等）一向非初始普通職業，閘門語意一致。
-- **測試**：`tests/test_unit_templet.cpp`（RunUnitTempletTestsByRef）：IsInitNormalJob 邊界（0/-1/9/10/31/100/121/122/200/255）、HandleCreateUnitReq 合法 1/5/7/8/9 → NET_OK、非法 → 1289（暱稱唯一化確保不被唯一性閘門先行攔截）、ENTRY_POINT_CREATE_NEW_UNIT 共用閘門（iClass=100→1289）。
+- **已知偏差（誠實聲明，已由 §0a7 收斂）**：templet 存在性當時未建模——iClass=200 等一律以 1289 拒絕，原碼為 28。**§0a7 已移植 templet 存在性閘門（enum 模型，55 個 iClass）；不存在 → 28、存在但非初始普通職業 → 1289，與原碼呼叫順序一致。** 剩餘：templet 名稱／IsFirstChangeJob 未建模（資料源 UnitTemplet.lua 未隨倉庫提供）。
+- **測試**：`tests/test_unit_templet.cpp`（RunUnitTempletTestsByRef）：IsInitNormalJob 邊界、HandleCreateUnitReq 合法 1/5/7/8/9 → NET_OK、ENTRY_POINT_CREATE_NEW_UNIT 共用閘門；§0a7 已改為兩階段閘門接線與期望值（見下）。
 - 測試自 1185 → **JP/TW/CN = 1232、EU = 1230 passed / 0 failed**（EU permissive 分支較少）。
 
 ## 0a4. 2026-11-17 附記（CREATE_UNIT / CHANGE_NICK_NAME IsExistPvpNpcName 閘門（PvP NPC 保留暱稱））
@@ -357,6 +357,24 @@ tests/test_string_filter.cpp 的字元集閘門斷言改為依 `X2_REGION_*` 分
 - **測試** `tests/test_create_unit_satellite.cpp`（41 項）：class 1..4 SkillID 對應／class 5 無 gskill・gskillslot（忠實）／GQuests 所有職業 QuestID=13・SubQuest0=1／GDenyOption 4 列 CodeNo=1／GSpirit（空表→0、Flag=0；有列→100）／**副作用失敗 → 整體 ROLLBACK**（`DROP TABLE gskillslot` 後 create → ack=ERR_CREATE_UNIT_02、gunit/gunit_nickname/gquests 皆 0 列）。
 - **測試數**：**JP = 1297、TW = 1295、EU = 1293、CN = 1295 passed / 0 failed**。
 - 剩餘未移植：gmo_*_skill（技能 slot 更新）／gup_get_community_opt_unituid（社群選項查詢）／class 5..9 技能列（原 proc 不存在）／LogDB；gspirit 的 Flag 並列槽位 UI 亦未建模。
+
+## 0a7. 2026-11-17 附記（GetUnitTemplet／UnitTemplet.mdb 徹查＋enum 模型移植 templet 存在性閘門）
+
+目標：`SiCXSLUnitManager()->GetUnitTemplet(iClass)` 在原碼 CREATE_UNIT 路徑的唯一用途是**存在性檢查**（無 templet → `ERR_CREATE_UNIT_03`=28；`pUnitTemplet->欄位` 從未被解引用——post-create ACK 也只用於 NULL 檢查與 StatTable/EXP 表修補）。原碼其他 9 處呼叫點同樣只做 NULL 檢查（CHARACTER_LIST_ACK×2、EGS_CREATE_NEW_UNIT_REQ、DBE_ACCOUNT_CREATE_UNIT_ACK…）。
+
+**徹查 ScriptData/UnitTemplet.mdb（Jet4，1,839,104 B，449 頁）**——結論：**樣板期資料，無法也不該用於 2014 JP 閘門**：
+
+- 檔案附編 VBA 宏（「select * from [Units]」＋枚舉 `AddUnitTemplet` 呼叫，Jet4 壓縮 Unicode 存放）——即當年的 **UnitTemplet.lua 產生器**；真正的執行期 templet 源是 `UnitTemplet.lua`（`GSSimLayer.cpp` 於啟動時載入），**該 lua 未隨本倉庫提供**（`git ls-tree -r HEAD` 全倉庫無 UnitTemplet.lua）。
+- 表內容與 2007/2011 樣板一致：UnitClass 僅 14 列（UC_NONE／SWORDMAN／VIOLET_MAGE(誤綴 VIOLET_MAGED)／ELVEN_RANGER／ELISIS_KNIGHT + 6 個 ELISIS 進階 + ELSWORD_SWORD_EXPERT/SQUERD_LEADER + ARME_ARCH_MAGE/ARCHIMIST/ARCANE_MASTER）；UnitType 僅 UT_NONE/ELSWORD/ARME/LIRE/ELISIS（無 UT_RAVEN/UT_EVE/UT_CHUNG/UT_ARA）；WeaponType 僅 WT_NONE/GREAT_SWORD/LONG_BOW/WAND。**缺 2009 後的全部職業**：RAVEN_FIGHTER=4、EVE_NASOD=5、CHUNG_IRON_CANNON=6、ARA_MARTIAL_ARTIST=7、ELESIS_KNIGHT=8、ADD_NASOD_RULER=9 及所有 2nd 職業。
+- Units 主表（23 欄，12 fixed int + 11 Jet4 壓縮 Unicode variable text）：頁0 為 Jet4 標頭（"Standard Jet DB"）、頁1 幾近空置（17 printable bytes）、Units TDef 頁 51–84 僅欄定義；**record_count 表徵異常**（access-parser 報告 1 列、variable_length 偏移 3869 < page_size，且 header variable_columns=16 ≠ 實際 11）；可見 fixed BaseStat_* = [5,6,7,8,9,9,0,9,9,9,9,9]。可解析的三張衛星表（UnitClass 14／UnitType 5／WeaponType 4）也都是樣板值。access-parser（0.0.6，本機 sys.path）在 Units 上 `StreamError(variable_length_field_offsets)`；mdbtools 不可達（可達網路僅 pypi/github/npm）。
+- 即便修復解析，此檔也**不能**用於當前閘門：以它判斷存在性會把 RAVEN/EVE/CHUNG/ARA/ELESIS 全部誤判為不存在（原 2014 JP 可用職業）。
+
+**決策（已移植）**：templet 存在性以**enum 模型**近似——「已宣告可玩職業即存在」。`UNIT_CLASS`（XSLUnit.h）依 `ServerDefine.h` 之 `#define` 集合（JP INT_INTERNAL，561 個宏）機械求值：`tools/gen_unit_classes.py` 解析 enum 段（處理 `#ifdef/#ifndef/#else/#endif`，可重設計數器），排除 UC_NONE=0／UC_MAX 哨兵 → **55 個 iClass**（1..32、100..122），產出 `src/server/UnitClassData.inc`（verify_generated.sh 納入防漂移）。
+
+- **新模組** `UnitTemplet.{h,cpp}` 增加 `UnitTempletExists(iClass)`（查 55 成員集合）：`HandleCreateUnitReq`／ENTRY_POINT_CREATE_NEW_UNIT 依原碼順序先 templet(→ERR_CREATE_UNIT_03=28) 再 IsInitNormalJob(→1289)。測試期望值同步拆分（0/-1/33/50/99/123/200/255 → 28；10/22/31/32/100/112/121/122 → 1289；1/5/7/8/9 → NET_OK）。
+- **偏差聲明**：templet 的 baseStat/unitType/weaponType 等欄位 V2 路徑**不需要**（creation ack 的 stat 由 §0v StatTable 補上；`m_kStat.m_iBaseHP` 等實際來源為 KStatTable）。模型是「存在性白名單」，不是 templet 內容；若某未來部署 templet 漏列已宣告職業，行為為「允許建立」而非原碼的 28——已發佈職業不存在此情形。templet 名稱（暱稱相似檢查）/IsFirstChangeJob（CHANGE_CLASS_SPECIFIC 專用）仍未建模。
+
+**測試數**：**JP = 1348、TW = 1346、EU = 1344、CN = 1346、US = 1345 passed / 0 failed**。
 
 ## 0a6. 2026-11-17 附記（每日建立上限考察——原版無伺服器端閘門）
 
@@ -653,7 +671,7 @@ V2 目前**原樣保留**協議所需的密碼學直譯，這些本身**不符�
 1. 非同步網路層（IOCP/epoll）；`…_Local(KSADatabase*)` 會話金鑰路徑（2010 專有）；`SST_SERVER` 來源標記；代理 15s 心跳迴圈；SA bit-window 驗證。（同步 TCP 訊框原型與 Session 層已完成，見 §9。）
 2. 帳號驗證（含 JP 專屬 `ChannelUserAuth_JP`）、密碼雜湊遷移（禁明文 MD5）。→ 已有**開發替代品**（LoginArbiter，loopback 綠），正式出版商認證端點 RPC 未實作。
 3. 284 張表 / 527 sproc → SQLite schema 與參數化查詢的逐步重建（users ✅；game 庫 guser/gunit/暱稱歷史 ✅ + GameStore 存取層 + 單元測試；其餘表未開始）。
-4. 遊戲邏輯（GS/LS/CS/CenterServer）全部未移植；Lua 腳本層未移植。
+4. 遊戲邏輯（GS/LS/CS/CenterServer）全部未移植；Lua 腳本層未移植。（UnitTemplet.lua 未隨倉庫提供——templet 存在性閘門 §0a7 以 enum 模型近似；真正的 templet 內容/名稱檢查/IsFirstChangeJob 不可移植。）
 5. Windows 實機建置、安裝/升級路徑、符號伺服器、CI。
 6. 效能與容量測試；記憶體/句柄洩漏基線（原版以 VLD 除錯，V2 無對應）。
 7. `LoadINIFile`、設定檔格式與部署工具（原 `ReleaseTool`/`.bat` 流程）。

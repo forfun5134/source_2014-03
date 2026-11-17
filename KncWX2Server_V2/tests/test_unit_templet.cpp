@@ -1,6 +1,6 @@
-// tests/test_unit_templet.cpp — UnitTemplet（IsInitNormalJob 謂詞）測試
-// 涵蓋：謂詞全域邊界（0..9..100..255..負數）、HandleCreateUnitReq 閘門接線（class 不在 1..9 → ERR_CREATE_UNIT_11=1289）、
-//       ENTRY_POINT_CREATE_NEW_UNIT 共用閘門、合法 class 9 可建立。
+// tests/test_unit_templet.cpp — UnitTemplet（UnitTempletExists templet 模型＋IsInitNormalJob 謂詞）測試
+// 涵蓋：謂詞全域邊界、enum 模型集合（1..32、100..122 存在；0/33..99/123+/200/255 不存在）、
+//       HandleCreateUnitReq 閘門接線（原碼順序：templet→03、class→1289）、ENTRY_POINT_CREATE_NEW_UNIT 共用閘門。
 #include <cstdio>
 #include <string>
 
@@ -22,6 +22,18 @@ static int g_pass_ut = 0, g_fail_ut = 0;
     if (cond) { g_pass_ut++; } \
     else { g_fail_ut++; std::printf("FAIL: %s (line %d)\n", name, __LINE__); } \
 } while (0)
+
+static void TestUnitTempletExists()
+{
+    // enum 模型（JP INT_INTERNAL）：已宣告可玩職業存在
+    for (int c : {1, 2, 7, 8, 9, 10, 22, 23, 27, 28, 29, 30, 31, 32, 100, 111, 112, 117, 118, 119, 120, 121, 122}) {
+        CHECK(UnitTempletExists(c), "declared class exists");
+    }
+    // 哨兵／未宣告 → 不存在
+    for (int c : {0, -1, 33, 50, 99, 123, 124, 150, 200, 255}) {
+        CHECK(!UnitTempletExists(c), "undeclared class does not exist");
+    }
+}
 
 static void TestIsInitNormalJob()
 {
@@ -46,9 +58,14 @@ static void TestCreateUnitClassGate()
     GameStore store(db);
     GUserRecord gu;
     CHECK(store.GetOrCreateGUser(4242, "unittemplet", gu, err), "seed guser");
-    const struct { int cls; bool ok; } cases[] = {
-        { 1, true }, { 5, true }, { 7, true }, { 8, true }, { 9, true },
-        { 0, false }, { 10, false }, { 100, false }, { 121, false }, { 200, false }, { 255, false }, { -1, false },
+    // ok：建立成功；init1279：templet 存在但非初始普通職業 → 1289；notemplet：無 templet → 28
+    const struct { int cls; int expect; } cases[] = {
+        { 1, NET_OK }, { 5, NET_OK }, { 7, NET_OK }, { 8, NET_OK }, { 9, NET_OK },
+        { 10, ERR_CREATE_UNIT_11 }, { 22, ERR_CREATE_UNIT_11 }, { 31, ERR_CREATE_UNIT_11 }, { 32, ERR_CREATE_UNIT_11 },
+        { 100, ERR_CREATE_UNIT_11 }, { 112, ERR_CREATE_UNIT_11 }, { 121, ERR_CREATE_UNIT_11 }, { 122, ERR_CREATE_UNIT_11 },
+        { 0, ERR_CREATE_UNIT_03 }, { -1, ERR_CREATE_UNIT_03 }, { 33, ERR_CREATE_UNIT_03 },
+        { 50, ERR_CREATE_UNIT_03 }, { 99, ERR_CREATE_UNIT_03 }, { 123, ERR_CREATE_UNIT_03 },
+        { 200, ERR_CREATE_UNIT_03 }, { 255, ERR_CREATE_UNIT_03 },
     };
     int idx = 0;
     for (const auto& tc : cases) {
@@ -56,11 +73,7 @@ static void TestCreateUnitClassGate()
         create_unit::CreateUnitReq req; req.wstrNickName = L"職業" + std::to_wstring(idx); req.iClass = tc.cls;   // 唯一暱稱（DB 冷卻/唯一性）
         create_unit::CreateUnitAck ack;
         CHECK(HandleCreateUnitReq(store, 4242, /*authLevel=*/5, req, ack, err), "handled");
-        if (tc.ok) {
-            CHECK(ack.iOK == NET_OK, "init class accepted");
-        } else {
-            CHECK(ack.iOK == ERR_CREATE_UNIT_11, "non-init class -> ERR_CREATE_UNIT_11");
-        }
+        CHECK(ack.iOK == tc.expect, "class gate result as expected");
         (void)idx;
     }
     // ENTRY_POINT_CREATE_NEW_UNIT 共用同一道閘門
@@ -68,12 +81,13 @@ static void TestCreateUnitClassGate()
         create_unit::CreateNewUnitReq req; req.wstrNickName = L"職業二"; req.iClass = 100; req.iServerGroup = 1;
         create_unit::CreateUnitAck ack;
         CHECK(HandleCreateNewUnitReq(store, 4242, /*authLevel=*/5, req, ack, err), "entry-point handled");
-        CHECK(ack.iOK == ERR_CREATE_UNIT_11, "entry-point non-init class -> ERR_CREATE_UNIT_11");
+        CHECK(ack.iOK == ERR_CREATE_UNIT_11, "entry-point declared non-init class -> ERR_CREATE_UNIT_11");
     }
 }
 
 void RunUnitTempletTestsByRef(int& pass, int& fail)
 {
+    TestUnitTempletExists();
     TestIsInitNormalJob();
     TestCreateUnitClassGate();
     pass += g_pass_ut;

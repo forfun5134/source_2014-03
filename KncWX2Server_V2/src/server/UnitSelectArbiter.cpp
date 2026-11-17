@@ -436,7 +436,12 @@ bool HandleCreateUnitReq(db::GameStore& gameDb, int64_t userUID, int authLevel,
                          create_unit::CreateUnitAck& ack, std::string& err)
 {
     ack = create_unit::CreateUnitAck{};
-    // 原碼（SERV_CHECK_CREATE_UNIT_CLASS）：IsInitNormalJob 驗證（templet 存在性閘門未建模，見 UnitTemplet.h）
+    // 原碼順序：GetUnitTemplet（無 templet → 03）→ IsInitNormalJob（SERV_CHECK_CREATE_UNIT_CLASS → 11）
+    if (!unit_templet::UnitTempletExists(req.iClass)) {
+        ack.iOK = ERR_CREATE_UNIT_03;      // 無 templet（enum 模型；見 UnitTemplet.h—— UnitTemplet.lua 未隨倉庫提供）
+        err.clear();
+        return true;
+    }
     if (!unit_templet::IsInitNormalJob(req.iClass)) {
         ack.iOK = ERR_CREATE_UNIT_11;      // 非初始普通職業（enum 實測＝1289）
         err.clear();

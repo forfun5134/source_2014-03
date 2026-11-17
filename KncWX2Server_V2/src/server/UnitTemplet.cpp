@@ -1,7 +1,16 @@
-// UnitTemplet.cpp — 見 UnitTemplet.h 的對照說明
+// UnitTemplet.cpp — 見 UnitTemplet.h 的對照說明與模型偏差
 #include "UnitTemplet.h"
+#include "UnitClassData.inc"
 
 namespace x2 { namespace unit_templet {
+
+bool UnitTempletExists(int unitClass)
+{
+    for (int i = 0; i < kKnownUnitClassesSize; ++i) {
+        if (kKnownUnitClasses[i] == unitClass) return true;
+    }
+    return false;
+}
 
 bool IsInitNormalJob(int unitClass)
 {

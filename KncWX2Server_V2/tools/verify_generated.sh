@@ -6,7 +6,8 @@ cd "$(dirname "$0")/.."
 
 tmp="$(mktemp -d)"
 for f in ExpTableData.inc StatTableData.inc StringFilterData.inc \
-         PvpNpcNamesJP.inc PvpNpcNamesTW.inc PvpNpcNamesEU.inc PvpNpcNamesCN.inc PvpNpcNamesUS.inc; do
+         PvpNpcNamesJP.inc PvpNpcNamesTW.inc PvpNpcNamesEU.inc PvpNpcNamesCN.inc PvpNpcNamesUS.inc \
+         UnitClassData.inc; do
     cp "src/server/$f" "$tmp/$f"
 done
 
@@ -14,10 +15,12 @@ python3 tools/gen_exp_table.py >/dev/null
 python3 tools/gen_stat_table.py >/dev/null
 python3 tools/gen_string_filter.py >/dev/null
 python3 tools/gen_pvp_npc_names.py >/dev/null
+python3 tools/gen_unit_classes.py >/dev/null
 
 ok=1
 for f in ExpTableData.inc StatTableData.inc StringFilterData.inc \
-         PvpNpcNamesJP.inc PvpNpcNamesTW.inc PvpNpcNamesEU.inc PvpNpcNamesCN.inc PvpNpcNamesUS.inc; do
+         PvpNpcNamesJP.inc PvpNpcNamesTW.inc PvpNpcNamesEU.inc PvpNpcNamesCN.inc PvpNpcNamesUS.inc \
+         UnitClassData.inc; do
     if ! cmp -s "$tmp/$f" "src/server/$f"; then
         echo "DRIFT: src/server/$f 與產生器輸出不一致（請重跑 python3 tools/gen_*.py 並提交）" >&2
         ok=0
