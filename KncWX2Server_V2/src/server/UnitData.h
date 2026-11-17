@@ -167,6 +167,35 @@ struct BuffInfo
     int64_t buffEndTime = 0;                  // __int64
 };
 
+
+struct UserSkillData                      // SERV_SKILL_PAGE_SYSTEM（KUserSkillData）
+{
+    int16_t skillID = 0;                  // short
+    uint8_t skillLevel = 0;               // UCHAR
+    uint8_t skillCSPoint = 0;             // UCHAR
+};
+
+struct UserSkillPageData
+{
+    static constexpr int kEquippedSkillSlotCount = 4;
+    SkillData equippedSkill[kEquippedSkillSlotCount];
+    SkillData equippedSkillSlotB[kEquippedSkillSlotCount];
+    uint16_t usSkillPoint = 0;            // USHORT
+    uint16_t usCashSkillPoint = 0;        // USHORT
+    std::vector<UserSkillData> userSkillData;
+};
+
+struct RelationshipInfo               // SERV_RELATIONSHIP_SYSTEM（KRelationshipInfo）
+{
+    int8_t  relationshipType = 0;         // char
+    int64_t otherUnitUID = 0;             // UidType
+    std::wstring otherNickName;
+    std::wstring loveWord;
+    int64_t date = 0;                     // __int64
+    int64_t lastReward = 0;               // __int64
+    int8_t  rewardTitleType = 0;          // char
+};
+
 struct UnitInfo
 {
     int64_t ownerUserUID = 0;                 // UidType
@@ -235,6 +264,12 @@ bool PutSkillData(Serializer& ks, const SkillData& v);
 bool GetSkillData(Serializer& ks, SkillData& v);
 bool PutUnitSkillData(Serializer& ks, const UnitSkillData& v);
 bool GetUnitSkillData(Serializer& ks, UnitSkillData& v);
+bool PutUserSkillData(Serializer& ks, const UserSkillData& v);
+bool GetUserSkillData(Serializer& ks, UserSkillData& v);
+bool PutUserSkillPageData(Serializer& ks, const UserSkillPageData& v);
+bool GetUserSkillPageData(Serializer& ks, UserSkillPageData& v);
+bool PutRelationshipInfo(Serializer& ks, const RelationshipInfo& v);
+bool GetRelationshipInfo(Serializer& ks, RelationshipInfo& v);
 bool PutUserGuildInfo(Serializer& ks, const UserGuildInfo& v);
 bool GetUserGuildInfo(Serializer& ks, UserGuildInfo& v);
 bool PutLastPositionInfo(Serializer& ks, const LastPositionInfo& v);

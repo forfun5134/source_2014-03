@@ -25,7 +25,7 @@
 
 `src/server/SelectUnitProtocol.{h,cpp}`、`src/server/UnitSelectArbiter.{h,cpp}`、`tests/test_select_unit.cpp` 新增：JP INT_INTERNAL（`SERV_SELECT_UNIT_PACKET_DIVISION` 定義）下的 `EGS_SELECT_UNIT_REQ`（{UidType}，無 CODE_EVENT/GLOBAL_EVENT_TABLE 欄位）與收尾 `EGS_SELECT_UNIT_ACK`（{int iOK}）線路 codec（golden bytes 自洽）+ 決策層：unit 不存在/已刪除→ERR_SELECT_UNIT_00(35)、歸屬錯誤→ERR_SELECT_UNIT_07(1081，編譯實測)、DB 錯誤→ERR_SELECT_UNIT_05、二級密碼未驗證（bool 參數，V2 尚無帳號二級服務）→ERR_VERIFY_21(578，編譯實測)、成功→NET_OK + RecordUnitLogin。
 
-⚠ 誠實聲明：**SELECT_UNIT_1_NOT…5_NOT（KUnitInfo/背包/任務/寵物等，約 20 個巢狀型別）未移植**；成功路徑目前只回 `EGS_SELECT_UNIT_ACK{NET_OK}`，真實客戶端無法進大廳。Golden bytes 未對原 SDK 實機驗證。
+⚠ 誠實聲明（已被 §0e 部分取代）：**SELECT_UNIT_2_NOT…5_NOT** 未移植；`SELECT_UNIT_1_NOT` 已移植（codec+組裝，§0e），上一版「成功路徑只回收尾 ACK」不再成立。Golden bytes 未對原 SDK 實機驗證。
 
 ## 0d. 2026-11-17 快照（UnitData KUnitInfo 子系列 + Login 線路訂正）
 
@@ -34,6 +34,18 @@
 **UnitData**：`src/server/UnitData.{h,cpp}`、`tests/test_unit_data.cpp` 新增：KUnitInfo（JP INT_INTERNAL 組合）及其巢狀型別的 wire codec——KStat、KSkillData、KUnitSkillData（含 EQUIPPED_SKILL_SLOT_COUNT=4、GUILD_SKILL_TEST guildPassiveSkill、SERV_SKILL_NOTE skillNote、SERV_SKILL_PAGE_SYSTEM）、KItemAttributeEnchantInfo、KItemInfo（SERV_ITEM_OPTION_DATA_SIZE→vector<int>、SERV_NEW_ITEM_SYSTEM_2013_05→vector<int>+cItemState、SERV_BATTLE_FIELD_BOSS→expandedSocketNum）、KInventoryItemInfo、KDungeonClearInfo、KTCClearInfo、KUserGuildInfo、KLastPositionInfo（SERV_BATTLE_FIELD_SYSTEM+BOSS ignoreLastTouch）、KBuffBehaviorFactor/KBuffFinalizerFactor/KBuffIdentity/KBuffFactor/KBuffInfo（**KBuffFactor 不序列化 m_uidMesGameUnit/m_bIsMesGameUnitNpc**，與原 PUT 一致，有位元組長度斷言保護）、UnitInfo 完整結構（map<int,…> 三組、vector<KBuffInfo>、SERV_PVP_NEW_SYSTEM+SERV_2012_PVP_SEASON2 欄位、SERV_TITLE_DATA_SIZE int titleID、GUILD_TEST userGuildInfo）。容器格式：DWORD 數量前綴 + 元素，map 元素 = [first][second]（tagging=false）。
 
 ⚠ 誠實聲明：golden bytes 為自洽佈局，**未對原 SDK 實機驗證**；UnitInfo 結構已有但 SELECT_UNIT_1_NOT…5_NOT 封包本身與資料載入管線未實作；更換巨集組合佈局即變。
+
+## 0e. 2026-11-17 快照（SELECT_UNIT_1_NOT 移植）
+
+**WireHelpers.h**（新增，header-only）：`x2::detail::Put/GetCountPrefixVec/Map` 共享模板——DWORD 數量前綴 + 元素，map 走 key functor（固定 `map<int32_t,…>` 與任意鍵皆可），Get 側有 65536 DoS guard。UnitData.cpp 已重構改用；`x2::Serializer` 需全限定（anonymous namespace 先前踩過）。
+
+**UnitData 擴充**：`UserSkillData`（short skillID / UCHAR skillLevel / UCHAR skillCSPoint）、`UserSkillPageData`（EQUIPPED_SKILL_SLOT_COUNT=4 的 active/passive SkillData + uint16 usSkillPoint/usCashSkillPoint + vector<UserSkillData>）、`RelationshipInfo`（char relationshipType / int64 otherUnitUID / wstr×2 / int64 date / int64 lastReward / char rewardTitleType）——對應原 `KUserSkillData`/`KUserSkillPageData`/`KRelationshipInfo`（CommonPacket.cpp 機讀）。
+
+**SelectUnitNot1**（`SelectUnitProtocol.{h,cpp}`，事件 ID 42）：`int32 iOK → KUnitInfo → wstr unitCreateDate(SERV_CHAR_LOG) → int32 realDataED(SERV_LOGOUT_ED_CHECK) → wstr unitLastLoginDate(SERV_DAILY_CHAR_FIRST_SELECT) → map<int32,int32> inventorySlotSize → map<int64,InventoryItemInfo> items → int32 iNumResurrectionStone → (AP_RESTONE) int32 iNumAutoPaymentResStone + wstr autoPayResStoneLastDate → (SKILL_PAGE_SYSTEM) vector<UserSkillPageData> → vector<int16> vecSkillUnsealed → (SERV_SKILL_NOTE) int8 skillNoteMaxPageNum + map<int8,int32> mapSkillNote → (RELATIONSHIP_SYSTEM) RelationshipInfo`。Put 順序機讀自 CommonPacket.cpp `KEGS_SELECT_UNIT_1_NOT`（SERIALIZE_DEFINE_PUT）。
+
+**組裝路徑**：`BuildSelectUnitNot1(userUID, authLevel, GUnitRecord, out)`（UnitSelectArbiter）由 V2 game DB 的 gunit 表組裝——level/exp/win/lose/stat/lastPos.mapID(←lastPosition)/nickname/regDate/lastDate 有真實資料源；**items/inventorySlotSize/dungeonClear/tcClear/spirit/rating/ED/resStone/skillPages 無對應表，一律填空容器/0/單一全預設技能頁（pages=1/1，與 KUnitSkillData 一致），這些值不代表角色實際狀態，不得當真**。`HandleSelectUnitReq` 成功路徑新增 outNot1/authLevel 參數（二級密碼閘門之後）。迴路整合測試：server 端成功時**先送 1_NOT(42) 再送收尾 ACK**（對齊原 `SendSelectUnitACK` 次序），client 端先收 1_NOT 再收 ACK。測試自 524 → **557 passed / 0 failed**（新增 Not1 codec golden roundtrip + gunit→Not1 建構 + 迴路 1_NOT 順序斷言）。
+
+⚠ 誠實聲明：golden bytes 為自洽佈局，**未對原 SDK 實機驗證**；SELECT_UNIT **2_NOT…5_NOT 與 EGS_SELECT_UNIT_ACK 未移植**；1_NOT 中無資料來源的欄位全為佔位值（見上）；更換巨集組合佈局即變。
 
 ## 0. 一句話現況
 
@@ -326,7 +338,7 @@ V2 目前**原樣保留**協議所需的密碼學直譯，這些本身**不符�
 6. 效能與容量測試；記憶體/句柄洩漏基線（原版以 VLD 除錯，V2 無對應）。
 7. `LoadINIFile`、設定檔格式與部署工具（原 `ReleaseTool`/`.bat` 流程）。
 8. EventIDs 以外的大型表（道具/技能/副本資料）從 `X2/dat/Script` 的轉換管道。
-9. `SELECT_UNIT` 的 REQ/收尾 ACK + 決策層已完成（§0c）；`SELECT_UNIT_1_NOT…5_NOT` 分片與 KUnitInfo 載入管線未開始。Login 切片打通到 SELECT_UNIT 決策為止（未載入角色資料）。
+9. `SELECT_UNIT` 的 REQ/收尾 ACK + 決策層已完成（§0c）；`SELECT_UNIT_1_NOT` codec + 組裝（gunit 表 → Not1，缺資料項佔位）已完成（§0e）；`SELECT_UNIT_2_NOT…5_NOT` 分片與完整角色資料載入管線未開始。Login 切片打通到 SELECT_UNIT_1_NOT 為止（items/任務/寵物/ED/rating 等無資料來源，值為佔位）。
 11. GDenyOption（社群拒絕選項）／GResurrectionStoneCnt／角色技能與任務衛星表未實作；帳號→角色建立的完整 `gup_create_unit` 副作用不完整。
 10. Wire 相容：Login 切片 codec 只有自洽 golden bytes，**缺原 SDK 實機對照向量**（見 §13）。
 

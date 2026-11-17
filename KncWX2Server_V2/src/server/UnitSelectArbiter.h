@@ -32,10 +32,23 @@ namespace x2 { namespace select_unit {
 
 // 成功時回傳 NET_OK；失敗回傳對應 NetError；DB 錯誤訊息寫入 err（僅伺服器側用）。
 // outUnit（可為 nullptr）：成功時帶出已更新 LoginCount 的角色記錄。
+// outNot1（可為 nullptr）：成功時填入 SELECT_UNIT_1_NOT 的最小合法內容（見 BuildSelectUnitNot1）；
+//   失敗時不動。呼叫端應「先送 1_NOT，再送收尾 ACK」（對照原版 SendSelectUnitACK 的次序）。
 int32_t HandleSelectUnitReq(db::GameStore& gameDb, int64_t userUID, const SelectUnitReq& req,
                             SelectUnitAck& ack, std::string& err,
                             bool secondSecurityOk = true,
-                            db::GUnitRecord* outUnit = nullptr);
+                            db::GUnitRecord* outUnit = nullptr,
+                            SelectUnitNot1* outNot1 = nullptr,
+                            int authLevel = 0);
+
+// 由 GUnitRecord 組裝 SELECT_UNIT_1_NOT（成功路徑的角色資料分片，第一手資料）。
+// 誠實說明：V2 game DB 僅有 gunit 一表可用——items/quests/titles/resStone/spirit/rating 等
+// 無資料來源，一律填 0/空容器；該值「不代表」角色實際狀態，僅為格式完整的佔位。
+// unitCreateDate=regDate、unitLastLoginDate=lastDate、lastPos.mapID=lastPosition、
+// Stat ← gunit 的 BaseHP/Atk*/Def*、win/lose ← GUnit.Win/Lose、exp/level ← GUnit。
+// vecUserSkillPageData 填一頁全預設資料（與 unitSkillData pages=1/1 一致）。
+void BuildSelectUnitNot1(int64_t userUID, int authLevel, const db::GUnitRecord& unit,
+                         SelectUnitNot1& out);
 
 } // namespace select_unit
 } // namespace x2

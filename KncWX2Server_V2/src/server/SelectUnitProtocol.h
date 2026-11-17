@@ -18,6 +18,11 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
+#include <vector>
+#include <map>
+
+#include "UnitData.h"
 
 namespace x2 { class Serializer; }
 
@@ -33,10 +38,42 @@ struct SelectUnitAck   // SERV_SELECT_UNIT_PACKET_DIVISION 下的收尾 ACK
     int32_t iOK = 0;      // NetError（NET_OK=0）
 };
 
+// EGS_SELECT_UNIT_1_NOT（服務端 → 客戶端）：角色本體 + 背包/技能進度分片之首。
+// JP INT_INTERNAL（SERV_SELECT_UNIT_PACKET_DIVISION、SERV_CHAR_LOG、SERV_LOGOUT_ED_CHECK、
+// SERV_DAILY_CHAR_FIRST_SELECT、SERV_SKILL_PAGE_SYSTEM、SERV_SKILL_NOTE、
+// AP_RESTONE、SERV_RELATIONSHIP_SYSTEM 皆已定義；SERV_NEW_UNIT_TRADE_LIMIT 未定義）
+// PUT 順序機讀自 CommonPacket.cpp（2026-11-17）：
+//   iOK, kUnitInfo, wstrUnitCreateDate, iRealDataED, wstrUnitLastLoginDate,
+//   mapInventorySlotSize<int,int>, mapItem<UidType,KInventoryItemInfo>, iNumResurrectionStone,
+//   iNumAutoPaymentResStone, wstrAutoPayResStoneLastDate, vecUserSkillPageData, vecSkillUnsealed<short>,
+//   cSkillNoteMaxPageNum, mapSkillNote<char,int>, kRelationshipInfo
+// 事件 ID：EGS_SELECT_UNIT_1_NOT = 42。
+// ⚠ 自洽 golden bytes；未對原 SDK 實機驗證。
+struct SelectUnitNot1
+{
+    int32_t iOK = 0;
+    unit::UnitInfo unitInfo;
+    std::wstring unitCreateDate;                    // SERV_CHAR_LOG（原 wstring）
+    int32_t realDataED = 0;                         // SERV_LOGOUT_ED_CHECK（int）
+    std::wstring unitLastLoginDate;                 // SERV_DAILY_CHAR_FIRST_SELECT
+    std::map<int32_t, int32_t> inventorySlotSize;   // map<int,int>
+    std::map<int64_t, unit::InventoryItemInfo> items; // map<UidType,KInventoryItemInfo>
+    int32_t numResurrectionStone = 0;               // int
+    int32_t numAutoPaymentResStone = 0;             // AP_RESTONE（int）
+    std::wstring autoPayResStoneLastDate;           // AP_RESTONE（wstring）
+    std::vector<unit::UserSkillPageData> vecUserSkillPageData;  // SERV_SKILL_PAGE_SYSTEM
+    std::vector<int16_t> vecSkillUnsealed;          // vector<short>
+    int8_t skillNoteMaxPageNum = 0;                 // SERV_SKILL_NOTE（char）
+    std::map<int8_t, int32_t> mapSkillNote;         // SERV_SKILL_NOTE（map<char,int>，char key eTAG_CHAR）
+    unit::RelationshipInfo relationshipInfo;        // SERV_RELATIONSHIP_SYSTEM
+};
+
 bool PutSelectUnitReq(Serializer& ks, const SelectUnitReq& v);
 bool GetSelectUnitReq(Serializer& ks, SelectUnitReq& v);
 bool PutSelectUnitAck(Serializer& ks, const SelectUnitAck& v);
 bool GetSelectUnitAck(Serializer& ks, SelectUnitAck& v);
+bool PutSelectUnitNot1(Serializer& ks, const SelectUnitNot1& v);
+bool GetSelectUnitNot1(Serializer& ks, SelectUnitNot1& v);
 
 } // namespace select_unit
 } // namespace x2

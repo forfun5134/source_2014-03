@@ -62,6 +62,7 @@
     <ClInclude Include="src\server\SelectUnitProtocol.h"><Filter>server</Filter></ClInclude>
     <ClInclude Include="src\server\UnitSelectArbiter.h"><Filter>server</Filter></ClInclude>
     <ClInclude Include="src\server\UnitData.h"><Filter>server</Filter></ClInclude>
+    <ClInclude Include="src\server\WireHelpers.h"><Filter>server</Filter></ClInclude>
     <ClInclude Include="src\core\NetError.h"><Filter>core</Filter></ClInclude>
     <ClInclude Include="src\core\SerBuffer.h"><Filter>core</Filter></ClInclude>
     <ClInclude Include="src\core\Serializer.h"><Filter>core</Filter></ClInclude>

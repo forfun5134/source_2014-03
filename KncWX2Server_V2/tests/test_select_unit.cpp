@@ -42,6 +42,7 @@ static int g_pass_sel = 0, g_fail_sel = 0;
 
 static const uint16_t kSelectUnitReqID = static_cast<uint16_t>(EventID::EGS_SELECT_UNIT_REQ);
 static const uint16_t kSelectUnitAckID = static_cast<uint16_t>(EventID::EGS_SELECT_UNIT_ACK);
+static const uint16_t kSelectUnit1NotID = static_cast<uint16_t>(EventID::EGS_SELECT_UNIT_1_NOT);
 static const uint16_t kConnectReqID = static_cast<uint16_t>(EventID::EGS_CONNECT_REQ);
 static const uint16_t kConnectAckID = static_cast<uint16_t>(EventID::EGS_CONNECT_ACK);
 static const uint16_t kVerifyReqID  = static_cast<uint16_t>(EventID::EGS_VERIFY_ACCOUNT_REQ);
@@ -174,6 +175,102 @@ static void TestUnitSelectArbiterDecisions()
     CHECK(rc == ERR_SELECT_UNIT_07, "zero unitUID -> ERR_SELECT_UNIT_07");
 }
 
+static void TestSelectUnitNot1Codec()
+{
+    SelectUnitNot1 v;
+    v.iOK = NET_OK;
+    v.unitInfo.ownerUserUID = 0x1020304050607080LL;
+    v.unitInfo.authLevel = 3;
+    v.unitInfo.unitUID = 0x7766554433221100LL;
+    v.unitInfo.unitClass = 2;
+    v.unitInfo.nickName = L"阿斯特雷亞";
+    v.unitInfo.level = 42;
+    v.unitInfo.exp = 123456;
+    v.unitInfo.stat = { 500, 60, 70, 80, 90 };
+    v.unitInfo.gameStat = v.unitInfo.stat;
+    v.unitInfo.lastPos = { 20000, 1, 30000, false };
+    v.unitInfo.win = 10;
+    v.unitInfo.lose = 4;
+    v.unitInfo.unitSkillData.equippedSkill[0] = { 10001, 16 };
+    v.unitInfo.unitSkillData.activeSkillPagesNumber = 2;
+    v.unitInfo.unitSkillData.theNumberOfSkillPagesAvailable = 3;
+    v.unitCreateDate = L"2026-11-01 10:00:00";
+    v.realDataED = 123;
+    v.unitLastLoginDate = L"2026-11-17 08:00:00";
+    v.inventorySlotSize[1] = 60;
+    v.inventorySlotSize[2] = 30;
+    v.items[0x1122334455667788LL].itemUID = 0x1122334455667788LL;
+    v.items[0x1122334455667788LL].slotCategory = 1;
+    v.items[0x1122334455667788LL].slotID = 10;
+    v.items[0x1122334455667788LL].itemInfo.itemID = 777;
+    v.numResurrectionStone = 5;
+    v.numAutoPaymentResStone = 2;
+    v.autoPayResStoneLastDate = L"2026-12-01 00:00:00";
+    {
+        unit::UserSkillPageData page;
+        page.usSkillPoint = 10;
+        page.usCashSkillPoint = 3;
+        page.userSkillData.push_back({ 10001, 16, 2 });
+        v.vecUserSkillPageData.push_back(page);
+    }
+    v.vecSkillUnsealed = { 10001, 10002 };
+    v.skillNoteMaxPageNum = 4;
+    v.mapSkillNote[1] = 1001;
+    v.relationshipInfo = { 2, 0x0BADCAFE12345678LL, L"戀人", L"甜蜜宣言", 999, 111, 1 };
+
+    SerBuffer buf = PutPayload([&v](Serializer& s) { return PutSelectUnitNot1(s, v); });
+    CHECK(buf.GetLength() > 0, "not1 encodes");
+
+    Serializer ks2;
+    SerBuffer tmp = buf;
+    SelectUnitNot1 out;
+    CHECK(ks2.BeginReading(&tmp), "not1 begin read");
+    CHECK(GetSelectUnitNot1(ks2, out), "not1 decodes");
+    ks2.EndReading();
+    CHECK(out.iOK == NET_OK, "not1 iOK rt");
+    CHECK(out.unitInfo.unitUID == v.unitInfo.unitUID && out.unitInfo.nickName == L"阿斯特雷亞", "not1 unit rt");
+    CHECK(out.unitInfo.level == 42 && out.unitInfo.stat.atkMagic == 70 && out.unitInfo.gameStat.baseHP == 500, "not1 stat rt");
+    CHECK(out.unitInfo.lastPos.mapID == 20000 && out.unitInfo.win == 10 && out.unitInfo.lose == 4, "not1 lastpos/winlose rt");
+    CHECK(out.unitInfo.unitSkillData.equippedSkill[0].skillID == 10001 && out.unitInfo.unitSkillData.theNumberOfSkillPagesAvailable == 3, "not1 skill rt");
+    CHECK(out.unitCreateDate == L"2026-11-01 10:00:00" && out.unitLastLoginDate == L"2026-11-17 08:00:00" && out.realDataED == 123, "not1 dates/ED rt");
+    CHECK(out.inventorySlotSize.size() == 2 && out.inventorySlotSize[1] == 60 && out.inventorySlotSize[2] == 30, "not1 inv slot map rt");
+    CHECK(out.items.size() == 1 && out.items.begin()->second.itemInfo.itemID == 777, "not1 items map rt");
+    CHECK(out.numResurrectionStone == 5 && out.numAutoPaymentResStone == 2 && out.autoPayResStoneLastDate == L"2026-12-01 00:00:00", "not1 restone rt");
+    CHECK(out.vecUserSkillPageData.size() == 1 && out.vecUserSkillPageData[0].userSkillData.size() == 1 &&
+          out.vecUserSkillPageData[0].userSkillData[0].skillCSPoint == 2 && out.vecUserSkillPageData[0].usSkillPoint == 10, "not1 skill page rt");
+    CHECK(out.vecSkillUnsealed == std::vector<int16_t>({ 10001, 10002 }), "not1 unsealed rt");
+    CHECK(out.skillNoteMaxPageNum == 4 && out.mapSkillNote.size() == 1 && out.mapSkillNote[1] == 1001, "not1 skill note rt");
+    CHECK(out.relationshipInfo.relationshipType == 2 && out.relationshipInfo.otherUnitUID == 0x0BADCAFE12345678LL &&
+          out.relationshipInfo.otherNickName == L"戀人" && out.relationshipInfo.date == 999 && out.relationshipInfo.rewardTitleType == 1, "not1 relationship rt");
+}
+
+static void TestBuildSelectUnitNot1FromGUnit()
+{
+    Database db;
+    std::string err;
+    int64_t unitUID = 0;
+    CHECK(SeedGameDb(db, err, unitUID), "seed game db");
+    GameStore store(db);
+
+    SelectUnitReq req;
+    req.unitUID = unitUID;
+    SelectUnitAck ack;
+    SelectUnitNot1 not1;
+    int rc = HandleSelectUnitReq(store, 777, req, ack, err, /*secondSecurityOk=*/true, /*outUnit=*/nullptr, &not1, /*authLevel=*/5);
+    CHECK(rc == NET_OK, "select ok with outNot1");
+    CHECK(not1.iOK == NET_OK, "not1 iOK");
+    CHECK(not1.unitInfo.unitUID == unitUID, "not1 carries unitUID");
+    CHECK(not1.unitInfo.ownerUserUID == 777, "not1 ownerUserUID");
+    CHECK(not1.unitInfo.authLevel == 5, "not1 authLevel from account");
+    CHECK(not1.unitInfo.nickName == L"選擇測試", "not1 nickname utf8->wide");
+    CHECK(not1.unitInfo.level == 1 && not1.unitInfo.exp == 0, "not1 level/exp from gunit");
+    CHECK(not1.unitInfo.stat.baseHP == 0 && not1.unitInfo.lastPos.mapID == 20000, "not1 stat/lastpos");
+    CHECK(!not1.unitCreateDate.empty() && not1.unitCreateDate == not1.unitLastLoginDate, "not1 dates filled from gunit");
+    CHECK(not1.vecUserSkillPageData.size() == 1, "not1 one default skill page");
+    // 空資料誠實佔位
+    CHECK(not1.items.empty() && not1.inventorySlotSize.empty() && not1.numResurrectionStone == 0, "not1 no fabricated items/stones");
+}
+
 // ---- loopback：CONNECT → VERIFY → SELECT_UNIT（雙庫聯動）----
 static void TestSelectUnitLoopback()
 {
@@ -285,7 +382,12 @@ static void TestSelectUnitLoopback()
                 if (!GetSelectUnitReq(ks, req)) return;
                 ks.EndReading();
                 SelectUnitAck ack;
-                HandleSelectUnitReq(gameStore, seenUserUID.load(), req, ack, err);
+                SelectUnitNot1 not1;
+                HandleSelectUnitReq(gameStore, seenUserUID.load(), req, ack, err, true, nullptr, &not1, 5);
+                if (ack.iOK == NET_OK) {
+                    SerBuffer p1 = PutPayload([&not1](Serializer& s2) { return PutSelectUnitNot1(s2, not1); });
+                    if (!srv.SendEvent(MakeEvent(kSelectUnit1NotID, p1))) return;
+                }
                 SerBuffer payload = PutPayload([&ack](Serializer& s) { return PutSelectUnitAck(s, ack); });
                 if (!srv.SendEvent(MakeEvent(kSelectUnitAckID, payload))) return;
             }
@@ -340,6 +442,16 @@ static void TestSelectUnitLoopback()
         req.unitUID = unitUID;
         SerBuffer payload = PutPayload([&req](Serializer& s) { return PutSelectUnitReq(s, req); });
         CHECK(client.SendEvent(MakeEvent(kSelectUnitReqID, payload)), "select unit req (own) sent");
+        // 先收 1_NOT（角色本體分片），再收收尾 ACK（原版 SendSelectUnitACK 次序：1_NOT…5_NOT → ACK）
+        Event notEv;
+        CHECK(client.RecvEvent(notEv, 5000) == Session::RecvResult::Event, "select 1_NOT received");
+        CHECK(notEv.eventID == kSelectUnit1NotID, "select 1_NOT id == 42");
+        SelectUnitNot1 not1;
+        Serializer ksNot;
+        CHECK(ksNot.BeginReading(&notEv.payload), "read 1_NOT");
+        CHECK(GetSelectUnitNot1(ksNot, not1), "decode 1_NOT");
+        ksNot.EndReading();
+        CHECK(not1.iOK == NET_OK && not1.unitInfo.unitUID == unitUID && not1.unitInfo.nickName == L"選擇切片", "1_NOT carries selected unit");
         Event ackEv;
         CHECK(client.RecvEvent(ackEv, 5000) == Session::RecvResult::Event, "select ack (own) received");
         CHECK(ackEv.eventID == kSelectUnitAckID, "select ack (own) id");
@@ -406,6 +518,8 @@ static void TestSelectUnitLoopback()
 void RunSelectUnitTestsByRef(int& pass, int& fail)
 {
     TestSelectUnitCodec();
+    TestSelectUnitNot1Codec();
+    TestBuildSelectUnitNot1FromGUnit();
     TestUnitSelectArbiterDecisions();
     TestSelectUnitLoopback();
     pass += g_pass_sel;

@@ -1,61 +1,11 @@
 // UnitData.cpp — 見 UnitData.h；PUT 順序機讀自 CommonPacket.cpp（2026-11-17）
 #include "UnitData.h"
 #include "../core/Serializer.h"
+#include "WireHelpers.h"
 #include <utility>
 #include <map>
 #include <vector>
 
-
-namespace {
-
-template <typename T, typename PutFn>
-static bool PutVec(x2::Serializer& ks, const std::vector<T>& v, PutFn&& putOne)
-{
-    if (!ks.Put(static_cast<uint32_t>(v.size()))) return false;   // DWORD 數量前綴
-    for (const auto& e : v) if (!putOne(ks, e)) return false;
-    return true;
-}
-
-template <typename T, typename GetFn>
-static bool GetVec(x2::Serializer& ks, std::vector<T>& v, GetFn&& getOne)
-{
-    uint32_t n = 0;
-    if (!ks.Get(n)) return false;
-    if (n > 65536) return false;                                  // 防禦性上限（DoS guard）
-    v.clear(); v.reserve(n);
-    for (uint32_t i = 0; i < n; ++i) { T e{}; if (!getOne(ks, e)) return false; v.push_back(std::move(e)); }
-    return true;
-}
-
-template <typename V, typename PutVFn>
-static bool PutMap(x2::Serializer& ks, const std::map<int32_t, V>& m, PutVFn&& putV)
-{
-    if (!ks.Put(static_cast<uint32_t>(m.size()))) return false;
-    for (const auto& kv : m) {
-        if (!ks.Put(kv.first)) return false;                      // map 元素 = [first][second]，無 tag/wrapper
-        if (!putV(ks, kv.second)) return false;
-    }
-    return true;
-}
-
-template <typename V, typename GetVFn>
-static bool GetMap(x2::Serializer& ks, std::map<int32_t, V>& m, GetVFn&& getV)
-{
-    uint32_t n = 0;
-    if (!ks.Get(n)) return false;
-    if (n > 65536) return false;
-    m.clear();
-    for (uint32_t i = 0; i < n; ++i) {
-        int32_t key = 0;
-        if (!ks.Get(key)) return false;
-        V val{};
-        if (!getV(ks, val)) return false;
-        m[key] = std::move(val);
-    }
-    return true;
-}
-
-} // namespace
 
 namespace x2 { namespace unit {
 
@@ -73,8 +23,8 @@ bool PutItemInfo(Serializer& ks, const ItemInfo& v)
     if (!(ks.Put(v.itemID) && ks.Put(v.usageType) && ks.Put(v.quantity) &&
           ks.Put(v.endurance) && ks.Put(v.sealData) && ks.Put(v.enchantLevel))) return false;
     if (!PutItemAttributeEnchantInfo(ks, v.attrib)) return false;
-    if (!PutVec(ks, v.itemSocket, [](Serializer& s2, const int32_t& e) { return s2.Put(e); })) return false;   // vector<int>（SERV_ITEM_OPTION_DATA_SIZE）
-    if (!PutVec(ks, v.randomSocket, [](Serializer& s2, const int32_t& e) { return s2.Put(e); })) return false;  // vector<int>（SERV_NEW_ITEM_SYSTEM_2013_05）
+    if (!x2::detail::PutCountPrefixVec(ks, v.itemSocket, [](Serializer& s2, const int32_t& e) { return s2.Put(e); })) return false;   // vector<int>（SERV_ITEM_OPTION_DATA_SIZE）
+    if (!x2::detail::PutCountPrefixVec(ks, v.randomSocket, [](Serializer& s2, const int32_t& e) { return s2.Put(e); })) return false;  // vector<int>（SERV_NEW_ITEM_SYSTEM_2013_05）
     if (!ks.Put(v.itemState)) return false;          // char
     return ks.Put(v.period) && ks.Put(v.expirationDate) && ks.Put(v.expandedSocketNum);  // SERV_BATTLE_FIELD_BOSS
 }
@@ -83,8 +33,8 @@ bool GetItemInfo(Serializer& ks, ItemInfo& v)
     if (!(ks.Get(v.itemID) && ks.Get(v.usageType) && ks.Get(v.quantity) &&
           ks.Get(v.endurance) && ks.Get(v.sealData) && ks.Get(v.enchantLevel))) return false;
     if (!GetItemAttributeEnchantInfo(ks, v.attrib)) return false;
-    if (!GetVec(ks, v.itemSocket, [](Serializer& s2, int32_t& e) { return s2.Get(e); })) return false;
-    if (!GetVec(ks, v.randomSocket, [](Serializer& s2, int32_t& e) { return s2.Get(e); })) return false;
+    if (!x2::detail::GetCountPrefixVec(ks, v.itemSocket, [](Serializer& s2, int32_t& e) { return s2.Get(e); })) return false;
+    if (!x2::detail::GetCountPrefixVec(ks, v.randomSocket, [](Serializer& s2, int32_t& e) { return s2.Get(e); })) return false;
     if (!ks.Get(v.itemState)) return false;
     return ks.Get(v.period) && ks.Get(v.expirationDate) && ks.Get(v.expandedSocketNum);
 }
@@ -150,9 +100,9 @@ bool PutUnitSkillData(Serializer& ks, const UnitSkillData& v)
         if (!PutSkillData(ks, v.equippedSkillSlotB[i])) return false;
     if (!ks.Put(v.skillSlotBEndDate)) return false;       // wstring
     if (!ks.Put(v.skillSlotBExpirationState)) return false;  // char
-    if (!PutVec(ks, v.passiveSkill, [](Serializer& s2, const SkillData& e) { return PutSkillData(s2, e); })) return false;       // vector<KSkillData>
-    if (!PutVec(ks, v.guildPassiveSkill, [](Serializer& s2, const SkillData& e) { return PutSkillData(s2, e); })) return false;   // GUILD_SKILL_TEST
-    if (!PutVec(ks, v.skillNote, [](Serializer& s2, const int32_t& e) { return s2.Put(e); })) return false;                       // SERV_SKILL_NOTE（vector<int>）
+    if (!x2::detail::PutCountPrefixVec(ks, v.passiveSkill, [](Serializer& s2, const SkillData& e) { return PutSkillData(s2, e); })) return false;       // vector<KSkillData>
+    if (!x2::detail::PutCountPrefixVec(ks, v.guildPassiveSkill, [](Serializer& s2, const SkillData& e) { return PutSkillData(s2, e); })) return false;   // GUILD_SKILL_TEST
+    if (!x2::detail::PutCountPrefixVec(ks, v.skillNote, [](Serializer& s2, const int32_t& e) { return s2.Put(e); })) return false;                       // SERV_SKILL_NOTE（vector<int>）
     return ks.Put(v.activeSkillPagesNumber) && ks.Put(v.theNumberOfSkillPagesAvailable);  // SERV_SKILL_PAGE_SYSTEM
 }
 bool GetUnitSkillData(Serializer& ks, UnitSkillData& v)
@@ -163,10 +113,55 @@ bool GetUnitSkillData(Serializer& ks, UnitSkillData& v)
         if (!GetSkillData(ks, v.equippedSkillSlotB[i])) return false;
     if (!ks.Get(v.skillSlotBEndDate)) return false;
     if (!ks.Get(v.skillSlotBExpirationState)) return false;
-    if (!GetVec(ks, v.passiveSkill, [](Serializer& s2, SkillData& e) { return GetSkillData(s2, e); })) return false;
-    if (!GetVec(ks, v.guildPassiveSkill, [](Serializer& s2, SkillData& e) { return GetSkillData(s2, e); })) return false;
-    if (!GetVec(ks, v.skillNote, [](Serializer& s2, int32_t& e) { return s2.Get(e); })) return false;
+    if (!x2::detail::GetCountPrefixVec(ks, v.passiveSkill, [](Serializer& s2, SkillData& e) { return GetSkillData(s2, e); })) return false;
+    if (!x2::detail::GetCountPrefixVec(ks, v.guildPassiveSkill, [](Serializer& s2, SkillData& e) { return GetSkillData(s2, e); })) return false;
+    if (!x2::detail::GetCountPrefixVec(ks, v.skillNote, [](Serializer& s2, int32_t& e) { return s2.Get(e); })) return false;
     return ks.Get(v.activeSkillPagesNumber) && ks.Get(v.theNumberOfSkillPagesAvailable);
+}
+
+bool PutUserSkillData(Serializer& ks, const UserSkillData& v)
+{
+    return ks.Put(v.skillID) && ks.Put(v.skillLevel) && ks.Put(v.skillCSPoint);
+}
+bool GetUserSkillData(Serializer& ks, UserSkillData& v)
+{
+    return ks.Get(v.skillID) && ks.Get(v.skillLevel) && ks.Get(v.skillCSPoint);
+}
+
+bool PutUserSkillPageData(Serializer& ks, const UserSkillPageData& v)
+{
+    for (int i = 0; i < UserSkillPageData::kEquippedSkillSlotCount; ++i)
+        if (!PutSkillData(ks, v.equippedSkill[i])) return false;
+    for (int i = 0; i < UserSkillPageData::kEquippedSkillSlotCount; ++i)
+        if (!PutSkillData(ks, v.equippedSkillSlotB[i])) return false;
+    if (!ks.Put(v.usSkillPoint) || !ks.Put(v.usCashSkillPoint)) return false;
+    return x2::detail::PutCountPrefixVec(ks, v.userSkillData,
+               [](Serializer& s2, const UserSkillData& e) { return PutUserSkillData(s2, e); });
+}
+bool GetUserSkillPageData(Serializer& ks, UserSkillPageData& v)
+{
+    for (int i = 0; i < UserSkillPageData::kEquippedSkillSlotCount; ++i)
+        if (!GetSkillData(ks, v.equippedSkill[i])) return false;
+    for (int i = 0; i < UserSkillPageData::kEquippedSkillSlotCount; ++i)
+        if (!GetSkillData(ks, v.equippedSkillSlotB[i])) return false;
+    if (!ks.Get(v.usSkillPoint) || !ks.Get(v.usCashSkillPoint)) return false;
+    return x2::detail::GetCountPrefixVec(ks, v.userSkillData,
+               [](Serializer& s2, UserSkillData& e) { return GetUserSkillData(s2, e); });
+}
+
+bool PutRelationshipInfo(Serializer& ks, const RelationshipInfo& v)
+{
+    return ks.Put(v.relationshipType) && ks.Put(v.otherUnitUID) &&
+           ks.Put(v.otherNickName) && ks.Put(v.loveWord) &&
+           ks.Put(v.date) && ks.Put(v.lastReward) &&
+           ks.Put(v.rewardTitleType);
+}
+bool GetRelationshipInfo(Serializer& ks, RelationshipInfo& v)
+{
+    return ks.Get(v.relationshipType) && ks.Get(v.otherUnitUID) &&
+           ks.Get(v.otherNickName) && ks.Get(v.loveWord) &&
+           ks.Get(v.date) && ks.Get(v.lastReward) &&
+           ks.Get(v.rewardTitleType);
 }
 
 bool PutUserGuildInfo(Serializer& ks, const UserGuildInfo& v)
@@ -194,23 +189,23 @@ bool GetLastPositionInfo(Serializer& ks, LastPositionInfo& v)
 bool PutBuffBehaviorFactor(Serializer& ks, const BuffBehaviorFactor& v)
 {
     if (!ks.Put(v.uiType)) return false;
-    return PutVec(ks, v.vecValues, [](Serializer& s2, const float& e) { return s2.Put(e); });   // UINT + vector<float>
+    return x2::detail::PutCountPrefixVec(ks, v.vecValues, [](Serializer& s2, const float& e) { return s2.Put(e); });   // UINT + vector<float>
 }
 bool GetBuffBehaviorFactor(Serializer& ks, BuffBehaviorFactor& v)
 {
     if (!ks.Get(v.uiType)) return false;
-    return GetVec(ks, v.vecValues, [](Serializer& s2, float& e) { return s2.Get(e); });
+    return x2::detail::GetCountPrefixVec(ks, v.vecValues, [](Serializer& s2, float& e) { return s2.Get(e); });
 }
 
 bool PutBuffFinalizerFactor(Serializer& ks, const BuffFinalizerFactor& v)
 {
     if (!ks.Put(v.uiType)) return false;
-    return PutVec(ks, v.vecValues, [](Serializer& s2, const float& e) { return s2.Put(e); });
+    return x2::detail::PutCountPrefixVec(ks, v.vecValues, [](Serializer& s2, const float& e) { return s2.Put(e); });
 }
 bool GetBuffFinalizerFactor(Serializer& ks, BuffFinalizerFactor& v)
 {
     if (!ks.Get(v.uiType)) return false;
-    return GetVec(ks, v.vecValues, [](Serializer& s2, float& e) { return s2.Get(e); });
+    return x2::detail::GetCountPrefixVec(ks, v.vecValues, [](Serializer& s2, float& e) { return s2.Get(e); });
 }
 
 bool PutBuffIdentity(Serializer& ks, const BuffIdentity& v)
@@ -225,15 +220,15 @@ bool GetBuffIdentity(Serializer& ks, BuffIdentity& v)
 bool PutBuffFactor(Serializer& ks, const BuffFactor& v)
 {
     // ⚠ 不寫出 m_uidMesGameUnit / m_bIsMesGameUnitNpc（原碼 PUT 如此）
-    if (!PutVec(ks, v.vecBuffBehaviorFactors, [](Serializer& s2, const BuffBehaviorFactor& e) { return PutBuffBehaviorFactor(s2, e); })) return false;
-    if (!PutVec(ks, v.vecBuffFinalizerFactors, [](Serializer& s2, const BuffFinalizerFactor& e) { return PutBuffFinalizerFactor(s2, e); })) return false;
+    if (!x2::detail::PutCountPrefixVec(ks, v.vecBuffBehaviorFactors, [](Serializer& s2, const BuffBehaviorFactor& e) { return PutBuffBehaviorFactor(s2, e); })) return false;
+    if (!x2::detail::PutCountPrefixVec(ks, v.vecBuffFinalizerFactors, [](Serializer& s2, const BuffFinalizerFactor& e) { return PutBuffFinalizerFactor(s2, e); })) return false;
     if (!PutBuffIdentity(ks, v.identity)) return false;
     return ks.Put(v.accumulationMultiplier) && ks.Put(v.accumulationCountNow) && ks.Put(v.factorID);
 }
 bool GetBuffFactor(Serializer& ks, BuffFactor& v)
 {
-    if (!GetVec(ks, v.vecBuffBehaviorFactors, [](Serializer& s2, BuffBehaviorFactor& e) { return GetBuffBehaviorFactor(s2, e); })) return false;
-    if (!GetVec(ks, v.vecBuffFinalizerFactors, [](Serializer& s2, BuffFinalizerFactor& e) { return GetBuffFinalizerFactor(s2, e); })) return false;
+    if (!x2::detail::GetCountPrefixVec(ks, v.vecBuffBehaviorFactors, [](Serializer& s2, BuffBehaviorFactor& e) { return GetBuffBehaviorFactor(s2, e); })) return false;
+    if (!x2::detail::GetCountPrefixVec(ks, v.vecBuffFinalizerFactors, [](Serializer& s2, BuffFinalizerFactor& e) { return GetBuffFinalizerFactor(s2, e); })) return false;
     if (!GetBuffIdentity(ks, v.identity)) return false;
     return ks.Get(v.accumulationMultiplier) && ks.Get(v.accumulationCountNow) && ks.Get(v.factorID);
 }
@@ -266,11 +261,11 @@ bool PutUnitInfo(Serializer& ks, const UnitInfo& v)
     if (!PutStat(ks, v.stat)) return false;
     if (!PutStat(ks, v.gameStat)) return false;
     if (!PutLastPositionInfo(ks, v.lastPos)) return false;               // SERV_BATTLE_FIELD_SYSTEM
-    if (!PutVec(ks, v.buffInfo, [](Serializer& s2, const BuffInfo& e) { return PutBuffInfo(s2, e); })) return false;   // SERV_REFORM_THE_GATE_OF_DARKNESS（vector<KBuffInfo>）
+    if (!x2::detail::PutCountPrefixVec(ks, v.buffInfo, [](Serializer& s2, const BuffInfo& e) { return PutBuffInfo(s2, e); })) return false;   // SERV_REFORM_THE_GATE_OF_DARKNESS（vector<KBuffInfo>）
     if (!(ks.Put(v.win) && ks.Put(v.lose))) return false;
-    if (!PutMap(ks, v.dungeonClear, [](Serializer& s2, const DungeonClearInfo& e) { return PutDungeonClearInfo(s2, e); })) return false;   // map<int,KDungeonClearInfo>
-    if (!PutMap(ks, v.tcClear, [](Serializer& s2, const TCClearInfo& e) { return PutTCClearInfo(s2, e); })) return false;                     // map<int,KTCClearInfo>
-    if (!PutMap(ks, v.equippedItem, [](Serializer& s2, const InventoryItemInfo& e) { return PutInventoryItemInfo(s2, e); })) return false;    // map<int,KInventoryItemInfo>
+    if (!x2::detail::PutCountPrefixMap(ks, v.dungeonClear, [](Serializer& s2, const int32_t& e) { return s2.Put(e); }, [](Serializer& s2, const DungeonClearInfo& e) { return PutDungeonClearInfo(s2, e); })) return false;   // map<int,KDungeonClearInfo>
+    if (!x2::detail::PutCountPrefixMap(ks, v.tcClear, [](Serializer& s2, const int32_t& e) { return s2.Put(e); }, [](Serializer& s2, const TCClearInfo& e) { return PutTCClearInfo(s2, e); })) return false;                     // map<int,KTCClearInfo>
+    if (!x2::detail::PutCountPrefixMap(ks, v.equippedItem, [](Serializer& s2, const int32_t& e) { return s2.Put(e); }, [](Serializer& s2, const InventoryItemInfo& e) { return PutInventoryItemInfo(s2, e); })) return false;    // map<int,KInventoryItemInfo>
     if (!PutUnitSkillData(ks, v.unitSkillData)) return false;
     if (!(ks.Put(v.isParty) && ks.Put(v.spiritMax) && ks.Put(v.spirit) && ks.Put(v.isGameBang))) return false;
     if (!ks.Put(v.titleID)) return false;                                // SERV_TITLE_DATA_SIZE（int）
@@ -292,11 +287,11 @@ bool GetUnitInfo(Serializer& ks, UnitInfo& v)
     if (!GetStat(ks, v.stat)) return false;
     if (!GetStat(ks, v.gameStat)) return false;
     if (!GetLastPositionInfo(ks, v.lastPos)) return false;
-    if (!GetVec(ks, v.buffInfo, [](Serializer& s2, BuffInfo& e) { return GetBuffInfo(s2, e); })) return false;
+    if (!x2::detail::GetCountPrefixVec(ks, v.buffInfo, [](Serializer& s2, BuffInfo& e) { return GetBuffInfo(s2, e); })) return false;
     if (!(ks.Get(v.win) && ks.Get(v.lose))) return false;
-    if (!GetMap(ks, v.dungeonClear, [](Serializer& s2, DungeonClearInfo& e) { return GetDungeonClearInfo(s2, e); })) return false;
-    if (!GetMap(ks, v.tcClear, [](Serializer& s2, TCClearInfo& e) { return GetTCClearInfo(s2, e); })) return false;
-    if (!GetMap(ks, v.equippedItem, [](Serializer& s2, InventoryItemInfo& e) { return GetInventoryItemInfo(s2, e); })) return false;
+    if (!x2::detail::GetCountPrefixMap(ks, v.dungeonClear, [](Serializer& s2, int32_t& e) { return s2.Get(e); }, [](Serializer& s2, DungeonClearInfo& e) { return GetDungeonClearInfo(s2, e); })) return false;
+    if (!x2::detail::GetCountPrefixMap(ks, v.tcClear, [](Serializer& s2, int32_t& e) { return s2.Get(e); }, [](Serializer& s2, TCClearInfo& e) { return GetTCClearInfo(s2, e); })) return false;
+    if (!x2::detail::GetCountPrefixMap(ks, v.equippedItem, [](Serializer& s2, int32_t& e) { return s2.Get(e); }, [](Serializer& s2, InventoryItemInfo& e) { return GetInventoryItemInfo(s2, e); })) return false;
     if (!GetUnitSkillData(ks, v.unitSkillData)) return false;
     if (!(ks.Get(v.isParty) && ks.Get(v.spiritMax) && ks.Get(v.spirit) && ks.Get(v.isGameBang))) return false;
     if (!ks.Get(v.titleID)) return false;
