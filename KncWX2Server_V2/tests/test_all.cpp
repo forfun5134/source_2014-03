@@ -70,6 +70,7 @@ void RunGetSkillTestsByRef(int& pass, int& fail);
 void RunDecideSkillPageTestsByRef(int& pass, int& fail);
 void RunGetNextSkillPageEdTestsByRef(int& pass, int& fail);
 void RunGetNextInventoryEdTestsByRef(int& pass, int& fail);
+void RunGetNextBankEdTestsByRef(int& pass, int& fail);
 void RunDeleteBlacklistTestsByRef(int& pass, int& fail);
 
 static int g_fail = 0, g_pass = 0;
@@ -461,6 +462,7 @@ int main() {
     RunDecideSkillPageTestsByRef(g_pass, g_fail);
     RunGetNextSkillPageEdTestsByRef(g_pass, g_fail);
     RunGetNextInventoryEdTestsByRef(g_pass, g_fail);
+    RunGetNextBankEdTestsByRef(g_pass, g_fail);
     RunDeleteBlacklistTestsByRef(g_pass, g_fail);
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;

@@ -1334,3 +1334,10 @@ V2 目前**原樣保留**協議所需的密碼學直譯，這些本身**不符�
 - 依 `Inventory.cpp` 的啟用巨集還原各地區基礎格數：TW/HK 一般分類 16，其餘 24；特殊分類 TW/HK/CN/TH/US/PH 為 24，其餘 V2 支援地區為 32；六分類上限皆為 56。已擴充格數由 V2 現有 `GetInventorySlotSize` 讀取；其重複列加總偏差見 §0a14。容量檢查優先於費用查詢，因此某些地區可能在查到表格全部階段之前就達上限。
 - 偏差：V2 固定內建目前倉庫 Lua 費用，不載入可變的伺服器資源；使用 DB 持久化快照而非原版在線記憶體狀態，且尚未實作 Field/Room 狀態檢查。缺失、刪除角色或 DB 錯誤回 `ERR_ODBC_01`。此切片不扣 ED、不擴充或寫入背包，也不等同完成購買流程。
 - 驗收：五地區建置及測試 JP 2383、TW 2381、EU 2379、CN 2381、US 2380 passed / 0 failed；涵蓋封包 golden bytes、四階費用、六分類容量限制、地區差異、錯誤與 DB 失敗。
+
+### §0a32 個人倉庫擴充 ED 報價（唯讀）
+
+- 對照 `GSUserInventory.cpp` 的 `EGS_GET_NEXT_BANK_ED_REQ/ACK`（1141/1142），REQ 無欄位，ACK 為 `iOK, iED`。`ST_BANK` 為類別 8；原版以基本 8 格加 DB 擴充格數形成會員等級，無效等級在 `Inventory::Init` 重設為 8 格。依 `EDInventoryExpand.lua`，從 8、16、24、32、40 格升至下一等級所需 ED 為 4M、8M、18M、54M、65M。
+- 保留原版特殊行為：handler 將目前等級（最大 48）誤與白金會員**物品 ID** `CI_BANK_MEMBERSHIP_PLATINUM`（213500）比較，故 48 格不會進入 `_02`，而是取下一等級 `MPB_NONE`、找不到費用並回 `ERR_EXPAND_INVENTORY_ED_03`（1357）。V2 按此實際行為回 `_03`，不將疑似 bug 當成設計意圖改寫。
+- 偏差：固定使用倉庫 Lua 中的費用，未載入可變資源；使用 DB 快照而非在線記憶體，且未實作 Field/Room 狀態檢查。重複 DB 列依現有 V2 加總語義（§0a14）處理；角色不存在、已刪除及 DB 讀取失敗映射 `ERR_ODBC_01`。報價不扣款、不修改倉庫，不包含購買流程。
+- 驗收：JP 2413、TW 2411、EU 2409、CN 2411、US 2410 passed / 0 failed；涵蓋 wire golden bytes、各會員等級、滿級、無效等級回復及 DB 錯誤。
