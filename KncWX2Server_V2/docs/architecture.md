@@ -1347,3 +1347,9 @@ V2 目前**原樣保留**協議所需的密碼學直譯，這些本身**不符�
 - 對照 `GSUserField.cpp` 的 `EGS_OPTION_UPDATE_REQ/ACK`（573/574）。REQ 的 `KFieldOption` 僅有 `short m_sLimitOption`，預設 35；ACK 為 `KPacketOK`（int32）。原 handler 將輸入直接賦給使用者的記憶體選項並回 `NET_OK`，選項驗證與 Field 通知程式均已註解；V2 因此接受任何 int16 值，不猜測只允許 10/25/35。
 - 此切片提供 codec 與操作由呼叫端持有之 session 狀態的決策函式；無 DB 持久化，也尚未接入實際 session 分派、場景或 Field server。使用時必須每個使用者 session 分別持有狀態。wire golden bytes 為 V2 自洽向量，尚未與原 SDK 實機比對。
 - 驗收：JP 2435、TW 2433、EU 2431、CN 2433、US 2432 passed / 0 failed；涵蓋封包及截斷、預設值、session 隔離與非常規輸入。
+
+### §0a34 平均幀率回報（分類切片）
+
+- 對照 `GSUserGameCommon.cpp` 的 `EGS_FRAME_AVERAGE_REQ/ACK`（429/430）；REQ 欄位依序為 `char gameType, int totalFrame, int frameAverage`，ACK 是 `KPacketOK`。平均值為負時先回 `ERR_STATISTICS_00`（327）；非負但類型為 NONE 或未知時回成功、不記統計。PVP/DUNGEON/BATTLE_FIELD（1/2/3）對應統計鍵 0/1/2；依原版區間分為 0–20、21–30、31–40、41–50、51–60、61–70、71–80、81–90、91 以上九桶。`totalFrame` 在原 handler 中未使用，不額外驗證。
+- 偏差與範圍：原版呼叫 `KSIManager.IncreaseCount`；V2 僅回傳可供呼叫端消費的分類結果，尚無統計 sink、session 事件分派或 Field/Room 警告。未宣稱已持久化或實際收集統計。封包 golden bytes 為 V2 自洽向量，尚未與原 SDK 實機比對。
+- 驗收：JP 2509、TW 2507、EU 2505、CN 2507、US 2506 passed / 0 failed；覆蓋 wire、所有桶邊界、三類遊戲、未知類型、負值優先順序及截斷。

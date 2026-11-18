@@ -47,6 +47,7 @@ inline constexpr int ERR_BLACKLIST_04 = 246;  // 黑名單 DB 刪除失敗
 inline constexpr int ERR_BLACKLIST_05 = 247;  // 不能把自己加入黑名單
 inline constexpr int ERR_BLACKLIST_06 = 248;  // 不能從黑名單刪除自己
 inline constexpr int ERR_BLACKLIST_07 = 249;  // 只能加入目前在線的使用者（V2 無在線狀態）
+inline constexpr int ERR_STATISTICS_00 = 327;  // 負的平均幀率
 // ERR_EXPAND_INVENTORY_ED_01..03（1355..1357；原 NetError_def.h enum 機讀值）
 inline constexpr int ERR_EXPAND_INVENTORY_ED_01 = 1355;  // ED 不足
 inline constexpr int ERR_EXPAND_INVENTORY_ED_02 = 1356;  // 背包欄位已達上限
