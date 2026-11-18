@@ -305,6 +305,60 @@ CREATE TABLE gtrainingcenter (
 );
 )SQL";
 
+static const char* kCreateGSkillExpandV14 = R"SQL(
+CREATE TABLE gskillexpand (
+    UnitUID     INTEGER NOT NULL PRIMARY KEY REFERENCES gunit(UnitUID) ON DELETE CASCADE,
+    PageCount   INTEGER NOT NULL DEFAULT 1 CHECK (PageCount >= 1),   -- SKILLPageCNT（缺列 → 視為 1）
+    ActivePage  INTEGER NOT NULL DEFAULT 1 CHECK (ActivePage >= 1)   -- ActivePage（1-based；> PageCount/0 → LoadSkillPageState 修正為 1）
+);
+)SQL";
+
+static const char* kCreateGSkillSlotNewV14 = R"SQL(
+CREATE TABLE gskillslotnew (
+    UnitUID         INTEGER NOT NULL REFERENCES gunit(UnitUID) ON DELETE CASCADE,
+    SkillPageNumber INTEGER NOT NULL DEFAULT 1 CHECK (SkillPageNumber >= 1),   -- iSkillPageNumber
+    Slot01 INTEGER NOT NULL DEFAULT 0,
+    Slot02 INTEGER NOT NULL DEFAULT 0,
+    Slot03 INTEGER NOT NULL DEFAULT 0,
+    Slot04 INTEGER NOT NULL DEFAULT 0,
+    RegDate TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (UnitUID, SkillPageNumber)
+);
+)SQL";
+
+static const char* kCreateGSkillSlot2NewV14 = R"SQL(
+CREATE TABLE gskillslot2new (
+    UnitUID         INTEGER NOT NULL REFERENCES gunit(UnitUID) ON DELETE CASCADE,
+    SkillPageNumber INTEGER NOT NULL DEFAULT 1 CHECK (SkillPageNumber >= 1),
+    Slot01 INTEGER NOT NULL DEFAULT 0,
+    Slot02 INTEGER NOT NULL DEFAULT 0,
+    Slot03 INTEGER NOT NULL DEFAULT 0,
+    Slot04 INTEGER NOT NULL DEFAULT 0,
+    EndDate TEXT NOT NULL DEFAULT '2000-01-01 00:00:00',   -- m_wstrSkillSlotBEndDate（smalldatetime → UTC 文字）
+    RegDate TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (UnitUID, SkillPageNumber)
+);
+)SQL";
+
+static const char* kCreateGSkillUnsealedV14 = R"SQL(
+CREATE TABLE gskillunsealed (
+    UnitUID     INTEGER NOT NULL REFERENCES gunit(UnitUID) ON DELETE CASCADE,
+    SkillID     INTEGER NOT NULL,                          -- 原 short iSkillID
+    RegDate     TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (UnitUID, SkillID)
+);
+)SQL";
+
+static const char* kCreateGSkillCashV14 = R"SQL(
+CREATE TABLE gskillcash (
+    UnitUID     INTEGER NOT NULL PRIMARY KEY REFERENCES gunit(UnitUID) ON DELETE CASCADE,
+    CSPoint     INTEGER NOT NULL DEFAULT 0,                -- m_iCSPoint（原 short）
+    MaxCSPoint  INTEGER NOT NULL DEFAULT 0,                -- m_iMaxCSPoint（原 short）
+    EndDate     TEXT NOT NULL DEFAULT '2000-01-01 00:00:00',   -- m_wstrCSPointEndDate（原 smalldatetime）
+    RegDate     TEXT NOT NULL DEFAULT (datetime('now'))
+);
+)SQL";
+
 static const char* kCreateGItemWishListV13 = R"SQL(
 CREATE TABLE gitemwishlist (
     UserUID INTEGER NOT NULL REFERENCES guser(UserUID) ON DELETE CASCADE ON UPDATE CASCADE,  -- 原 FK→GUser CASCADE
@@ -472,14 +526,59 @@ bool ApplyGameMigrations(Database& db, std::string& err)
             return false;
         }
     }
+    if (v < 14) {
+        // §0a23：2013 SERV_SKILL_PAGE_SYSTEM 反推。gskill 擴充欄位；既有列 SkillLevel 補 1（= 已學基礎技能語意）、
+        //   頁碼 1、CSPoint 0。gskillslot（2008 單頁 Slot01..03）→ gskillslotnew 第 1 頁遷移（Slot04=0）；
+        //   gskillexpand 由 gskill 既有角色回填 1/1。Legacy gskill/gskillslot 保留（否則舊測試/外部工具噴掉），不再寫入。
+        const char* const alters[] = {
+            "ALTER TABLE gskill ADD COLUMN SkillLevel INTEGER NOT NULL DEFAULT 1;",
+            "ALTER TABLE gskill ADD COLUMN SkillCSPoint INTEGER NOT NULL DEFAULT 0;",
+            "ALTER TABLE gskill ADD COLUMN SkillPageNumber INTEGER NOT NULL DEFAULT 1;"
+        };
+        for (const char* alter : alters) {
+            if (!db.Exec(alter, err)) {
+                std::string unused;
+                db.Rollback(unused);
+                err = std::string("game migration v14 failed (alter gskill): ") + err;
+                return false;
+            }
+        }
+        if (!db.Exec(kCreateGSkillExpandV14, err) ||
+            !db.Exec(kCreateGSkillSlotNewV14, err) ||
+            !db.Exec(kCreateGSkillSlot2NewV14, err) ||
+            !db.Exec(kCreateGSkillUnsealedV14, err) ||
+            !db.Exec(kCreateGSkillCashV14, err)) {
+            std::string unused;
+            db.Rollback(unused);
+            err = std::string("game migration v14 failed (create tables): ") + err;
+            return false;
+        }
+        // 舊庫可能有 gunit 已刪除但 gskill/gskillslot 尚存的孤兒列（FK 曾關閉時代入可能）→ JOIN gunit 濾除，
+        //   否則整個升級交易被 FK 擋下而無法開服（§0a23 偏差登錄）。
+        if (!db.Exec("INSERT OR IGNORE INTO gskillslotnew (UnitUID, SkillPageNumber, Slot01, Slot02, Slot03, Slot04) "
+                     "SELECT s.UnitUID, 1, s.Slot01, s.Slot02, s.Slot03, 0 FROM gskillslot s JOIN gunit u ON u.UnitUID = s.UnitUID;", err)) {
+            std::string unused;
+            db.Rollback(unused);
+            err = std::string("game migration v14 failed (backfill slotA): ") + err;
+            return false;
+        }
+        if (!db.Exec("INSERT OR IGNORE INTO gskillexpand (UnitUID, PageCount, ActivePage) "
+                     "SELECT DISTINCT s.UnitUID, 1, 1 FROM gskill s JOIN gunit u ON u.UnitUID = s.UnitUID;", err)) {
+            std::string unused;
+            db.Rollback(unused);
+            err = std::string("game migration v14 failed (backfill expand): ") + err;
+            return false;
+        }
+    }
     if (!db.SetUserVersion(kGameSchemaVersion, err)) { std::string unused; db.Rollback(unused); return false; }
     return db.Commit(err);
 }
 
 // 原 gup_create_unit 的衛星副作用（呼叫端已 Begin）：
 //   GQuests：QuestID=13（로우의 호출）, SubQuest0=1（原 proc 對所有職業）
-//   GSkill/GSkillSlot：class 1→10000 / 2→20030 / 3→30000 / 4→40010（**僅 1..4**；原 proc 如此，
-//     5..9 無技能列——忠實照抄）；Slot01=SkillID、Slot02/03=0
+//   GSkill/GSkillSlotNew：class 1→10000 / 2→20030 / 3→30000 / 4→40010（**僅 1..4**；原 proc 如此，
+//     5..9 無技能列——忠實照抄）；SkillLevel=1、SkillPageNumber=1；gskillslotnew(page 1): Slot01=SkillID、Slot04=0；gskillexpand(1,1)；
+//     v14 起 legacy gskillslot 不再寫入（§0a23）
 //   GSpirit：StartSpirit ← gresurrectionstonecnt（缺列或 NULL → 0；
 //     原 stored proc 空表時 @iStartSpirit=NULL → Spirit NULL → -21 → 建角整體 ROLLBACK；
 //     V2 以 0 續建並於文件誠實聲明）；Flag=0（原 DF_GSpirit_Flag DEFAULT(0)）
@@ -502,10 +601,15 @@ static bool InsertCreateUnitSideEffects(Database& db, int64_t unitUID, int unitC
 
     static const int kClassSkill[5] = { 0, 10000, 20030, 30000, 40010 };
     if (unitClass >= 1 && unitClass <= 4) {
+        // §0a23：2013 頁系統路徑——技能寫入 gskill（SkillLevel=1、SkillPageNumber=1）＋ gskillslotnew 第 1 頁（Slot04=0）
+        //   ＋ gskillexpand(1,1)。Legacy gskillslot（2008 單頁）不再寫入（v14 起僅供遷移來源；見 docs §0a23）。
         const int64_t skillID = kClassSkill[unitClass];
-        if (!insert("INSERT INTO gskill (UnitUID, SkillID) VALUES (?, ?);", "gskill", skillID, true)) return false;
-        if (!insert("INSERT INTO gskillslot (UnitUID, Slot01, Slot02, Slot03) VALUES (?, ?, 0, 0);",
-                    "gskillslot", skillID, true)) return false;
+        if (!insert("INSERT INTO gskill (UnitUID, SkillID, SkillLevel, SkillCSPoint, SkillPageNumber) VALUES (?, ?, 1, 0, 1);",
+                    "gskill", skillID, true)) return false;
+        if (!insert("INSERT INTO gskillslotnew (UnitUID, SkillPageNumber, Slot01, Slot02, Slot03, Slot04) VALUES (?, 1, ?, 0, 0, 0);",
+                    "gskillslotnew", skillID, true)) return false;
+        if (!insert("INSERT OR IGNORE INTO gskillexpand (UnitUID, PageCount, ActivePage) VALUES (?, 1, 1);",
+                    "gskillexpand")) return false;
     }
 
     {
@@ -977,6 +1081,174 @@ bool GameStore::SoftDeleteUnit(int64_t unitUID, std::string& err)
     }
 
     return m_db.Commit(err);
+}
+
+// ===== §0a23：2013 SERV_SKILL_PAGE_SYSTEM 反推 =====
+bool GameStore::LoadSkillPageState(int64_t unitUID, SkillPageState& out, std::string& err)
+{
+    out = SkillPageState{};
+
+    // 1) Expand（P_GSkill_Expand_SEL）：gskillexpand 缺列 → 1/1；PageCount<1 → 1；ActivePage<1 或 >PageCount → 1。
+    {
+        Statement st;
+        if (!st.Prepare(m_db, "SELECT PageCount, ActivePage FROM gskillexpand WHERE UnitUID = ?;", err)) return false;
+        if (!st.BindInt(1, unitUID, err)) return false;
+        std::string se;
+        if (st.StepRow(se)) {
+            int pages = static_cast<int>(st.ColumnInt64(0));
+            int active = static_cast<int>(st.ColumnInt64(1));
+            if (pages < 1) pages = 1;
+            if (active < 1 || active > pages) active = 1;
+            out.pagesAvailable = pages;
+            out.activePage = active;
+            err.clear();
+        } else if (!se.empty()) { err = se; return false; }
+        // 缺列 → 預設 1/1（原 BeginFetch 失敗分支同）
+    }
+
+    // 2) Learned（P_GSkill_New_SEL）：gskill；同原 fetch 端過濾 SkillID>0 && SkillLevel>0；ORDER BY 原 proc 未知 → V2 固定 (頁, ID)（§0a23 偏差）
+    {
+        Statement st;
+        if (!st.Prepare(m_db,
+                "SELECT SkillID, SkillLevel, SkillCSPoint, SkillPageNumber FROM gskill"
+                " WHERE UnitUID = ? AND SkillID > 0 AND SkillLevel > 0"
+                " ORDER BY SkillPageNumber, SkillID;", err)) return false;
+        if (!st.BindInt(1, unitUID, err)) return false;
+        while (true) {
+            std::string rowErr;
+            if (!st.StepRow(rowErr)) {
+                if (!rowErr.empty()) { err = rowErr; return false; }
+                break;
+            }
+            SkillPageLearned sk;
+            sk.skillID = static_cast<int32_t>(st.ColumnInt64(0));
+            sk.skillLevel = static_cast<int32_t>(st.ColumnInt64(1));
+            sk.skillCSPoint = static_cast<int32_t>(st.ColumnInt64(2));
+            sk.skillPageNumber = static_cast<int32_t>(st.ColumnInt64(3));
+            out.skills.push_back(sk);
+        }
+        err.clear();
+    }
+
+    // 3) SlotA（P_GSkillSlot_New_SEL）：gskillslotnew；**整表缺列** → 自癒 INSERT 0×pagesAvailable（原 select-unit 路徑 InsertSkillWithSkillSlot 副作用，§0a23 偏差：V2 於讀取端執行）
+    bool slotAEmpty = true;
+    {
+        Statement st;
+        if (!st.Prepare(m_db,
+                "SELECT SkillPageNumber, Slot01, Slot02, Slot03, Slot04 FROM gskillslotnew"
+                " WHERE UnitUID = ? ORDER BY SkillPageNumber;", err)) return false;
+        if (!st.BindInt(1, unitUID, err)) return false;
+        while (true) {
+            std::string rowErr;
+            if (!st.StepRow(rowErr)) {
+                if (!rowErr.empty()) { err = rowErr; return false; }
+                break;
+            }
+            slotAEmpty = false;
+            SkillPageSlotRow row;
+            row.pageNumber = static_cast<int32_t>(st.ColumnInt64(0));
+            for (int i = 0; i < 4; ++i) row.slot[i] = static_cast<int32_t>(st.ColumnInt64(1 + i));
+            out.slotA.push_back(row);
+        }
+        err.clear();
+    }
+    if (slotAEmpty && out.pagesAvailable >= 1) {
+        if (!m_db.Begin(err)) return false;
+        auto rollbackHeal = [this, &err]() {
+            std::string unused;
+            m_db.Rollback(unused);
+            return false;
+        };
+        {
+            int64_t cnt = -1;
+            Statement st;
+            if (!st.Prepare(m_db, "SELECT COUNT(*) FROM gskillslotnew WHERE UnitUID = ?;", err)) return rollbackHeal();
+            if (!st.BindInt(1, unitUID, err)) return rollbackHeal();
+            std::string se;
+            if (!st.StepRow(se)) { err = se.empty() ? "count: no row" : se; return rollbackHeal(); }
+            cnt = st.ColumnInt64(0);
+            err.clear();
+            if (cnt == 0) {
+                for (int page = 1; page <= out.pagesAvailable; ++page) {
+                    Statement ins;
+                    if (!ins.Prepare(m_db,
+                            "INSERT INTO gskillslotnew (UnitUID, SkillPageNumber, Slot01, Slot02, Slot03, Slot04)"
+                            " VALUES (?, ?, 0, 0, 0, 0);", err)) return rollbackHeal();
+                    if (!ins.BindInt(1, unitUID, err)) return rollbackHeal();
+                    if (!ins.BindInt(2, page, err)) return rollbackHeal();
+                    std::string stepErr;
+                    if (ins.StepRow(stepErr) || !stepErr.empty()) { err = "self-heal insert: " + stepErr; return rollbackHeal(); }
+                }
+            }
+        }
+        if (!m_db.Commit(err)) return rollbackHeal();
+        out.slotA.clear();
+        for (int page = 1; page <= out.pagesAvailable; ++page) {
+            SkillPageSlotRow row;
+            row.pageNumber = page;
+            out.slotA.push_back(row);
+        }
+    }
+
+    // 4) SlotB（P_GSkillSlot2_New_SEL）：缺列不寫回；EndDate 取最高頁列；無列 → 哨兵 2000-01-01 00:00:00
+    {
+        Statement st;
+        if (!st.Prepare(m_db,
+                "SELECT SkillPageNumber, Slot01, Slot02, Slot03, Slot04, EndDate FROM gskillslot2new"
+                " WHERE UnitUID = ? ORDER BY SkillPageNumber;", err)) return false;
+        if (!st.BindInt(1, unitUID, err)) return false;
+        while (true) {
+            std::string rowErr;
+            if (!st.StepRow(rowErr)) {
+                if (!rowErr.empty()) { err = rowErr; return false; }
+                break;
+            }
+            SkillSlotBRow row;
+            row.pageNumber = static_cast<int32_t>(st.ColumnInt64(0));
+            for (int i = 0; i < 4; ++i) row.slot[i] = static_cast<int32_t>(st.ColumnInt64(1 + i));
+            row.endDate = st.ColumnText(5);
+            out.skillSlotBEndDate = row.endDate;   // ORDER BY 遞增 → 迴圈結束時 = 最高頁 EndDate
+            out.slotB.push_back(std::move(row));
+        }
+        err.clear();
+    }
+
+    // 5) Unsealed（gup_get_unsealed_skill_info）：isBornSealed 技能的解封記錄
+    {
+        Statement st;
+        if (!st.Prepare(m_db, "SELECT SkillID FROM gskillunsealed WHERE UnitUID = ? ORDER BY SkillID;", err)) return false;
+        if (!st.BindInt(1, unitUID, err)) return false;
+        while (true) {
+            std::string rowErr;
+            if (!st.StepRow(rowErr)) {
+                if (!rowErr.empty()) { err = rowErr; return false; }
+                break;
+            }
+            out.unsealed.push_back(static_cast<int32_t>(st.ColumnInt64(0)));
+        }
+        err.clear();
+    }
+    return true;
+}
+
+bool GameStore::GetCashSkillPoint(int64_t unitUID, CashSkillPointValues& out, std::string& err)
+{
+    out = CashSkillPointValues{};
+    Statement st;
+    if (!st.Prepare(m_db, "SELECT CSPoint, MaxCSPoint, EndDate FROM gskillcash WHERE UnitUID = ?;", err)) return false;
+    if (!st.BindInt(1, unitUID, err)) return false;
+    std::string se;
+    if (st.StepRow(se)) {
+        out.csPoint = static_cast<int>(st.ColumnInt64(0));
+        out.maxCSPoint = static_cast<int>(st.ColumnInt64(1));
+        out.endDate = st.ColumnText(2);
+        err.clear();
+        return true;
+    }
+    if (!se.empty()) { err = se; return false; }
+    // 缺列 → {0, 0, 哨兵}（原 BeginFetch 失敗分支）
+    err.clear();
+    return true;
 }
 
 bool GameStore::GetSpiritValues(int64_t unitUID, SpiritValues& out, std::string& err)

@@ -43,7 +43,7 @@
 
 **SelectUnitNot1**（`SelectUnitProtocol.{h,cpp}`，事件 ID 42）：`int32 iOK → KUnitInfo → wstr unitCreateDate(SERV_CHAR_LOG) → int32 realDataED(SERV_LOGOUT_ED_CHECK) → wstr unitLastLoginDate(SERV_DAILY_CHAR_FIRST_SELECT) → map<int32,int32> inventorySlotSize → map<int64,InventoryItemInfo> items → int32 iNumResurrectionStone → (AP_RESTONE) int32 iNumAutoPaymentResStone + wstr autoPayResStoneLastDate → (SKILL_PAGE_SYSTEM) vector<UserSkillPageData> → vector<int16> vecSkillUnsealed → (SERV_SKILL_NOTE) int8 skillNoteMaxPageNum + map<int8,int32> mapSkillNote → (RELATIONSHIP_SYSTEM) RelationshipInfo`。Put 順序機讀自 CommonPacket.cpp `KEGS_SELECT_UNIT_1_NOT`（SERIALIZE_DEFINE_PUT）。
 
-**組裝路徑**：`BuildSelectUnitNot1(userUID, authLevel, GUnitRecord, out)`（UnitSelectArbiter）由 V2 game DB 的 gunit 表組裝——level/exp/win/lose/stat/lastPos.mapID(←lastPosition)/nickname/regDate/lastDate 有真實資料源；**items/inventorySlotSize/dungeonClear/tcClear/rating/ED/resStone/skillPages 無對應表，一律填空容器/0/單一全預設技能頁（pages=1/1，與 KUnitSkillData 一致），這些值不代表角色實際狀態，不得當真**；spirit 自 GSpirit 讀回（§0a8），spiritMax 恆 0（SpiritTable.lua 未隨倉庫提供）。`HandleSelectUnitReq` 成功路徑新增 outNot1/authLevel 參數（二級密碼閘門之後）。迴路整合測試：server 端成功時**先送 1_NOT(42) 再送收尾 ACK**（對齊原 `SendSelectUnitACK` 次序），client 端先收 1_NOT 再收 ACK。測試自 524 → **557 passed / 0 failed**（新增 Not1 codec golden roundtrip + gunit→Not1 建構 + 迴路 1_NOT 順序斷言）。
+**組裝路徑**：`BuildSelectUnitNot1(userUID, authLevel, GUnitRecord, out)`（UnitSelectArbiter）由 V2 game DB 的 gunit 表組裝——level/exp/win/lose/stat/lastPos.mapID(←lastPosition)/nickname/regDate/lastDate 有真實資料源；**items/inventorySlotSize/dungeonClear/tcClear/rating/ED/resStone 無對應表，一律填空容器/0（rating/ED 不適用）**；技能頁自 §0a23 起自 gskillexpand/gskill/gskillslotnew/gskillslot2new/gskillunsealed/gskillcash 讀回（§0a23），supplemental==nullptr 時維持 1 頁全預設；spirit 自 GSpirit 讀回（§0a8），spiritMax 恆 0（SpiritTable.lua 未隨倉庫提供）。`HandleSelectUnitReq` 成功路徑新增 outNot1/authLevel 參數（二級密碼閘門之後）。迴路整合測試：server 端成功時**先送 1_NOT(42) 再送收尾 ACK**（對齊原 `SendSelectUnitACK` 次序），client 端先收 1_NOT 再收 ACK。測試自 524 → **557 passed / 0 failed**（新增 Not1 codec golden roundtrip + gunit→Not1 建構 + 迴路 1_NOT 順序斷言）。
 
 ⚠ 誠實聲明：golden bytes 為自洽佈局，**未對原 SDK 實機驗證**；SELECT_UNIT 1_NOT…5_NOT 分片皆已移植（§0e…§0i）；**完整角色資料載入管線與 2_NOT…5_NOT 佔位內容替換為真實 DB 資料未開始**；1_NOT 中無資料來源的欄位全為佔位值（見上）；更換巨集組合佈局即變。
 
@@ -358,6 +358,74 @@ tests/test_string_filter.cpp 的字元集閘門斷言改為依 `X2_REGION_*` 分
 - **測試數**：**JP = 1297、TW = 1295、EU = 1293、CN = 1295 passed / 0 failed**。
 - 剩餘未移植：gmo_*_skill（技能 slot 更新）／gup_get_community_opt_unituid（社群選項查詢——V2 改以 gdenyoption 直接讀回近似，§0a9；relationship 6 欄寫入 EGS_UPDATE_COMMUNITY_OPT 已於 §0a10 以 write-through upsert 移植；P_GDenyOption_UPD 仍缺 proc）／class 5..9 技能列（原 proc 不存在）／LogDB；gspirit 的 Flag 完整語意與復活石補充/精力重置已於 §0a8 移植；Flag 並列槽位 UI 亦未建模。
 
+## 0a23. 2026-11-18 附記（SELECT_UNIT_1_NOT 技能頁系統：SERV_SKILL_PAGE_SYSTEM 2013 路徑反推；schema v14）
+
+**用戶選定「硬啃 2013 版（大量推測）」**（2026-11-18 決定；在「缺 xlsm→TempletVer2、缺全部頁系統 proc/表、缺 SkillTemplet.lua」的前提下仍實作）。反推資料源**僅**以下幾處（全部唯讀機讀）：
+
+- 原版 `GameServer/GSGameDBThread.cpp` Query_SelectUnit：`P_GSkill_Expand_SEL`（SKILLPageCNT>>ActivePage；缺列→1/1；Active 越界 log 後 clamp 1）→ `P_GSkill_New_SEL`/`P_GSkill_Cash_SEL`/`gup_get_cash_skill_point_info`（short,short,wstrEndDate；BeginFetch 失敗→0/0/L"2000-01-01 00:00:00"）→ `gup_get_unsealed_skill_info`（short 迴圈）→ `P_GSkillSlot_New_SEL`/`P_GSkillSlot2_New_SEL`（**整表缺列 → 自癒 INSERT 0 槽×頁**（gup_get_skill_slot_add 等價）；Active 頁技能鏡射 KUnitSkillData.m_aEquippedSkill）。
+- `Common/CommonPacket.h`：KSkillData{short skillID; UCHAR cSkillLevel}、KUserSkillData、KUserSkillPageData（EQUIPPED_SKILL_SLOT_COUNT=4）、KUnitSkillData（SERV_SKILL_PAGE_SYSTEM：UCHAR m_nActiveSkillPagesNumber=1、m_nTheNumberOfSkillPagesAvailable=1）。
+- `GSUserFunction.cpp`（m_nTheNumberOfSkillPagesAvailable ← SkillTree->GetTheNumberOfSkillPagesAvailable()，2 處）、`GSUserCashShop.cpp`（m_wstrCSPointEndDate 寫入）、`UserSkillTree.cpp`（SetCSPointEndDate 解析）。
+- 2013 proc 名稱以 `SERV_ALL_RENEWAL_SP` 為判定分兩路（P_GSkill_*_SEL vs gup_*），V2 以單一路徑實作。
+
+**⚠ 全部表結構／欄位語意／層級制皆為推定**——方向性（讀回什麼、預設值、自癒副作用）與原版一致，欄位級與位元級保證**不存在**；任何與原版不符之處只能靠本節偏差清單揭露。
+
+**Schema v14**（`kGameSchemaVersion` 13→14）：
+
+- `gskill` 擴充：`SkillLevel` INTEGER NOT NULL DEFAULT 1、`SkillCSPoint` INTEGER NOT NULL DEFAULT 0、`SkillPageNumber` INTEGER NOT NULL DEFAULT 1（Migration 既有列自動補 1/1/0＝「已學基礎技能」語意近似；技能等級過濾 SkillID>0 && SkillLevel>0 抄自原 New_SEL fetch 端）。
+- 新表（FK→gunit，`ON DELETE CASCADE`）：
+  - `gskillexpand`（UnitUID PK；`PageCount` INTEGER NOT NULL DEFAULT 1 `CHECK (PageCount >= 1)`；`ActivePage` INTEGER NOT NULL DEFAULT 1 `CHECK (ActivePage >= 1)`）— P_GSkill_Expand_SEL
+  - `gskillslotnew`（PK(UnitUID, SkillPageNumber)；`Slot01..04` INTEGER NOT NULL DEFAULT 0；RegDate）— P_GSkillSlot_New_SEL
+  - `gskillslot2new`（PK(UnitUID, SkillPageNumber)；`Slot01..04`；`EndDate` TEXT NOT NULL DEFAULT '2000-01-01 00:00:00'；RegDate）— P_GSkillSlot2_New_SEL
+  - `gskillunsealed`（PK(UnitUID, SkillID)；RegDate）— gup_get_unsealed_skill_info
+  - `gskillcash`（UnitUID PK；`CSPoint`、`MaxCSPoint` INTEGER NOT NULL DEFAULT 0；`EndDate` TEXT NOT NULL DEFAULT '2000-01-01 00:00:00'）— gup_get_cash_skill_point_info／P_GSkill_Cash_SEL
+- **Backfill**（v13→v14）：legacy `gskillslot`（2008 單頁 Slot01..03）→ `gskillslotnew` 第 1 頁（Slot04=0）；`gskillexpand` ← gskill 既有角色（1/1）。**v13 庫可能存在 gunit 已刪但 skill 列殘留的孤兒列 → JOIN gunit 濾除**（FK 曾關閉時代入；不濾除則整個升級交易被 FK 擋死而無法開服，見偏差 14）。Legacy `gskill`/`gskillslot` **保留但不再寫入**（僅供舊測試/外部工具過渡）。
+- 建角衛星（`InsertCreateUnitSideEffects`，§0a5）改寫頁系統：`gskill(SkillLevel=1, SkillPageNumber=1)` ＋ `gskillslotnew` 第 1 頁（Slot01=SkillID, Slot04=0）＋ `gskillexpand(1,1)`；class 5..9 仍忠實無列；失敗整體 ROLLBACK 不變。
+
+**GameStore API**：
+
+- `LoadSkillPageState(unitUID, SkillPageState& out, err)`：① `gskillexpand`（缺列→1/1；PageCount<1→1；ActivePage<1 或 >PageCount→1）② `gskill`（過濾 SkillID>0 && SkillLevel>0，ORDER BY SkillPageNumber, SkillID）③ `gskillslotnew` ORDER BY SkillPageNumber（**整表缺列 → 自癒**：Begin→recount→INSERT 0×PageCount→Commit，失敗 ROLLBACK→false，對應原 select-unit 路徑 InsertSkillWithSkillSlot 副作用）④ `gskillslot2new`（缺列不寫回；EndDate 取最高頁列；無列→哨兵）⑤ `gskillunsealed` ORDER BY SkillID。DB 錯誤/缺表→false；缺資料列皆預設值，非錯誤。
+- `GetCashSkillPoint(unitUID, CashSkillPointValues& out, err)`：缺列→{0,0,哨兵} 非錯誤；DB 錯誤→false。
+
+**Not1 組裝**：
+
+- `unitInfo.unitSkillData`：`equippedSkill`/`equippedSkillSlotB` ← active 頁列（技能等級＝skills 查表，未學或未命中→0）；`skillSlotBEndDate` ← 讀回（哨兵同原）；`skillSlotBExpirationState`=0（偏差 9）；`activeSkillPagesNumber`/`theNumberOfSkillPagesAvailable` ← expand（u8 clamp）；`passiveSkill`/`guildPassiveSkill`/`skillNote` 空（偏差 10/11）。
+- `unitInfo.csPoint`/`maxCSPoint`/`csPointEndDate` ← `gskillcash`（缺→0/0/哨兵）。
+- `vecUserSkillPageData`：pagesAvailable 頁、每頁 equippedSkill/equippedSkillSlotB＋`userSkillData`（該頁 gskill 列，SkillCSPoint 直通 u8）；`usSkillPoint`/`usCashSkillPoint`=0（偏差 8）。
+- `vecSkillUnsealed` ← `gskillunsealed`；`mapSkillNote` 空、`skillNoteMaxPageNum`=0（偏差 10）。
+- `supplemental==nullptr`（list 路徑）：維持 1 頁全預設（pages 1/1），與 §0a2 行為一致。
+
+**測試**：`tests/test_skill_page_readback.cpp`（新增 99 斷言）：schema v14 建表/欄位；v13→v14 手工最小庫遷移（backfill Slot04=0、expand 回填 1/1、SkillLevel 預設 1、**孤兒列被 JOIN 濾除**）；建角 class1 → 讀回 1 頁 {10000 Lv1 頁1 Slot01}、EndDate 哨兵、現金 0/0/哨兵；多頁場景（expand 3/2、頁 2 學 12001 Lv17 CSPoint 7、頁 3 學 13001、slotA 頁2=[20001,0,0,10000]、slotB 頁3=[21001]+EndDate 2026-05-01 ⇒ Not1 active 頁＝頁 2、skillSlotBEndDate 取最高頁、pages vec=3、page1/2/3 userSkillData 各自正確、裝備鏡射 10000→Lv1／20001→Lv0）；ActivePage 99→1；v14 CHECK 拒絕 ActivePage/PageCount=0；**SlotA 整表缺列自癒**（DB 補回 2 頁 0 槽，與原 InsertSkillWithSkillSlot 等價）；`gskill`／`gskillcash` 缺表 → `ERR_SELECT_UNIT_05`；現金點 roundtrip。
+`tests/test_create_unit_satellite.cpp` 更新對應 v14（斷言 gskill 擴充欄位 / gskillslotnew 第 1 頁 Slot04=0 / gskillexpand 1/1；rollback 測試 DROP `gskillslotnew`）。
+`tests/test_select_unit.cpp`、`tests/test_inventory_readback.cpp`：Not1 技能斷言更新為讀回值（pages 1/1、equippedSkill[0]={10000,1}、unsealed/note 空）。
+**測試數**：**JP = 2017、TW = 2015、EU = 2013、CN = 2015、US = 2014 passed / 0 failed**（vs §0a22：JP 1908、TW 1906、EU 1904、CN 1906、US 1905）。`verify_generated` OK；NUL clean。
+
+**偏差聲明**（全部為推定，非原版保證）：
+
+1. 表名／欄位名／型別全為反推命名（`gskillslotnew`/`gskillslot2new`/`gskillunsealed`/`gskillexpand`/`gskillcash`）；原 proc 名稱以 SERV_ALL_RENEWAL_SP 分兩路（P_GSkill_*_SEL vs gup_*），V2 採單一路徑。
+2. `SKILLPageCNT` 來源表名無證據——採 (UnitUID → PageCount, ActivePage) 單列表假設；無列 → 1/1（原 BeginFetch 失敗分支同）。
+3. ActivePage 越界：原 clamp 1；V2 同＋schema `CHECK (>= 1)`（0 被 DB 直接拒絕，比 clamp 更強）。
+4. `SkillLevel > 0` 過濾採自 New_SEL fetch 端（KimHC 註解語意）；`SkillID > 0` 同。
+5. `gskill` ORDER BY 原 proc 未知 → V2 固定 (SkillPageNumber, SkillID)。
+6. **自癒副作用位置**：原在 select-unit 讀路徑發生（InsertSkillWithSkillSlot）；V2 同一位置執行（讀路徑寫入副作用，僅整表缺列時、單一 transaction）。若排斥讀路徑寫入，可改為建角時寫入——本實作保留原行為。
+7. `gskillslot2new` 缺列 → 哨兵 EndDate、不寫回（同原 Slot2_SEL「an 스킬슬롯B EndDate 비교는 하지 않는다」行為）。
+8. `usSkillPoint`/`usCashSkillPoint`（頁 SP/CSP 池）無資料源 → 0；原 SP/CSP 池儲存表名完全未知。
+9. `skillSlotBExpirationState`（char）無資料源 → 0（原語意不明：有效/過期狀態推測）。
+10. `mapSkillNote`/`skillNoteMaxPageNum`（SERV_SKILL_NOTE）無資料源 → 空/0；GSkillNote 表名/原 P_GSkill_Note 系 proc 皆不存在於倉庫。
+11. `passiveSkill`/`guildPassiveSkill`（被動/公會被動技能）無資料源 → 空。
+12. **技能樹完全未建模**：SLV_MAX_LEVEL=30／技能學習·升級 SP 費用／SLV_MAX_LEVEL 的 Stat/SA／m_vecPrecedingSkill 前置關係／class 技能樹定義（NewSkillTempletVer2.lua **不在倉庫**）——V2 不做技能學習合法性/費用/解封判斷，僅持久化+回讀當前狀態。
+13. `gskillunsealed`＝「已解封」清單（isBornSealed 技能經道具解封）；V2 無解封道具發放路徑 → 恆空（直到有寫入端點）。
+14. v13→v14 Backfill 之**孤兒列 JOIN gunit 濾除**；不濾除則整個遷移被 FK 擋死（本輪實測複現並修復）。
+15. `KSkillData.skillID` int16：DB int→clamp [0, 32767]（mod 超範圍資料降級為 32767，不報錯；<0 → 0）。
+16. EndDate('YYYY-MM-DD HH:MM:SS')＝smalldatetime 以小時秒精度 UTC 保存（V2 其他 datetime 欄位一致慣例）。
+17. `gskillcash` 缺列 → 0/0/哨兵（原 BeginFetch 失敗分支），非錯誤；原 P_GSkill_Cash_SEL 之 EndDate 更新時機（續期）完全不可移植——無現金商城技能續期端點。
+18. CreateUnit 寫入 gskillexpand(1,1)/gskill(SkillLevel=1,PageNumber=1)/gskillslotnew(1頁)——**原 2013 CreateUnit 行為未知**（未確認建角 proc 是否直接建頁系統列，抑或首次 select 時由自癒路徑補列；V2 選擇建角即建列，與 2008 衛星慣例一致）。
+19. Wire 佈局**未變更**（SELECT_UNIT_1_NOT 格式不變；golden bytes 不變）；變的是填充值（不再是預設假資料）。
+20. 讀取失敗政策：缺表/DB 錯誤 → 整個選角失敗 `ERR_SELECT_UNIT_05`（比照 §0a14 背包／§0a18 清單政策）；缺「資料列」不視為錯誤（原缺列→預設值）。
+21. sPoint（gunit.SPoint）與 CSPoint（gskillcash）兩者語意分離（SkillPoint vs CashSkillPoint，原 DB 分表）；V2 亦分表，不要混用。
+22. list 路徑（MyUnitAndInventoryInfoList 等）`PopulateUnitInfoFromGUnit` 傳 nullptr → 技能頁/現金點維持 0/空（list 本來只給靜態欄位）。
+23. 本 slice 修復三個既有/潛伏缺陷：v13→v14 Backfill 未濾孤兒列導致 FK brick（本輪實測複現）；測試暱稱 > 12 bytes（UTF-8 上限）靜默觸發 ERR_CREATE_UNIT_04 後未檢查 uid≤0 即繼續使用導致 vec 越界 **segv**（本輪實測複現）；以及 `test_select_not4_readback` 等 5 個測試的 `schema v13` 斷言未隨版本升級。
+24. 已知未覆蓋：ASAN build 於 `test_select_not4_readback.cpp:72`（`std::__cxx11::basic_string<char>::clear()`）null-write **在純淨 312aa54 上亦 100% 複現**（已驗證），與本 slice 無關；正式 `build_and_test.sh` 五地區全綠，未深入根因（偏差登錄代查）。
+
 ## 0a22. 2026-11-17 附記（EGS_CURRENT_TIME_REQ/ACK：サーバー現在時刻）
 
 SELECT_UNIT 全流程已落地；本期實作**完全自足、無 DB／無腳本表**的客戶端事件——`EGS_CURRENT_TIME_REQ`（NOPARAM）→ `EGS_CURRENT_TIME_ACK{ std::wstring m_wstrCurrentTime }`。
@@ -594,7 +662,7 @@ Not1 的 `UnitInfo.mapDungeonClear`／`UnitInfo.mapTCClear`（原版寫法：`m_
   - `out.inventorySlotSize ← supplemental->inventorySlotSize`；`out.items` ← 以**gup_get_item_list 暫存表預設值**建 `ItemInfo`（quantity=0、usageType=0、endurance=-1、period=0、enchantLevel=0、sockets 全 0、sealData=0、attrib 全 0、randomSocket **空 vector**、itemState=0、expandedSocketNum=0、expirationDate=""）；`equippedItem`：SlotCategory==9 → keyed by SlotID（`map::insert` 保留第一筆，與原碼一致）。
   - `out.numResurrectionStone ← gresurrectionstone.Quantity`（缺列 → 0）。
 - **HandleSelectUnitReq**：outNot1 非空時於 Spirit 讀回後取得三項；任一失敗 → `ERR_SELECT_UNIT_05`（DBE 慣例）。
-- **測試** `tests/test_inventory_readback.cpp`（schema v8／gitem AUTOINCREMENT／slot size per-category SUM（同 category 多列求和）／items（ORDER BY、軟刪除排除、衛星預設值）／Not1 整合（slot size 接線、equippedItem key=slotID、復活石 3、技能佔位保持）／缺表 → ERR_SELECT_UNIT_05／歸屬錯誤）。TestBuildSelectUnitNot1Defaults 未改（supplemental=nullptr 路徑）。
+- **測試** `tests/test_inventory_readback.cpp`（schema v8／gitem AUTOINCREMENT／slot size per-category SUM（同 category 多列求和）／items（ORDER BY、軟刪除排除、衛星預設值）／Not1 整合（slot size 接線、equippedItem key=slotID、復活石 3、技能佔位保持，於 §0a23 更新為讀回斷言）／缺表 → ERR_SELECT_UNIT_05／歸屬錯誤）。TestBuildSelectUnitNot1Defaults 未改（supplemental=nullptr 路徑）。
 - **測試數**：**JP = 1700、TW = 1698、EU = 1696、CN = 1698、US = 1697 passed / 0 failed**。
 - **偏差聲明（逐條）**：
   1. **`gup_get_inventory_size` 疑似 bug 已修正**：原 proc `GROUP BY NumSlot, InventoryCategory`（每 (Category, NumSlot) 群組一列的 SUM，再靠 `map::insert` 只保留第一列、且同類多列只顯示不定哪列）；V2 以 **category GROUP BY SUM(NumSlot)** 實作（每類格數總和，deterministic）。若原語意（每類僅一列、NumSlot 即總數）成立，兩者結果一致；若 NumSlot 多列（副本/深淵等擴格）——V2 求和，原碼行為未定義。
@@ -604,7 +672,7 @@ Not1 的 `UnitInfo.mapDungeonClear`／`UnitInfo.mapTCClear`（原版寫法：`m_
   5. **`ItemUID` 為 gitem 自增主鍵**（原 IDENTITY(1,1) bigint → SQLite INTEGER PRIMARY KEY AUTOINCREMENT）；itemUID 由 DB 生成。
   6. **ORDER BY**：原 `order by inventorycategory`（slotID 順序未定義）；V2 明確 `InventoryCategory, SlotID, ItemUID`。
   7. **裝備映射** SlotCategory==9（ST_E_EQUIP）；**無跳過 ST_BANK/ST_E_EQUIP**（原 Query_GetInventory 不跳過；MY_UNIT_AND_INVENTORY_INFO_LIST 路徑跳過邏輯未建模）。
-  8. **技能/裝備 Buff 不建模**（技能 proc 缺）；vecUserSkillPageData 仍為 1 頁全預設。
+  8. **技能樹/被動技能不建模**（NewSkillTempletVer2.lua 及 P_GSkill_Passive_SEL 皆不在倉庫）；裝備 Buff 不建模。技能頁已於 §0a23 讀回（gskill/gskillslotnew/gskillslot2new/gskillexpand/gskillunsealed/gskillcash）。
   9. **GItem 軟刪除語意**：`Deleted` 生成欄位 = `CASE WHEN RegDate = DelDate THEN 0 ELSE 1 END`（原計算欄位逐字對應）；軟刪除為 `DelDate > RegDate`。
 
 ## 0a13. 2026-11-17 附記（SELECT_UNIT_4_NOT：黑名單／師徒（사제）／30 分鐘連線事件讀回；schema v7）
@@ -1075,8 +1143,8 @@ V2 目前**原樣保留**協議所需的密碼學直譯，這些本身**不符�
 6. 效能與容量測試；記憶體/句柄洩漏基線（原版以 VLD 除錯，V2 無對應）。
 7. `LoadINIFile`、設定檔格式與部署工具（原 `ReleaseTool`/`.bat` 流程）。
 8. EventIDs 以外的大型表（道具/技能/副本資料）從 `X2/dat/Script` 的轉換管道。
-9. `SELECT_UNIT` 的 REQ/收尾 ACK + 決策層已完成（§0c）；`SELECT_UNIT_1_NOT` codec + 組裝（gunit 表 → Not1，缺資料項佔位；背包 slot size/items/equippedItem 自 §0a14 ← gitem/giteminventorysize；復活石量 ← gresurrectionstone）已完成（§0e）；`SELECT_UNIT_2_NOT` codec + 組裝（§0f；任務讀回自 §0a11 ← gquests/gquests_complete/gquests_repeat）已完成（§0f）；`SELECT_UNIT_3_NOT` codec + 組裝（§0g；title/mission 讀回自 §0a12 ← gtitle_complete/gtitle_mission；pet 仍空佔位）已完成（§0g）；`SELECT_UNIT_4_NOT` codec + 組裝（Henir/Messenger/戰場狀態無資料源→空容器/零值佔位；kDenyOptions ← gdenyoption（§0a9）；vecChatBlackList ← gblacklist、vecTutorialDBUnitInfo ← gtutor（≤10 級＝學生／≥20 級＝老師）、vecConnectTimeEvent ← gis30min，§0a13）已完成（§0h）；`SELECT_UNIT_5_NOT` codec + 組裝（spirit/pshop/henir-reward/cashshop 無資料源→false/0 佔位）已完成（§0i），1_NOT…5_NOT 全數落地；1_NOT…5_NOT 分片 codec 全數移植（§0e…0i）；完整角色資料載入管線未開始。Login 切片打通到 SELECT_UNIT_1_NOT 為止（items/寵物/ED/rating 等無資料來源，值為佔位；spirit 自 GSpirit 讀回，§0a8；任務自 §0a11 起讀 gquests/gquests_complete/gquests_repeat；稱號/稱號任務自 §0a12 起讀 gtitle_complete/gtitle_mission；黑名單/師徒/30 分鐘事件自 §0a13 起讀 gblacklist/gtutor/gis30min）。
-11. GDenyOption／GResurrectionStoneCnt／GSkill／GSkillSlot／GSpirit／GQuests——**建立流程副作用已移植（§0a5）；GSpirit 讀回與 gup_select_unit 每日重置／GResurrectionStone 每日補充／PlayDayCnt／LoginCount 登入副作用已移植（§0a8）**；其餘查詢/更新路徑（gup_get_community_opt_unituid——V2 改以 gdenyoption 直接讀回近似，§0a9；EGS_UPDATE_COMMUNITY_OPT 6 欄寫入（§0a10 write-through；P_GDenyOption_UPD 缺 proc，以 upsert 近似）已移植；gup_*_skill、gspirit Flag 語意變體）未實作；建角道具發放（gup_create_unit_set_promotion／P_GItemPeriod_INS，**不隨倉庫提供**）不可移植。
+9. `SELECT_UNIT` 的 REQ/收尾 ACK + 決策層已完成（§0c）；`SELECT_UNIT_1_NOT` codec + 組裝（gunit 表 → Not1，缺資料項佔位；背包 slot size/items/equippedItem 自 §0a14 ← gitem/giteminventorysize；復活石量 ← gresurrectionstone）已完成（§0e）；`SELECT_UNIT_2_NOT` codec + 組裝（§0f；任務讀回自 §0a11 ← gquests/gquests_complete/gquests_repeat）已完成（§0f）；`SELECT_UNIT_3_NOT` codec + 組裝（§0g；title/mission 讀回自 §0a12 ← gtitle_complete/gtitle_mission；pet 仍空佔位）已完成（§0g）；`SELECT_UNIT_4_NOT` codec + 組裝（Henir/Messenger/戰場狀態無資料源→空容器/零值佔位；kDenyOptions ← gdenyoption（§0a9）；vecChatBlackList ← gblacklist、vecTutorialDBUnitInfo ← gtutor（≤10 級＝學生／≥20 級＝老師）、vecConnectTimeEvent ← gis30min，§0a13）已完成（§0h）；`SELECT_UNIT_5_NOT` codec + 組裝（spirit/pshop/henir-reward/cashshop 無資料源→false/0 佔位）已完成（§0i），1_NOT…5_NOT 全數落地；1_NOT…5_NOT 分片 codec 全數移植（§0e…0i）；完整角色資料載入管線逐步推進（技能頁載入自 §0a23 起落地；技能升級/寫入路徑仍未開始）。Login 切片打通到 SELECT_UNIT_1_NOT 為止（items/寵物/ED/rating 等無資料來源，值為佔位；spirit 自 GSpirit 讀回，§0a8；任務自 §0a11 起讀 gquests/gquests_complete/gquests_repeat；稱號/稱號任務自 §0a12 起讀 gtitle_complete/gtitle_mission；黑名單/師徒/30 分鐘事件自 §0a13 起讀 gblacklist/gtutor/gis30min）。
+11. GDenyOption／GResurrectionStoneCnt／GSkill／GSkillSlot／GSpirit／GQuests——**建立流程副作用已移植（§0a5）；GSpirit 讀回與 gup_select_unit 每日重置／GResurrectionStone 每日補充／PlayDayCnt／LoginCount 登入副作用已移植（§0a8）**；其餘查詢/更新路徑（gup_get_community_opt_unituid——V2 改以 gdenyoption 直接讀回近似，§0a9；EGS_UPDATE_COMMUNITY_OPT 6 欄寫入（§0a10 write-through；P_GDenyOption_UPD 缺 proc，以 upsert 近似）已移植；gup_*_skill 之讀路徑（SELECT_UNIT 技能段）已於 §0a23 移植（v14 schema v14 反推），寫路徑（EGS_SKILL_*）未實作；gspirit Flag 語意變體）未實作；建角道具發放（gup_create_unit_set_promotion／P_GItemPeriod_INS，**不隨倉庫提供**）不可移植。
 10. Wire 相容：Login 切片 codec 只有自洽 golden bytes，**缺原 SDK 實機對照向量**（見 §13）。
 
 ## 13. 風險

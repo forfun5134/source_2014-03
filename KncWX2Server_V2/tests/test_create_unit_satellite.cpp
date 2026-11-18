@@ -94,13 +94,19 @@ static void TestSatelliteRows()
         CHECK(ScalarInt2(db, "SELECT COUNT(*) FROM gskill WHERE UnitUID = ? AND SkillID = ?;", uid4, 40010, v) && v == 1, "class4 -> skill 40010");
         CHECK(ScalarInt(db, "SELECT COUNT(*) FROM gskill WHERE UnitUID = ?;", uid5, v) && v == 0, "class5 -> no skill rows (faithful)");
     }
-    // --- GSkillSlot：class 1..4 有 Slot01=SkillID、02/03=0；class 5 無列
+    // --- GSkillSlotNew（§0a23 v14）：class 1..4 有 page=1 Slot01=SkillID、02/03/04=0；class 5 無列；gskillexpand=1/1；gskill 擴充欄位
     {
         int64_t v = -1;
-        CHECK(ScalarInt(db, "SELECT Slot01 FROM gskillslot WHERE UnitUID = ?;", uid1, v) && v == 10000, "class1 slot01 = 10000");
-        CHECK(ScalarInt(db, "SELECT Slot02 FROM gskillslot WHERE UnitUID = ?;", uid1, v) && v == 0, "class1 slot02 = 0");
-        CHECK(ScalarInt(db, "SELECT Slot03 FROM gskillslot WHERE UnitUID = ?;", uid1, v) && v == 0, "class1 slot03 = 0");
-        CHECK(ScalarInt(db, "SELECT COUNT(*) FROM gskillslot WHERE UnitUID = ?;", uid5, v) && v == 0, "class5 -> no slot row (faithful)");
+        CHECK(ScalarInt(db, "SELECT Slot01 FROM gskillslotnew WHERE UnitUID = ? AND SkillPageNumber = 1;", uid1, v) && v == 10000, "class1 slotA page1 slot01 = 10000");
+        CHECK(ScalarInt(db, "SELECT Slot02 FROM gskillslotnew WHERE UnitUID = ? AND SkillPageNumber = 1;", uid1, v) && v == 0, "class1 slotA page1 slot02 = 0");
+        CHECK(ScalarInt(db, "SELECT Slot03 FROM gskillslotnew WHERE UnitUID = ? AND SkillPageNumber = 1;", uid1, v) && v == 0, "class1 slotA page1 slot03 = 0");
+        CHECK(ScalarInt(db, "SELECT Slot04 FROM gskillslotnew WHERE UnitUID = ? AND SkillPageNumber = 1;", uid1, v) && v == 0, "class1 slotA page1 slot04 = 0");
+        CHECK(ScalarInt(db, "SELECT COUNT(*) FROM gskillslotnew WHERE UnitUID = ?;", uid5, v) && v == 0, "class5 -> no slotA row (faithful)");
+        CHECK(ScalarInt(db, "SELECT COUNT(*) FROM gskillexpand WHERE UnitUID = ? AND PageCount = 1 AND ActivePage = 1;", uid1, v) && v == 1, "class1 expand row 1/1");
+        CHECK(ScalarInt(db, "SELECT COUNT(*) FROM gskillexpand WHERE UnitUID = ?;", uid5, v) && v == 0, "class5 -> no expand row (no skill rows)");
+        CHECK(ScalarInt(db, "SELECT SkillLevel FROM gskill WHERE UnitUID = ? AND SkillID = 10000;", uid1, v) && v == 1, "class1 gskill SkillLevel = 1");
+        CHECK(ScalarInt(db, "SELECT SkillPageNumber FROM gskill WHERE UnitUID = ? AND SkillID = 10000;", uid1, v) && v == 1, "class1 gskill SkillPageNumber = 1");
+        CHECK(ScalarInt(db, "SELECT SkillCSPoint FROM gskill WHERE UnitUID = ? AND SkillID = 10000;", uid1, v) && v == 0, "class1 gskill SkillCSPoint = 0");
     }
     // --- GQuests：所有職業 QuestID=13、SubQuest0=1、其餘 0（class 1 與 class 5）
     {
@@ -163,12 +169,12 @@ static void TestSideEffectFailureRollsBack()
     bool ok = false;
     SeedGUser(store, 8888, "stateroller", ok);
     CHECK(ok, "seed guser 8888");
-    // 讓衛星插入失敗：刪除 gskillslot（class 1 → 需插入 gskillslot → 失敗）
+    // 讓衛星插入失敗：刪除 gskillslotnew（class 1 → 需插入 gskillslotnew → 失敗；§0a23）
     {
         Statement st; std::string e;
-        CHECK(st.Prepare(db, "DROP TABLE gskillslot;", e), "drop gskillslot");
+        CHECK(st.Prepare(db, "DROP TABLE gskillslotnew;", e), "drop gskillslotnew");
         std::string se;
-        CHECK(!st.StepRow(se) && se.empty(), "gskillslot dropped");
+        CHECK(!st.StepRow(se) && se.empty(), "gskillslotnew dropped");
     }
     CreateUnitReq req; req.iClass = 1; req.wstrNickName = L"rollbackme01";
     CreateUnitAck ack;

@@ -67,7 +67,7 @@ int32_t HandleSelectUnitReq(db::GameStore& gameDb, int64_t userUID, const Select
 //      含 KODBC 注入標記（; ' " -- /* */ \）→ ERR_CREATE_UNIT_08(33)（「無法使用的暱稱」）
 //   2) GameStore::CreateUnit（guser 不存在/已刪除 → ERR_CREATE_UNIT_00(25)；暱稱重複 → ERR_CREATE_UNIT_01(26)；
 //      槽位達 USSize → ERR_CREATE_UNIT_05(30)；暱稱 14 天冷卻 → ERR_CREATE_UNIT_06(31)；DB 錯誤 → ERR_CREATE_UNIT_02(27)；
-//      §0a5：gunit+gunit_nickname 與衛星副作用（gquests/gskill/gskillslot/gspirit/gdenyoption）同一 transaction）
+//      §0a5：gunit+gunit_nickname 與衛星副作用（gquests/gskill/gskillslotnew/gskillexpand/gspirit/gdenyoption；v14 起 gskillslot 僅遷移來源，§0a23）同一 transaction）
 //   3) 成功 → 重讀角色＋GSpirit（§0a8），kUnitInfo ← PopulateUnitInfoFromGUnit(..., spirit=GSpirit 讀回值)；
 //      vecSkillSlot / wstrEnableDate 原由 AccountDB(DBE_ACCOUNT_CREATE_UNIT_*) 填寫，V2 一律空（誠實佔位）。
 //   （FT_NICKNAME 過濾已移植 §0w：字元集閘門＋禁用暱稱 266＋禁用字 1389＋禁用標記；無 NICKNAMEWORD 子列表、無禁用字 DB 動態更新）
@@ -235,7 +235,6 @@ void PopulateUnitInfoFromGUnit(int64_t userUID, int authLevel, const db::GUnitRe
 //   inventorySlotSize ← giteminventorysize；equippedItem ← SlotCategory==9 的物品映射（ST_E_EQUIP，keyed by SlotID）。
 // unitCreateDate=regDate、unitLastLoginDate=lastDate、lastPos.mapID=lastPosition、
 // Stat ← gunit 的 BaseHP/Atk*/Def*、win/lose ← GUnit.Win/Lose、exp/level ← GUnit。
-// vecUserSkillPageData 填一頁全預設資料（與 unitSkillData pages=1/1 一致）。
 // SELECT_UNIT_1_NOT 補充資料（§0a14）：handle 於 outNot1 非空、Spirit 讀回之後、進 builder 之前取得。
 struct SelectUnit1Supplemental
 {
@@ -244,6 +243,8 @@ struct SelectUnit1Supplemental
     int32_t numResurrectionStone = 0;              // gresurrectionstone.Quantity（缺列 → 0）
     std::vector<db::DungeonClearRecord> dungeonClear;  // gdungeonclear（§0a18）
     std::vector<db::TCClearRecord> tcClear;            // gtrainingcenter（§0a18）
+    db::SkillPageState skillPageState;             // §0a23：技能頁系統 2013 路徑反推（gskillexpand/gskill/gskillslotnew/gskillslot2new/gskillunsealed；缺表 → false → ERR_SELECT_UNIT_05）
+    db::CashSkillPointValues cashSkillPoint;       // §0a23：現金技能點（gskillcash；缺列 → {0,0,哨兵}）
 };
 
 void BuildSelectUnitNot1(int64_t userUID, int authLevel, const db::GUnitRecord& unit,

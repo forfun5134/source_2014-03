@@ -59,6 +59,7 @@ void RunQuestReadbackTestsByRef(int& pass, int& fail);
 void RunTitleReadbackTestsByRef(int& pass, int& fail);
 void RunSelectNot4ReadbackTestsByRef(int& pass, int& fail);
 void RunInventoryReadbackTestsByRef(int& pass, int& fail);
+void RunSkillPageReadbackTestsByRef(int& pass, int& fail);
 void RunSelectNot45ReadbackTestsByRef(int& pass, int& fail);
 void RunEquipTitleTestsByRef(int& pass, int& fail);
 void RunWishListTestsByRef(int& pass, int& fail);
@@ -442,6 +443,7 @@ int main() {
     RunTitleReadbackTestsByRef(g_pass, g_fail);
     RunSelectNot4ReadbackTestsByRef(g_pass, g_fail);
     RunInventoryReadbackTestsByRef(g_pass, g_fail);
+    RunSkillPageReadbackTestsByRef(g_pass, g_fail);
     RunSelectNot45ReadbackTestsByRef(g_pass, g_fail);
     RunEquipTitleTestsByRef(g_pass, g_fail);
     RunWishListTestsByRef(g_pass, g_fail);

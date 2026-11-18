@@ -283,7 +283,12 @@ static void TestBuildSelectUnitNot1FromGUnit()
               "not1 stat=gunit+table / lastpos");
     }
     CHECK(!not1.unitCreateDate.empty() && not1.unitCreateDate == not1.unitLastLoginDate, "not1 dates filled from gunit");
-    CHECK(not1.vecUserSkillPageData.size() == 1, "not1 one default skill page");
+    CHECK(not1.vecUserSkillPageData.size() == 1, "not1 one skill page (pagesAvailable=1)");
+    CHECK(not1.unitInfo.unitSkillData.activeSkillPagesNumber == 1 && not1.unitInfo.unitSkillData.theNumberOfSkillPagesAvailable == 1, "not1 active/available pages == 1");
+    CHECK(not1.unitInfo.unitSkillData.equippedSkill[0].skillID == 10000 && not1.unitInfo.unitSkillData.equippedSkill[0].skillLevel == 1, "not1 class1 creation skill 10000 equipped (page1 slot01)");
+    CHECK(not1.unitInfo.unitSkillData.equippedSkill[1].skillID == 0 && not1.unitInfo.unitSkillData.equippedSkill[2].skillID == 0 && not1.unitInfo.unitSkillData.equippedSkill[3].skillID == 0, "not1 remaining equip slots empty");
+    CHECK(not1.vecUserSkillPageData[0].userSkillData.size() == 1 && not1.vecUserSkillPageData[0].userSkillData[0].skillID == 10000 && not1.vecUserSkillPageData[0].userSkillData[0].skillLevel == 1, "not1 page1 learned skill 10000");
+    CHECK(not1.unitInfo.csPoint == 0 && not1.unitInfo.maxCSPoint == 0, "not1 cash skill point default 0/0 (no gskillcash row)");
     // 空資料誠實佔位
     CHECK(not1.items.empty() && not1.inventorySlotSize.empty() && not1.numResurrectionStone == 0, "not1 no fabricated items/stones");
 }

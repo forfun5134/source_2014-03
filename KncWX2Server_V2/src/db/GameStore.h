@@ -43,7 +43,11 @@
 
 namespace x2 { namespace db {
 
-inline constexpr int kGameSchemaVersion = 13;
+// v14（§0a23）：2013 SERV_SKILL_PAGE_SYSTEM 反推——gskill+SkillLevel/SkillCSPoint/SkillPageNumber；
+//   新 gskillexpand（P_GSkill_Expand_SEL 對應）／gskillslotnew（P_GSkillSlot_New_SEL）／gskillslot2new（P_GSkillSlot2_New_SEL）／
+//   gskillunsealed（P_GSkill_Unsealed_SEL）／gskillcash（gup_get_cash_skill_point_info 對應）。
+//   原 proc/表皆不在倉庫——結構與語意全由 GSGameDBThread 行為反推，見 docs §0a23。
+inline constexpr int kGameSchemaVersion = 14;
 
 // game DB 遷移：v0→v1 建立 guser / gunit / gunit_nickname / gdeleted_nickname_history；冪等
 bool ApplyGameMigrations(Database& db, std::string& err);
@@ -77,6 +81,52 @@ struct GUnitRecord
     int32_t     loginCount   = 0;
     bool        deleted = false;
     std::string nickname;             // JOIN gunit_nickname 帶出；軟刪除後 NickName 已被釋放（NULL），此列為空字串
+};
+
+// ===== 2013 SERV_SKILL_PAGE_SYSTEM 反推（§0a23）=====
+// 倉庫內**無**原 proc（P_GSkill_Expand_SEL／P_GSkill_New_SEL／P_GSkillSlot_New_SEL／P_GSkillSlot2_New_SEL／
+// gup_get_cash_skill_point_info／gup_get_unsealed_skill_info…）也無對應表；以下結構與語意全由
+// KncWX2Server/GameServer/GSGameDBThread.cpp（Query_SelectUnit）與 CommonPacket 的轉置邏輯反推：
+//   Expand_SEL 返回 (SKILLPageCNT, ActivePage)（缺列 → 1/1，原 BeginFetch 失敗分支同）
+//   New_SEL    返回 (SkillID, SkillLevel, SkillCSPoint, SkillPageNumber)（SkillID>0 && SkillLevel>0 才有效）
+//   Slot_SEL   返回 (Slot01..04, SkillPageNumber)（整表缺列時伺服器端自癒 INSERT 0×N——見 LoadSkillPageState）
+//   Slot2_SEL  返回 (Slot01..04, SkillPageNumber, EndDate)（缺列 → 哨兵 EndDate、槽位 0；不寫回）
+//   Unsealed   返回 (SkillID)（isBornSealed 技能經道具解封的記錄；V2 建角流程不會寫入，恆空直到有發放路徑）
+// ⚠ 反推偏差聲明見 docs §0a23。
+struct SkillPageLearned
+{
+    int32_t skillID = 0;          // 原 short
+    int32_t skillLevel = 0;       // 原 UCHAR
+    int32_t skillCSPoint = 0;     // 原 UCHAR
+    int32_t skillPageNumber = 0;  // 原 UCHAR
+};
+struct SkillPageSlotRow
+{
+    int32_t pageNumber = 1;       // 原 int iSkillPageNumber（UCHAR 來源）
+    int32_t slot[4] = { 0, 0, 0, 0 };
+};
+struct SkillSlotBRow
+{
+    int32_t pageNumber = 1;
+    int32_t slot[4] = { 0, 0, 0, 0 };
+    std::string endDate = "2000-01-01 00:00:00";
+};
+// gup_get_cash_skill_point_info 對應（原返回 short iCSPoint, short iMaxCSPoint, wstring wstrCSPointEndDate；BeginFetch 失敗 → 0/0/哨兵）。
+struct CashSkillPointValues
+{
+    int csPoint = 0;
+    int maxCSPoint = 0;
+    std::string endDate = "2000-01-01 00:00:00";   // EndDate（'YYYY-MM-DD HH:MM:SS' UTC）
+};
+struct SkillPageState
+{
+    int32_t pagesAvailable = 1;   // P_GSkill_Expand_SEL SKILLPageCNT；缺列 → 1；<1 修正為 1（原 0 會傳出 0 頁 Not1::技能頁）
+    int32_t activePage = 1;       // P_GSkill_Expand_SEL ActivePage；缺列 → 1；<1 或 >pagesAvailable → 1（原 clamps）
+    std::vector<SkillPageLearned> skills;        // ORDER BY SkillPageNumber, SkillID（原 proc ORDER BY 未知；V2 固定，§0a23 偏差）
+    std::vector<SkillPageSlotRow> slotA;         // ORDER BY SkillPageNumber
+    std::vector<SkillSlotBRow> slotB;            // ORDER BY SkillPageNumber
+    std::string skillSlotBEndDate = "2000-01-01 00:00:00";  // slotB 最後一列（V2＝ORDER BY 最高頁）之 EndDate；無列 → 哨兵
+    std::vector<int32_t> unsealed;               // ORDER BY SkillID
 };
 
 // GSpirit 讀回（原 gup_get_unit_info_by_unituid 的 @iSpirit/@iAllSpirit 與 gup_select_unit 的 @iSpirit/@bSpiritFlag）。
@@ -218,7 +268,7 @@ public:
     //  nickname 長度檢查 1..16（原 nvarchar(16)），違反視為 DbError？否——回傳 NicknameTaken 語意外故
     //  以參數驗證先行：nickname/unitClass 不符 → false + err（程式錯誤，非業務拒絕）。
     //  副作用（§0a5，同一 transaction，失敗整體 ROLLBACK → DbError）：gquests(QuestID=13,SubQuest0=1，所有職業)、
-    //  gskill/gskillslot（僅 class 1..4：SkillID 10000/20030/30000/40010；class 5..9 忠實原碼——無技能列）、
+    //  gskill/gskillslotnew/gskillexpand（僅 class 1..4：SkillID 10000/20030/30000/40010；class 5..9 忠實原碼——無技能列；v14 起 legacy gskillslot 不再寫入，§0a23）、
     //  gspirit（Spirit←gresurrectionstonecnt 第一列 StartSpirit；缺列/NULL → 0；Flag=0）、gdenyoption(QuestionNo 1..4, CodeNo=1)。
     CreateUnitResult CreateUnit(int64_t userUID, const std::string& nickname, int unitClass,
                                 int64_t& unitUIDOut, std::string& err);
@@ -329,6 +379,15 @@ public:
 
     // 讀取 GResurrectionStone（缺列 → false，非錯誤；供測試/除錯）
     bool GetResurrectionStone(int64_t unitUID, ResurrectionStoneValues& out, std::string& err);
+    // 技能頁系統讀回（§0a23；2013 路徑反推）：gskillexpand（缺列 → 1/1，不寫回）→ gskill（過濾 ID>0 Level>0）
+    //   → gskillslotnew（**整表缺列且 pagesAvailable>=1 時自癒**：單一 transaction INSERT 0,0,0,0 × pagesAvailable，
+    //     對應原 select-unit 路徑 !bConductedOnceAtLeast 的 INSERT 副作用；insert 失敗整體 ROLLBACK → false）
+    //   → gskillslot2new（缺列不寫回；哨兵 EndDate）→ gskillunsealed。
+    //   DB 錯誤（含缺表）→ false + err（呼叫端映射 ERR_SELECT_UNIT_05）；缺資料列皆為預設值，非錯誤。
+    bool LoadSkillPageState(int64_t unitUID, SkillPageState& out, std::string& err);
+    // 現金技能點讀回（§0a23；原 gup_get_cash_skill_point_info／P_GSkill_Cash_SEL）：缺列 → {0,0,哨兵 EndDate}，非錯誤；
+    //   DB 錯誤（含缺表）→ false + err（呼叫端映射 ERR_SELECT_UNIT_05）。
+    bool GetCashSkillPoint(int64_t unitUID, CashSkillPointValues& out, std::string& err);
     // GDungeonClear / GTrainingCenter（§0a18；原 gup_get_dungeon_clear / gup_get_tc_clear）
     bool GetDungeonClears(int64_t unitUID, std::vector<struct DungeonClearRecord>& out, std::string& err);
     bool GetTCClears(int64_t unitUID, std::vector<struct TCClearRecord>& out, std::string& err);

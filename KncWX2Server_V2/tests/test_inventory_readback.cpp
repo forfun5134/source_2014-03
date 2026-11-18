@@ -66,7 +66,7 @@ static void TestSchemaV8()
 {
     Fixture fx;
     int v = fx.db.UserVersion(fx.err);
-    CHECK(v == kGameSchemaVersion && kGameSchemaVersion == 13, "schema v13 (user_version == 13)");
+    CHECK(v == kGameSchemaVersion && kGameSchemaVersion == 14, "schema v14 (user_version == 14)");
     CHECK(fx.db.Exec("SELECT 1 FROM gitem LIMIT 0;", fx.err), "gitem exists");
     CHECK(fx.db.Exec("SELECT 1 FROM giteminventorysize LIMIT 0;", fx.err), "giteminventorysize exists");
     CHECK(fx.db.Exec("SELECT 1 FROM gitemquantity LIMIT 0;", fx.err), "gitemquantity exists");
@@ -170,8 +170,9 @@ static void TestSelectIntegration()
         CHECK(eq->second.itemInfo.quantity == 0 && eq->second.itemInfo.endurance == -1,
               "equipped item satellite defaults");
         CHECK(not1.numResurrectionStone == 3, "resurrection stone wired");
-        // mapSkillNote/vecSkillUnsealed：空佔位（技能 proc 缺）
-        CHECK(not1.vecSkillUnsealed.empty() && not1.mapSkillNote.empty(), "skill placeholders remain");
+        // §0a23：技能頁系統已讀回（class 1 建角 → 技能 10000 習得/配裝第 1 頁 slot01）；unsealed/notes 仍為空（無資料源）
+        CHECK(not1.vecSkillUnsealed.empty() && not1.mapSkillNote.empty(), "skill unsealed/note still empty (no source)");
+        CHECK(not1.unitInfo.unitSkillData.equippedSkill[0].skillID == 10000 && not1.unitInfo.unitSkillData.equippedSkill[0].skillLevel == 1, "class1 learned skill equipped (skill page system readback)");
     }
     // 缺表（giteminventorysize）→ ERR_SELECT_UNIT_05
     {

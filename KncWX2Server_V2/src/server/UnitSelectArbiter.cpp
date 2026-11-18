@@ -337,8 +337,83 @@ void BuildSelectUnitNot1(int64_t userUID, int authLevel, const db::GUnitRecord& 
         }
     }
     // inventorySlotSize / items / resStone：supplemental 為空（list 路徑等）→ 沿用空/0 佔位
-    out.vecUserSkillPageData.push_back(unit::UserSkillPageData{});  // 一頁全預設（pages 1/1 一致；技能 proc 缺）
-    // vecSkillUnsealed / mapSkillNote：空；skillNoteMaxPageNum = 0
+    if (supplemental) {
+        // §0a23：2013 SERV_SKILL_PAGE_SYSTEM 反推讀回（LoadSkillPageState / GetCashSkillPoint）
+        const db::SkillPageState& sp = supplemental->skillPageState;
+        const auto levelOf = [&sp](int32_t skillID) -> uint8_t {
+            if (skillID <= 0) return 0;
+            for (const auto& sk : sp.skills) {
+                if (sk.skillID == skillID) {
+                    const int32_t lv = sk.skillLevel < 0 ? 0 : (sk.skillLevel > 255 ? 255 : sk.skillLevel);
+                    return static_cast<uint8_t>(lv);
+                }
+            }
+            return 0;
+        };
+        const auto clampShort = [](int32_t v) -> int16_t {
+            if (v <= 0) return 0;
+            if (v > 32767) return 32767;
+            return static_cast<int16_t>(v);
+        };
+        // UnitInfo.equippedSkill / equippedSkillSlotB ← active page（對應原 Active 頁鏡射）
+        const db::SkillPageSlotRow* pageA = nullptr;
+        for (const auto& r : sp.slotA) if (r.pageNumber == sp.activePage) { pageA = &r; break; }
+        const db::SkillSlotBRow* pageB = nullptr;
+        for (const auto& r : sp.slotB) if (r.pageNumber == sp.activePage) { pageB = &r; break; }
+        for (int i = 0; i < 4; ++i) {
+            out.unitInfo.unitSkillData.equippedSkill[i].skillID = clampShort(pageA ? pageA->slot[i] : 0);
+            out.unitInfo.unitSkillData.equippedSkill[i].skillLevel = pageA ? levelOf(pageA->slot[i]) : 0;
+            out.unitInfo.unitSkillData.equippedSkillSlotB[i].skillID = clampShort(pageB ? pageB->slot[i] : 0);
+            out.unitInfo.unitSkillData.equippedSkillSlotB[i].skillLevel = pageB ? levelOf(pageB->slot[i]) : 0;
+        }
+        out.unitInfo.unitSkillData.skillSlotBEndDate = Utf8ToWide(sp.skillSlotBEndDate);
+        out.unitInfo.unitSkillData.skillSlotBExpirationState = 0;   // 無資料源（原 cSkillSlotBExpirationState 語意未知）——誠實 0
+        out.unitInfo.unitSkillData.activeSkillPagesNumber = static_cast<uint8_t>(sp.activePage > 255 ? 255 : sp.activePage);
+        out.unitInfo.unitSkillData.theNumberOfSkillPagesAvailable = static_cast<uint8_t>(sp.pagesAvailable > 255 ? 255 : sp.pagesAvailable);
+        // passiveSkill / skillNote：2013 來源（P_GSkill_Passive_SEL / SERV_SKILL_NOTE）皆無資料源 → 空
+        // 現金技能點（原 gup_get_cash_skill_point_info）：UnitInfo 欄位
+        {
+            const db::CashSkillPointValues& cs = supplemental->cashSkillPoint;
+            const int32_t cp = cs.csPoint < 0 ? 0 : (cs.csPoint > 32767 ? 32767 : cs.csPoint);
+            const int32_t mx = cs.maxCSPoint < 0 ? 0 : (cs.maxCSPoint > 32767 ? 32767 : cs.maxCSPoint);
+            out.unitInfo.csPoint = cp;
+            out.unitInfo.maxCSPoint = mx;
+            out.unitInfo.csPointEndDate = Utf8ToWide(cs.endDate);
+        }
+        // vecUserSkillPageData：每頁一筆（1..pagesAvailable）；usSkillPoint/usCashSkillPoint 無資料源 → 0（§0a23 偏差）；
+        //   userSkillData ← 該頁已學技能（gskill rows：SkillLevel/SkillCSPoint 直通，§0a23）
+        out.vecUserSkillPageData.clear();
+        for (int32_t page = 1; page <= sp.pagesAvailable; ++page) {
+            unit::UserSkillPageData pageData;
+            const db::SkillPageSlotRow* a = nullptr;
+            for (const auto& r : sp.slotA) if (r.pageNumber == page) { a = &r; break; }
+            const db::SkillSlotBRow* b = nullptr;
+            for (const auto& r : sp.slotB) if (r.pageNumber == page) { b = &r; break; }
+            for (int i = 0; i < 4; ++i) {
+                pageData.equippedSkill[i].skillID = clampShort(a ? a->slot[i] : 0);
+                pageData.equippedSkill[i].skillLevel = a ? levelOf(a->slot[i]) : 0;
+                pageData.equippedSkillSlotB[i].skillID = clampShort(b ? b->slot[i] : 0);
+                pageData.equippedSkillSlotB[i].skillLevel = b ? levelOf(b->slot[i]) : 0;
+            }
+            pageData.usSkillPoint = 0;      // 無資料源（P_GSkill_Point_SEL 未知）——誠實 0（§0a23 偏差）
+            pageData.usCashSkillPoint = 0;  // 無資料源（P_GSkill_CashPoint_SEL 未知）——誠實 0（§0a23 偏差）
+            for (const auto& sk : sp.skills) {
+                if (sk.skillPageNumber != page) continue;
+                unit::UserSkillData ud;
+                ud.skillID = clampShort(sk.skillID);
+                ud.skillLevel = static_cast<uint8_t>(sk.skillLevel < 0 ? 0 : (sk.skillLevel > 255 ? 255 : sk.skillLevel));
+                ud.skillCSPoint = static_cast<uint8_t>(sk.skillCSPoint < 0 ? 0 : (sk.skillCSPoint > 255 ? 255 : sk.skillCSPoint));
+                pageData.userSkillData.push_back(ud);
+            }
+            out.vecUserSkillPageData.push_back(std::move(pageData));
+        }
+        // vecSkillUnsealed ← gskillunsealed（原 gup_get_unsealed_skill_info）
+        for (const int32_t sid : sp.unsealed) out.vecSkillUnsealed.push_back(clampShort(sid));
+        // mapSkillNote / skillNoteMaxPageNum：SERV_SKILL_NOTE 無資料源 → 空/0（§0a23 偏差）
+    } else {
+        out.vecUserSkillPageData.push_back(unit::UserSkillPageData{});  // list 路徑：一頁全預設（pages 1/1 一致）
+    }
+    // mapSkillNote：空；skillNoteMaxPageNum = 0
     out.relationshipInfo = unit::RelationshipInfo{};  // 無伴侶 → 全預設
 }
 
@@ -787,6 +862,20 @@ int32_t HandleSelectUnitReq(db::GameStore& gameDb, int64_t userUID, const Select
         svRead = true;
         SelectUnit1Supplemental sup;
         if (outNot1) {
+            if (!gameDb.LoadSkillPageState(req.unitUID, sup.skillPageState, err)) {
+                if (!err.empty()) {
+                    err = std::string("load skill page state: ") + err;
+                    ack.iOK = ERR_SELECT_UNIT_05;
+                    return ack.iOK;
+                }
+            }
+            if (!gameDb.GetCashSkillPoint(req.unitUID, sup.cashSkillPoint, err)) {
+                if (!err.empty()) {
+                    err = std::string("get cash skill point: ") + err;
+                    ack.iOK = ERR_SELECT_UNIT_05;
+                    return ack.iOK;
+                }
+            }
             if (!gameDb.GetInventorySlotSize(req.unitUID, sup.inventorySlotSize, err)) {
                 err = std::string("get inventory slot size: ") + err;
                 ack.iOK = ERR_SELECT_UNIT_05;
