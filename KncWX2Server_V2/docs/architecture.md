@@ -358,7 +358,30 @@ tests/test_string_filter.cpp 的字元集閘門斷言改為依 `X2_REGION_*` 分
 - **測試數**：**JP = 1297、TW = 1295、EU = 1293、CN = 1295 passed / 0 failed**。
 - 剩餘未移植：gmo_*_skill（技能 slot 更新）／gup_get_community_opt_unituid（社群選項查詢——V2 改以 gdenyoption 直接讀回近似，§0a9；relationship 6 欄寫入 EGS_UPDATE_COMMUNITY_OPT 已於 §0a10 以 write-through upsert 移植；P_GDenyOption_UPD 仍缺 proc）／class 5..9 技能列（原 proc 不存在）／LogDB；gspirit 的 Flag 完整語意與復活石補充/精力重置已於 §0a8 移植；Flag 並列槽位 UI 亦未建模。
 
-## 0a25. 2026-11-18 附記（EGS_RESET_SKILL_REQ/ACK：技能重置道具消耗；schema v14 沿用）
+## 0a26. 2026-11-18 附記（EGS_GET_SKILL_REQ/ACK：技能學習／升級寫路徑；schema v15）
+
+承 §0a23（技能頁讀回）／§0a24（技能欄位變更）／§0a25（技能重置）。本切片實作技能學習與升級：`EGS_GET_SKILL_REQ`（294）→ `EGS_GET_SKILL_ACK`（295）。原版為 GS handler 先扣內存 SP/CSP、再非同步送 DB worker 寫技能；V2 無 DB worker／角色內存技能樹，以讀庫驗證→單一 transaction→ACK 一跳 write-through。
+
+**原版（SERV_UPGRADE_SKILL_SYSTEM_2013、SERV_SKILL_PAGE_SYSTEM）**：
+
+- **REQ／ACK**（`Common/ClientPacket.h:2508/2526`；`Common/CommonPacket.h:9648`）：REQ=`[JP only: vector<int> m_vecNowLearnSkill] + int m_iActiveSkillPageNumber + map<int,KGetSkillInfo>`；KGetSkillInfo=`m_iSkillID, m_iBeforeSkillLevel, m_iSkillLevel, m_iSpendSkillCSPoint` 四個 int；ACK=`m_iOK + m_iActiveSkillPageNumber + map<int,KGetSkillInfo> + m_iRemainSP + m_iRemainCSP`。wire 順序即 PUT 順序（`ClientPacket.cpp:3610–3710`）。事件 294/295。
+- **驗證順序**（`GameServer/GSUserGameCommon.cpp:4337–4567`）：頁碼不符→ERR_SKILL_PAGE_01；map 空→ERR_SKILL_09；`CheckGetNewSkill`（`UserSkillTree.cpp:2559–2721`：技能 templet/tree 存在、未達 max、角色等級、born-sealed 解封、class、前置技能、tier 同階排斥）；CSP 過期且 SP≤0→ERR_SKILL_17，未過期且 SP+CSP≤0→ERR_SKILL_18；`GetNecessarySkillPoint`（:1673–1803）：已學技能 cost=`RequireUpgrade×(target−current)`，未學 cost=`RequireLearn + RequireUpgrade×(target−1)`，target 小於 current／小於 1 → false；若 CSP 未過期，總 CSP=`min(totalCost, CSP)`、總 SP=`totalCost−totalCSP`，否則全額 SP；資源不足→ERR_SKILL_18；過期且 totalCSP>0→ERR_SKILL_24（一般不可達）。逐技能 `m_iSpendSkillCSPoint`：未過期時先寫該技能**全額 cost**，隨後再加既有 `SkillCSPoint`；過期時不覆寫 REQ 欄位，仍加既有值。`SubtractSPoint`／`SetCSPoint` 後送 DB。
+- **DB 兩跳**（`GSGameDBThread.cpp:11040+`）：`m_iCSPoint >= 0` 才更新現金池；逐技能呼叫 `P_GSkill_New_UPD`（僅 IN 使用 SERV_ALL_RENEWAL_SP 時改 MER）；存 `(UnitUID, SkillID=value.m_iSkillID, SkillLevel, SkillCSPoint, SkillPageNumber)`。DB 失敗回 ACK，GS 恢復 SP/CSP；成功後 `CheckAndUpdateSkillLevelAndCSPOnUsedPage` 更新內存並在特定 Room 類型廣播 `ERM_CHANGE_SKILL_INFO_IN_ROOM_NOT`。
+- **NetError 實編核對**（原 `Common/Neterror/NetError_def.h`，g++ -fpermissive；JP/TW/EU/CN/US/Global enum 值一致）：ERR_SKILL_00=182、_01=183、_03=184、_07=188、_09=190、_10=191、_13=193、_14=194、_15=195、_16=196、_17=197、_18=198、_19=199、_20=200、_21=201、_24=204、_29=1278、ERR_SKILL_PAGE_01=1387、PAGE_04=1386、ERR_ODBC_01=555。曾在 V2 `NetError.h`／`test_change_skill_slot.cpp` 誤記 ERR_SKILL_09/10/13/14=164/165/167/168（手工計數）；本切片以實編機讀修正為 190/191/193/194。
+
+**V2 實作**：
+
+- **wire／決策** `src/server/GetSkillProtocol.{h,cpp}`：REQ／ACK、KGetSkillInfo 四 int、map count-prefix serializer；只在 `X2_REGION_JP` REQ 帶 `vecNowLearnSkill`（其他五建置地區不帶）。成功 ACK 回傳完整 map，更新每列 `iSpendSkillCSPoint`；`iRemainSP/CSP` 為 transaction 後讀回值。
+- **成本與限制**：原 SkillTemplet/SkillTreeTemplet/NewSkillTempletVer2.lua 與 `CalcLevelUpIncreaseSkillPoint` Lua 不在明碼倉庫（工具目錄的 Lua 多為加密 blob）；V2 僅能推定 Learn=1／Upgrade=1，且不能校驗技能存在、職業、角色等級、解封、max level、前置技能／tier 規則。正整數未知 SkillID 因此仍可能被寫入；需在取得可信技能表後補存在性/前置規則。SP 檢查以 `gunit.SPoint` unit-global 持久值代替原技能頁內存 SP；CSP 過期定義沿用 `MaxCSPoint==0`。
+- **交易** `GameStore::CommitGetSkill`：同一 transaction 逐列 upsert `gskill`、`gunit.SPoint -= totalSP`、upsert `gskillcash.CSPoint`；任何階段失敗整筆 rollback。ERR 映射：技能列／SP／COMMIT → ERR_SKILL_00=182；現金池 → ERR_SKILL_24=204。此為原 DB worker 路徑的 write-through 對位，無中間內存扣點／補償。
+- **schema v15（§0a26）**：v14 的 `gskill` PK 為 `(UnitUID,SkillID)`，不能表示同技能在多個 SkillPageNumber 各自學習；新增 migration v15 重建表為 PK `(UnitUID,SkillID,SkillPageNumber)`、搬移舊列且欄位值不變。**此 schema v15 必要變更**；v14 已有 SkillLevel/SkillCSPoint/SkillPageNumber，無需再加欄位。
+- **驗證／測試**：`tests/test_get_skill.cpp` codec golden bytes（含 JP-only vector）、事件／NetError 機讀值、學習／升級扣點、過期 CSP 欄位行為、跨頁同技能、失敗 ACK 與 transaction rollback。全五地區 `tools/build_and_test.sh` 全綠：JP **2278**、TW **2276**、EU **2274**、CN **2276**、US **2275 passed / 0 failed**（各含 get_skill 49 checks、reset_skill 129 checks）；`bash tools/verify_generated.sh` OK（xlrd 2.0.2）；原始碼 NUL scan clean。
+
+**偏差聲明**（完整條目另列於 `GetSkillProtocol.h` 檔頭）：(1) 無 Field/Room 狀態閘門、NOT 廣播與統計/角色日誌；(2) 技能 Lua/templet 缺失，以 ID>0 放行，正數未知技能亦可能寫入；(3) class/level/max/seal/prerequisite/tier 驗證暫缺；(4) active page 始終有效，PAGE_04 不可達；(5) 費用 1/1 推定；(6) unit-global SPoint 代替 page-local；(7) 忠實保留原奇特的 per-skill full-cost CSP 記錄（總 CSP/SP 則共用池切分）與 expired 時信任 REQ spend 欄位；(8) `SERV_ALL_RENEWAL_SP` 僅 IN 定義，JP/TW/EU/CN/US 均走非 RENEWAL_SP 對位；(9) CSP=0 原 `-1` 不寫回通道未保留，V2 一律寫 gskillcash；(10) 預驗證錯誤 ACK 全零、transaction 失敗 ACK 回顯頁碼且餘額為零（原 DB ACK 的 `GetLastError()` 值不定）；(11) JP 子任務 vector 收線不處理；(12) SP 直接 transaction 持久化（原靠週期 gup_update_unit_info）；(13) 對 `map key != value.m_iSkillID` 加 V2 完整性閘門（原驗證查 key、DB 寫 value，V2 mismatch 回 ERR_SKILL_01）；(14) wire golden bytes 自洽、未對原 SDK 實機驗證。
+
+**狀態**：實作與驗收完成；五地區 build/test 全綠，`verify_generated` OK，NUL clean。
+
+## 0a25. 2026-11-18 附記（EGS_RESET_SKILL_REQ/ACK：技能重置道具消耗；實作時 schema v14，現由 v15 延伸）
 
 承 §0a23（技能頁讀回）／§0a24（欄位變更）。本期實作**技能重置**——消耗「技能重置道具」退還 SP／技能點並重置技能等級：`EGS_RESET_SKILL_REQ`（305）→ `EGS_RESET_SKILL_ACK`（306）。原版對應 `DBE_RESET_SKILL_REQ`（DB worker）→ `DBE_RESET_SKILL_ACK`（GSGameDBThread 派發）路徑；V2 無 DB worker → 驗證→單一 transaction→ACK 一跳完成（write-through，§0a24 慣例）。
 
@@ -434,7 +457,7 @@ tests/test_string_filter.cpp 的字元集閘門斷言改為依 `X2_REGION_*` 分
 11. **交換目標**：iSlotID2 = **第一個**（欄位索引最小）裝備該技能的欄位（GetSlotID 語意）；同一技能可裝備多欄（原版允許）。
 12. 線路佈局為自洽 golden bytes（BE、tagging=false），未對原 SDK 實機驗證。
 13. 本期修復/補齊：NetError ERR_SKILL_09/10/13/14 常數（2026-11-18 實編原 NetError_def.h 核對）；`Database::Changes()`（sqlite3_changes64）已於 §0a21 存在，本期沿用。
-14. 已知未覆蓋：EGS_GET_SKILL_REQ（技能學習/升級，SERV_UPGRADE_SKILL_SYSTEM_2013；依賴 SkillTemplet/CalcLevelUpIncreaseSkillPoint Lua，**皆不在倉庫**）——**仍未開始**；EGS_RESET_SKILL_REQ 已於 §0a25 移植（write-through；消耗重置道具）；EGS_ADMIN_* 屬管理協議，不納入。技能欄位變更的「副本結束延遲 flush」與「Room 廣播 NOT」為永久性架構差異（V2 無副本/Room），不會再補。
+14. 已移植：EGS_GET_SKILL_REQ（§0a26；技能表資料缺失導致的技能規則偏差仍待補）、EGS_RESET_SKILL_REQ（§0a25）；EGS_ADMIN_* 屬管理協議，不納入。技能欄位變更／學習的 Room 廣播與副本延遲 flush 為 V2 無 Room/副本之架構差異。
 
 ## 0a23. 2026-11-18 附記（SELECT_UNIT_1_NOT 技能頁系統：SERV_SKILL_PAGE_SYSTEM 2013 路徑反推；schema v14）
 

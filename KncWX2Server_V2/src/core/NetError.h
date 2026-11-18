@@ -61,15 +61,30 @@ inline constexpr int ERR_TITLE_02 = 496;  // 사용 가능한 기간이 지난 �
 inline constexpr int ERR_TITLE_03 = 497;  // 존재하지 않는 칭호입니다.（不存在該稱號）
 inline constexpr int ERR_TITLE_04 = 498;  // 칭호를 획득하지 못했습니다.
 inline constexpr int ERR_TITLE_05 = 499;  // 이미 보유 중인 칭호입니다.
-// ERR_SKILL_*（164–180；2026-11-18 以 g++ 直接編譯原 NetError_def.h 機讀核對，純連續 enum；ERR_SKILL_27=528 顯式值未納入）
-inline constexpr int ERR_SKILL_09 = 164;  // 변경할 스킬 슬롯 아이디가 잘못되었습니다.（技能欄位 ID 錯誤）
-inline constexpr int ERR_SKILL_10 = 165;  // 배우지 않은 스킬을 등록하려고 하였습니다.（未學會的技能）
-inline constexpr int ERR_SKILL_13 = 167;  // 스킬 슬롯 B를 사용하실 수 없습니다.（技能欄位 B 不可用／已過期）
-inline constexpr int ERR_SKILL_14 = 168;  // 스킬 슬롯 B 확장 중 DB오류가 발생하였습니다.（V2 借用為「技能欄位寫入 DB 失敗」語列）
+// ERR_SKILL_*（182–206；2026-11-18 以 g++ -fpermissive 直接編譯原 Common/Neterror/NetError_def.h 機讀核對，五個地區變體 JP/TW/CN/US/Global 一致；純連續 enum）
+//   ⚠ 更正：本檔早前（2026-11-18 早些時候）ERR_SKILL_09/10/13/14 誤植 164/165/167/168（手工計數）；
+//   g++ 機讀實測連續 enum 為 190/191/193/194，已隨 §0a26 修正（tests/test_change_skill_slot.cpp 同步修正）。
+inline constexpr int ERR_SKILL_00 = 182;  // 이미 최고 레벨까지 배운 스킬입니다.（已達最高等級；V2 借用為「技能列 upsert／gunit SP 寫入 DB 失敗」語列）
+inline constexpr int ERR_SKILL_01 = 183;  // 존재하지 않는 스킬입니다.（不存在的技能）
+inline constexpr int ERR_SKILL_03 = 184;  // 레벨이 낮아서 아직 스킬을 배울 수 없습니다.（角色等級不足）
+inline constexpr int ERR_SKILL_07 = 188;  // 선행 습득 스킬을 배우지 않았습니다.（未學前置技能）
+inline constexpr int ERR_SKILL_09 = 190;  // 변경할 스킬 슬롯 아이디가 잘못되었습니다.（技能欄位 ID 錯誤；原碼 CHECK/GET_SKILL_REQ 亦用於空 mapSkillList）
+inline constexpr int ERR_SKILL_10 = 191;  // 배우지 않은 스킬을 등록하려고 하였습니다.（未學會的技能）
+inline constexpr int ERR_SKILL_13 = 193;  // 스킬 슬롯 B를 사용하실 수 없습니다.（技能欄位 B 不可用／已過期）
+inline constexpr int ERR_SKILL_14 = 194;  // 스킬 슬롯 B 확장 중 DB오류가 발생하였습니다.（V2 借用為「技能欄位寫入 DB 失敗」語列）
+inline constexpr int ERR_SKILL_15 = 195;  // 봉인 해제되지 않은 스킬은 배울 수 없습니다.（未解封技能）
+inline constexpr int ERR_SKILL_16 = 196;  // 배울 수 없는 계층에 있는 스킬입니다.（不可學習的職業）
+inline constexpr int ERR_SKILL_17 = 197;  // 스킬 포인트가 부족해서 스킬을 획득할 수 없습니다.（技能點不足／請求等級遞減非法）
+inline constexpr int ERR_SKILL_18 = 198;  // 스킬 포인트가 부족해서 스킬을 획득할 수 없습니다.（技能點不足）
+inline constexpr int ERR_SKILL_19 = 199;  // 존재하지 않는 스킬의 정보를 변경하려고 하였습니다.（修改不存在的技能）
+inline constexpr int ERR_SKILL_21 = 201;  // 스킬 제한 레벨보다 높은 레벨로 설정하려고 하였습니다.（超過技能等級上限）
+inline constexpr int ERR_SKILL_29 = 1278; // 동일 등급의 스킬을 동시에 습득하려고 합니다.（同階技能互斥）
+inline constexpr int ERR_ODBC_01 = 555;  // ODBC 실패（原 DBE 系查詢失敗 primordial 值；V2 用於 EGS_GET_SKILL_REQ 提交前 DB 讀取失敗映射）
 // ERR_SKILL_20 / ERR_SKILL_24 / ERR_SKILL_PAGE_01 / ERR_RESET_SKILL_00..05（200·204·1387·444..449；2026-11-18 以 g++ -fpermissive 直接編譯原 Common/Neterror/NetError_def.h 機讀核對，五個地區變體 JP/TW/CN/US/Global 全部一致）
 inline constexpr int ERR_SKILL_20 = 200;  // 스킬 레벨 정보가 이상합니다.（技能等級資訊異常——V2 用於「未學會/等級不足 1」）
 inline constexpr int ERR_SKILL_24 = 204;  // 캐시 스킬포인트 정보 갱신이 실패하였습니다.（現金技能點更新失敗）
 inline constexpr int ERR_SKILL_PAGE_01 = 1387;  // 클라이언트에서 보내준 활성화된 스킬 페이지 번호가 서버의 정보와 다릅니다.（作用技能頁不一致）
+inline constexpr int ERR_SKILL_PAGE_04 = 1386;  // 활성화 중인 스킬 페이지 번호가 이상 합니다.（作用技能頁碼異常）
 inline constexpr int ERR_RESET_SKILL_00 = 444;  // 존재하지 않는 스킬입니다.（不存在的技能）
 inline constexpr int ERR_RESET_SKILL_01 = 445;  // 스킬 초기화 아이템이 존재하지 않습니다.（無技能重置道具）
 inline constexpr int ERR_RESET_SKILL_02 = 446;  // 스킬 초기화 아이템을 DB에서 삭제하지 못했습니다.（重置道具 DB 更新/刪除失敗）

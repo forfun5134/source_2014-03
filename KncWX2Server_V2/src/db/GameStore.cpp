@@ -359,6 +359,31 @@ CREATE TABLE gskillcash (
 );
 )SQL";
 
+// v15（§0a26）：gskill 主鍵重建為 (UnitUID, SkillID, SkillPageNumber)——2013 分頁系統下同技能可在不同頁共存
+//   （2008 schema 的 PK(UnitUID,SkillID) 不含頁碼）。SQLite 無法 ALTER PK → 重建表（資料搬移、FK 保留）。
+static const char* kRebuildGSkillV15a = R"SQL(
+CREATE TABLE gskill_v15 (
+    UnitUID INTEGER NOT NULL REFERENCES gunit(UnitUID),
+    SkillID INTEGER NOT NULL,
+    RegDate TEXT NOT NULL DEFAULT (datetime('now')),
+    SkillLevel INTEGER NOT NULL DEFAULT 1,
+    SkillCSPoint INTEGER NOT NULL DEFAULT 0,
+    SkillPageNumber INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (UnitUID, SkillID, SkillPageNumber)
+);
+)SQL";
+static const char* kRebuildGSkillV15b = R"SQL(
+INSERT INTO gskill_v15 (UnitUID, SkillID, RegDate, SkillLevel, SkillCSPoint, SkillPageNumber)
+    SELECT s.UnitUID, s.SkillID, s.RegDate, s.SkillLevel, s.SkillCSPoint, s.SkillPageNumber
+      FROM gskill AS s JOIN gunit AS u ON u.UnitUID = s.UnitUID;
+)SQL";
+static const char* kRebuildGSkillV15c = R"SQL(
+DROP TABLE gskill;
+)SQL";
+static const char* kRebuildGSkillV15d = R"SQL(
+ALTER TABLE gskill_v15 RENAME TO gskill;
+)SQL";
+
 static const char* kCreateGItemWishListV13 = R"SQL(
 CREATE TABLE gitemwishlist (
     UserUID INTEGER NOT NULL REFERENCES guser(UserUID) ON DELETE CASCADE ON UPDATE CASCADE,  -- 原 FK→GUser CASCADE
@@ -567,6 +592,18 @@ bool ApplyGameMigrations(Database& db, std::string& err)
             std::string unused;
             db.Rollback(unused);
             err = std::string("game migration v14 failed (backfill expand): ") + err;
+            return false;
+        }
+    }
+    if (v < 15) {
+        // §0a26：gskill 主鍵加入 SkillPageNumber（2013 分頁系統同技能可跨頁共存）；重建表＋資料搬移。
+        if (!db.Exec(kRebuildGSkillV15a, err) ||
+            !db.Exec(kRebuildGSkillV15b, err) ||
+            !db.Exec(kRebuildGSkillV15c, err) ||
+            !db.Exec(kRebuildGSkillV15d, err)) {
+            std::string unused;
+            db.Rollback(unused);
+            err = std::string("game migration v15 failed (rebuild gskill): ") + err;
             return false;
         }
     }
@@ -2258,6 +2295,91 @@ bool GameStore::CommitResetSkill(int64_t unitUID, int64_t itemUID, int32_t activ
     }
 
     if (!m_db.Commit(err)) { failStage = ResetSkillFailure::Skill; return false; }  // commit 失敗 → 呼叫端映射 ERR_RESET_SKILL_03
+    err.clear();
+    return true;
+}
+
+bool GameStore::CommitGetSkill(int64_t unitUID, int32_t activePage,
+                               const std::vector<GetSkillCommitSkill>& skills,
+                               int32_t sPointCost, int32_t newCSPoint,
+                               GetSkillCommit& out, GetSkillFailure& failStage,
+                               std::string& err)
+{
+    out = GetSkillCommit{};
+    failStage = GetSkillFailure::None;
+    err.clear();
+    if (unitUID <= 0) { err = "invalid unit uid"; failStage = GetSkillFailure::Skill; return false; }
+    if (activePage < 1) { err = "invalid page number"; failStage = GetSkillFailure::Skill; return false; }
+    if (sPointCost < 0) { err = "invalid spoint cost (negative)"; failStage = GetSkillFailure::SPoint; return false; }
+    for (const auto& sk : skills) {
+        if (sk.skillID <= 0) { err = "invalid skill id"; failStage = GetSkillFailure::Skill; return false; }
+        if (sk.skillLevelAfter < 1) { err = "invalid skill level target"; failStage = GetSkillFailure::Skill; return false; }
+        if (sk.skillCSPoint < 0) { err = "invalid skill csp"; failStage = GetSkillFailure::Skill; return false; }
+    }
+
+    if (!m_db.Begin(err)) return false;
+    auto rollback = [this]() { std::string u; m_db.Rollback(u); };
+
+    // (1) 技能列 upsert（= 作用頁；v15 起 PK 含 SkillPageNumber）
+    for (const auto& sk : skills) {
+        Statement st;
+        if (!st.Prepare(m_db,
+                "INSERT INTO gskill (UnitUID, SkillID, SkillPageNumber, SkillLevel, SkillCSPoint) VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(UnitUID, SkillID, SkillPageNumber) DO UPDATE SET "
+                "SkillLevel = excluded.SkillLevel, SkillCSPoint = excluded.SkillCSPoint;", err)) {
+            failStage = GetSkillFailure::Skill; rollback(); return false;
+        }
+        if (!st.BindInt(1, unitUID, err) || !st.BindInt(2, sk.skillID, err) || !st.BindInt(3, activePage, err) ||
+            !st.BindInt(4, sk.skillLevelAfter, err) || !st.BindInt(5, sk.skillCSPoint, err)) {
+            failStage = GetSkillFailure::Skill; rollback(); return false;
+        }
+        std::string stepErr;
+        if (st.StepRow(stepErr)) { err = "unexpected row from gskill upsert"; failStage = GetSkillFailure::Skill; rollback(); return false; }
+        if (!stepErr.empty()) { err = stepErr; failStage = GetSkillFailure::Skill; rollback(); return false; }
+        out.skills.push_back(sk);
+    }
+
+    // (2) gunit.SPoint -= sPointCost（讀回絕對值供 ACK）
+    {
+        Statement st;
+        if (!st.Prepare(m_db, "UPDATE gunit SET SPoint = SPoint - ? WHERE UnitUID = ? AND Deleted = 0;", err)) {
+            failStage = GetSkillFailure::SPoint; rollback(); return false;
+        }
+        if (!st.BindInt(1, sPointCost, err) || !st.BindInt(2, unitUID, err)) {
+            failStage = GetSkillFailure::SPoint; rollback(); return false;
+        }
+        std::string stepErr;
+        if (st.StepRow(stepErr)) { err = "unexpected row from UPDATE gunit SPoint"; failStage = GetSkillFailure::SPoint; rollback(); return false; }
+        if (!stepErr.empty()) { err = stepErr; failStage = GetSkillFailure::SPoint; rollback(); return false; }
+        if (m_db.Changes() != 1) { err = "gunit SPoint update affected rows != 1"; failStage = GetSkillFailure::SPoint; rollback(); return false; }
+    }
+    {
+        Statement st;
+        if (!st.Prepare(m_db, "SELECT SPoint FROM gunit WHERE UnitUID = ?;", err)) { failStage = GetSkillFailure::SPoint; rollback(); return false; }
+        if (!st.BindInt(1, unitUID, err)) { failStage = GetSkillFailure::SPoint; rollback(); return false; }
+        std::string stepErr;
+        if (!st.StepRow(stepErr)) { err = stepErr.empty() ? "gunit row missing after SPoint update" : stepErr; failStage = GetSkillFailure::SPoint; rollback(); return false; }
+        out.sPointAbsolute = static_cast<int32_t>(st.ColumnInt64(0));
+    }
+
+    // (3) gskillcash upsert CSPoint=newCSPoint（v14 一律寫入慣例；見 docs §0a25 偏差 9/14）
+    {
+        Statement st;
+        if (!st.Prepare(m_db,
+                "INSERT INTO gskillcash (UnitUID, CSPoint) VALUES (?, ?) "
+                "ON CONFLICT(UnitUID) DO UPDATE SET CSPoint = excluded.CSPoint;", err)) {
+            failStage = GetSkillFailure::CashPoint; rollback(); return false;
+        }
+        if (!st.BindInt(1, unitUID, err) || !st.BindInt(2, newCSPoint, err)) {
+            failStage = GetSkillFailure::CashPoint; rollback(); return false;
+        }
+        std::string stepErr;
+        if (st.StepRow(stepErr)) { err = "unexpected row from gskillcash upsert"; failStage = GetSkillFailure::CashPoint; rollback(); return false; }
+        if (!stepErr.empty()) { err = stepErr; failStage = GetSkillFailure::CashPoint; rollback(); return false; }
+        out.csPoint = newCSPoint;
+    }
+
+    if (!m_db.Commit(err)) { failStage = GetSkillFailure::Skill; return false; }   // commit 失敗 → 呼叫端映射 ERR_SKILL_00
     err.clear();
     return true;
 }

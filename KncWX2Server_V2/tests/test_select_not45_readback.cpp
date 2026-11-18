@@ -57,7 +57,7 @@ static void TestSchemaV9()
 {
     Fixture fx;
     int v = fx.db.UserVersion(fx.err);
-    CHECK(v == kGameSchemaVersion && kGameSchemaVersion == 14, "schema v14 (user_version == 14)");
+    CHECK(v == kGameSchemaVersion && kGameSchemaVersion == 15, "schema v15 (user_version == 15)");
     CHECK(fx.db.Exec("SELECT 1 FROM grecommend LIMIT 0;", fx.err), "grecommend exists");
 }
 

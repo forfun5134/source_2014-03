@@ -68,7 +68,7 @@ static void TestSchemaV5()
 {
     Fixture fx;
     int v = fx.db.UserVersion(fx.err);
-    CHECK(v == kGameSchemaVersion && kGameSchemaVersion == 14, "schema v14 (user_version == 14; gquests_* created at v5)");
+    CHECK(v == kGameSchemaVersion && kGameSchemaVersion == 15, "schema v15 (user_version == 15; gquests_* created at v5)");
     CHECK(fx.db.Exec("SELECT 1 FROM gquests_complete LIMIT 0;", fx.err), "gquests_complete table exists");
     CHECK(fx.db.Exec("SELECT 1 FROM gquests_repeat LIMIT 0;", fx.err), "gquests_repeat table exists");
     // PK：gquests_complete PK(UnitUID, QuestID)——需要一個真實 unit（FK 啟用）

@@ -169,8 +169,8 @@ static void TestEventIdsAndErrorCodes()
           static_cast<uint16_t>(EventID::EGS_CHANGE_SKILL_SLOT_ACK) == 297 &&
           static_cast<uint16_t>(EventID::EGS_CHANGE_SKILL_SLOT_NOT) == 298,
           "event ids 296/297/298");
-    CHECK(ERR_SKILL_09 == 164 && ERR_SKILL_10 == 165 && ERR_SKILL_13 == 167 && ERR_SKILL_14 == 168,
-          "ERR_SKILL_09/10/13/14 == 164/165/167/168 (compiled against original NetError_def.h)");
+    CHECK(ERR_SKILL_09 == 190 && ERR_SKILL_10 == 191 && ERR_SKILL_13 == 193 && ERR_SKILL_14 == 194,
+          "ERR_SKILL_09/10/13/14 == 190/191/193/194 (g++ -fpermissive 機讀實編原 NetError_def.h；早前 164/165/167/168 為手工計數錯誤，§0a26 修正)");
 }
 
 // ---------- handler ----------

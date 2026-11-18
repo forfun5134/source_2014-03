@@ -47,7 +47,10 @@ namespace x2 { namespace db {
 //   新 gskillexpand（P_GSkill_Expand_SEL 對應）／gskillslotnew（P_GSkillSlot_New_SEL）／gskillslot2new（P_GSkillSlot2_New_SEL）／
 //   gskillunsealed（P_GSkill_Unsealed_SEL）／gskillcash（gup_get_cash_skill_point_info 對應）。
 //   原 proc/表皆不在倉庫——結構與語意全由 GSGameDBThread 行為反推，見 docs §0a23。
-inline constexpr int kGameSchemaVersion = 14;
+// v15（§0a26）：gskill 主鍵重建為 (UnitUID, SkillID, SkillPageNumber)——2013 分頁系統下同技能可在
+//   不同頁分別學習；2008 schema 的 PRIMARY KEY (UnitUID, SkillID) 不含頁碼，會擋住跨頁共存
+//   （且 ON CONFLICT 需同名唯一索引）。SQLite 無法改 PK → 重建表（資料搬移、FK 保留）。
+inline constexpr int kGameSchemaVersion = 15;
 
 // game DB 遷移：v0→v1 建立 guser / gunit / gunit_nickname / gdeleted_nickname_history；冪等
 bool ApplyGameMigrations(Database& db, std::string& err);
@@ -436,6 +439,32 @@ public:
                           const std::string& nowUtc,
                           ResetSkillCommit& out, ResetSkillFailure& failStage,
                           std::string& err);
+    // 技能學習／升級提交（§0a26；原 DBE_INSERT_SKILL_REQ 的 DB worker 路徑之 V2 單一 transaction 版）：
+    //   skills 依 req map 鍵遞增順序傳入；每列 upsert gskill（v15 起 PK 含 SkillPageNumber）：
+    //     INSERT ... ON CONFLICT(UnitUID, SkillID, SkillPageNumber) DO UPDATE SET
+    //       SkillLevel=excluded.SkillLevel, SkillCSPoint=excluded.SkillCSPoint
+    //   （新列 RegDate 以 datetime('now') 填入——原 P_GSkill_New_* 對新插入列記 RegDate）。
+    //   gunit.SPoint -= sPointCost（>= 0；原 SP 以 iTotalSP 扣減）；讀回絕對值供 ACK（failStage=SPoint）。
+    //   gskillcash upsert CSPoint=newCSPoint（v14 一律寫入慣例）（failStage=CashPoint）。
+    //   單一 transaction；任一步驟失敗 → 整體 rollback + false。failStage 指出失敗階段。
+    enum class GetSkillFailure { None, Skill, SPoint, CashPoint };
+    struct GetSkillCommitSkill
+    {
+        int32_t skillID = 0;
+        int32_t skillLevelAfter = 0;   // 目標等級（>= 1）
+        int32_t skillCSPoint = 0;      // 原 m_iSpendSkillCSPoint 計算結果（本次 cost/client 值 + 既有 gskill.SkillCSPoint）
+    };
+    struct GetSkillCommit
+    {
+        std::vector<GetSkillCommitSkill> skills;   // 與輸入順序一致
+        int32_t sPointAbsolute = 0;                // gunit.SPoint 新絕對值
+        int32_t csPoint = 0;                       // gskillcash.CSPoint 新值
+    };
+    bool CommitGetSkill(int64_t unitUID, int32_t activePage,
+                        const std::vector<GetSkillCommitSkill>& skills,
+                        int32_t sPointCost, int32_t newCSPoint,
+                        GetSkillCommit& out, GetSkillFailure& failStage,
+                        std::string& err);
 
 private:
     Database& m_db;

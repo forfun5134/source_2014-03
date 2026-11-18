@@ -74,17 +74,32 @@ static int64_t Scalar(Database& db, const char* sql, int64_t arg, bool& ok)
     return st.ColumnInt64(0);
 }
 
-static void TestSchemaV14()
+static void TestSchemaV15()
 {
     Fixture fx;
     int v = fx.db.UserVersion(fx.err);
-    CHECK(v == kGameSchemaVersion && kGameSchemaVersion == 14, "schema v14 (user_version == 14)");
+    CHECK(v == kGameSchemaVersion && kGameSchemaVersion == 15, "schema v15 (user_version == 15)");
     CHECK(fx.db.Exec("SELECT 1 FROM gskillexpand LIMIT 0;", fx.err), "gskillexpand exists");
     CHECK(fx.db.Exec("SELECT 1 FROM gskillslotnew LIMIT 0;", fx.err), "gskillslotnew exists");
     CHECK(fx.db.Exec("SELECT 1 FROM gskillslot2new LIMIT 0;", fx.err), "gskillslot2new exists");
     CHECK(fx.db.Exec("SELECT 1 FROM gskillunsealed LIMIT 0;", fx.err), "gskillunsealed exists");
     CHECK(fx.db.Exec("SELECT 1 FROM gskillcash LIMIT 0;", fx.err), "gskillcash exists");
     CHECK(fx.db.Exec("SELECT SkillLevel, SkillCSPoint, SkillPageNumber FROM gskill LIMIT 0;", fx.err), "gskill extended columns exist");
+}
+
+static void TestSameSkillCanBeLearnedOnMultiplePages()
+{
+    Fixture fx;
+    const int64_t uid = fx.MakeUnit(700, L"skill_v15", 1);
+    CHECK(uid > 0, "unit created for v15 cross-page key");
+    if (uid <= 0) return;
+    // 建角預設技能 10000 在第 1 頁；v15 複合 PK 允許第 2 頁同 ID 獨立一列。
+    CHECK(fx.db.Exec("INSERT INTO gskill (UnitUID, SkillID, SkillLevel, SkillCSPoint, SkillPageNumber) VALUES (" +
+                     std::to_string(uid) + ", 10000, 2, 0, 2);", fx.err), "same SkillID allowed on page 2");
+    bool ok = false;
+    int64_t count = Scalar(fx.db,
+        "SELECT COUNT(*) FROM gskill WHERE UnitUID = ? AND SkillID = 10000;", uid, ok);
+    CHECK(ok && count == 2, "same skill has independent rows on pages 1 and 2");
 }
 
 static void TestMigrationBackfillFromV13()
@@ -103,8 +118,8 @@ static void TestMigrationBackfillFromV13()
     CHECK(db.Exec("INSERT INTO gskill (UnitUID, SkillID) VALUES (9001, 10000),(9002, 10000);", err), "legacy skill rows (9002 orphan)");
     CHECK(db.Exec("INSERT INTO gskillslot VALUES (9001, 10000, 0, 0),(9002, 10000, 0, 0);", err), "legacy slot rows (9002 orphan)");
     CHECK(db.SetUserVersion(13, err), "set user_version=13");
-    CHECK(ApplyGameMigrations(db, err), "migrate v13 -> v14");
-    CHECK(db.UserVersion(err) == 14, "user_version == 14 after migration");
+    CHECK(ApplyGameMigrations(db, err), "migrate v13 -> v15");
+    CHECK(db.UserVersion(err) == 15, "user_version == 15 after migration");
     {
         bool ok = false;
         int64_t v = Scalar(db, "SELECT Slot01 FROM gskillslotnew WHERE UnitUID = ? AND SkillPageNumber = 1;", 9001, ok);
@@ -310,7 +325,8 @@ static void TestCashSkillPointRoundtrip()
 void RunSkillPageReadbackTestsByRef(int& pass, int& fail)
 {
     const int pass0 = g_pass_sk, fail0 = g_fail_sk;
-    TestSchemaV14();
+    TestSchemaV15();
+    TestSameSkillCanBeLearnedOnMultiplePages();
     TestMigrationBackfillFromV13();
     TestCreateSelectRoundtrip();
     TestMultiPageWiring();
