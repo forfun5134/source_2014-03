@@ -1341,3 +1341,9 @@ V2 目前**原樣保留**協議所需的密碼學直譯，這些本身**不符�
 - 保留原版特殊行為：handler 將目前等級（最大 48）誤與白金會員**物品 ID** `CI_BANK_MEMBERSHIP_PLATINUM`（213500）比較，故 48 格不會進入 `_02`，而是取下一等級 `MPB_NONE`、找不到費用並回 `ERR_EXPAND_INVENTORY_ED_03`（1357）。V2 按此實際行為回 `_03`，不將疑似 bug 當成設計意圖改寫。
 - 偏差：固定使用倉庫 Lua 中的費用，未載入可變資源；使用 DB 快照而非在線記憶體，且未實作 Field/Room 狀態檢查。重複 DB 列依現有 V2 加總語義（§0a14）處理；角色不存在、已刪除及 DB 讀取失敗映射 `ERR_ODBC_01`。報價不扣款、不修改倉庫，不包含購買流程。
 - 驗收：JP 2413、TW 2411、EU 2409、CN 2411、US 2410 passed / 0 failed；涵蓋 wire golden bytes、各會員等級、滿級、無效等級回復及 DB 錯誤。
+
+### §0a33 場景顯示選項更新（session 記憶體）
+
+- 對照 `GSUserField.cpp` 的 `EGS_OPTION_UPDATE_REQ/ACK`（573/574）。REQ 的 `KFieldOption` 僅有 `short m_sLimitOption`，預設 35；ACK 為 `KPacketOK`（int32）。原 handler 將輸入直接賦給使用者的記憶體選項並回 `NET_OK`，選項驗證與 Field 通知程式均已註解；V2 因此接受任何 int16 值，不猜測只允許 10/25/35。
+- 此切片提供 codec 與操作由呼叫端持有之 session 狀態的決策函式；無 DB 持久化，也尚未接入實際 session 分派、場景或 Field server。使用時必須每個使用者 session 分別持有狀態。wire golden bytes 為 V2 自洽向量，尚未與原 SDK 實機比對。
+- 驗收：JP 2435、TW 2433、EU 2431、CN 2433、US 2432 passed / 0 failed；涵蓋封包及截斷、預設值、session 隔離與非常規輸入。
