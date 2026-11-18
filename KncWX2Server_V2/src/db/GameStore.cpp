@@ -2127,4 +2127,139 @@ bool GameStore::UpdateSkillSlots(int64_t unitUID, int32_t pageNumber, const int3
     return m_db.Commit(err);
 }
 
+bool GameStore::CommitResetSkill(int64_t unitUID, int64_t itemUID, int32_t activePage,
+                                 int32_t delSkillID, int32_t skillLevelAfter,
+                                 int32_t sPointDelta, int32_t newCSPoint,
+                                 const std::string& nowUtc,
+                                 ResetSkillCommit& out, ResetSkillFailure& failStage,
+                                 std::string& err)
+{
+    out = ResetSkillCommit{};
+    out.itemUID = itemUID;
+    failStage = ResetSkillFailure::None;
+    err.clear();
+    if (unitUID <= 0) { err = "invalid unit uid"; failStage = ResetSkillFailure::Skill; return false; }
+    if (itemUID <= 0) { err = "invalid item uid"; failStage = ResetSkillFailure::Item; return false; }
+    if (activePage < 1) { err = "invalid page number"; failStage = ResetSkillFailure::Skill; return false; }
+    if (delSkillID <= 0) { err = "invalid skill id"; failStage = ResetSkillFailure::Skill; return false; }
+
+    if (!m_db.Begin(err)) return false;
+    auto rollback = [this]() { std::string u; m_db.Rollback(u); };
+    const std::string now = nowUtc.empty() ? std::string("2000-01-01 00:00:00") : nowUtc;
+
+    // (1) 消耗道具數量 -1（原 gup_update_item PT_QUANTITY delta=-1；數量不足 → failStage=Item → ERR_RESET_SKILL_02）
+    {
+        Statement st;
+        if (!st.Prepare(m_db,
+                "UPDATE gitemquantity SET Quantity = Quantity - 1 WHERE ItemUID = ? AND Quantity >= 1;", err)) {
+            failStage = ResetSkillFailure::Item; rollback(); return false;
+        }
+        if (!st.BindInt(1, itemUID, err)) { failStage = ResetSkillFailure::Item; rollback(); return false; }
+        std::string stepErr;
+        if (st.StepRow(stepErr)) { err = "unexpected row from UPDATE gitemquantity"; failStage = ResetSkillFailure::Item; rollback(); return false; }
+        if (!stepErr.empty()) { err = stepErr; failStage = ResetSkillFailure::Item; rollback(); return false; }
+        if (m_db.Changes() != 1) { err = "item quantity update affected rows != 1 (or insufficient quantity)"; failStage = ResetSkillFailure::Item; rollback(); return false; }
+    }
+    // 讀回新數量（本 transaction 內）
+    {
+        Statement st;
+        if (!st.Prepare(m_db, "SELECT Quantity FROM gitemquantity WHERE ItemUID = ?;", err)) { failStage = ResetSkillFailure::Item; rollback(); return false; }
+        if (!st.BindInt(1, itemUID, err)) { failStage = ResetSkillFailure::Item; rollback(); return false; }
+        std::string stepErr;
+        if (!st.StepRow(stepErr)) { err = stepErr.empty() ? "item quantity row missing after update" : stepErr; failStage = ResetSkillFailure::Item; rollback(); return false; }
+        out.itemNewQuantity = static_cast<int32_t>(st.ColumnInt64(0));
+    }
+    // 數量歸零 → gitem 軟刪除（原 gup_delete_item 慣例：DelDate = max(now, RegDate+1s)；Deleted 生成欄翻 1）
+    if (out.itemNewQuantity == 0) {
+        Statement st;
+        if (!st.Prepare(m_db,
+                "UPDATE gitem SET DelDate = max(?, datetime(RegDate, '+1 second'))"
+                " WHERE ItemUID = ? AND Deleted = 0;", err)) { failStage = ResetSkillFailure::Item; rollback(); return false; }
+        if (!st.BindText(1, now, err)) { failStage = ResetSkillFailure::Item; rollback(); return false; }
+        if (!st.BindInt(2, itemUID, err)) { failStage = ResetSkillFailure::Item; rollback(); return false; }
+        std::string stepErr;
+        if (st.StepRow(stepErr)) { err = "unexpected row from gitem soft-delete"; failStage = ResetSkillFailure::Item; rollback(); return false; }
+        if (!stepErr.empty()) { err = stepErr; failStage = ResetSkillFailure::Item; rollback(); return false; }
+        if (m_db.Changes() != 1) { err = "item soft-delete affected rows != 1"; failStage = ResetSkillFailure::Item; rollback(); return false; }
+        out.itemDeleted = true;
+    }
+
+    // (2) 技能列重置（= 作用頁）：levelAfter <= 0 → DELETE；否則 UPDATE SkillLevel=levelAfter, SkillCSPoint=0
+    if (skillLevelAfter <= 0) {
+        Statement st;
+        if (!st.Prepare(m_db,
+                "DELETE FROM gskill WHERE UnitUID = ? AND SkillID = ? AND SkillPageNumber = ?;", err)) {
+            failStage = ResetSkillFailure::Skill; rollback(); return false;
+        }
+        if (!st.BindInt(1, unitUID, err) || !st.BindInt(2, delSkillID, err) || !st.BindInt(3, activePage, err)) {
+            failStage = ResetSkillFailure::Skill; rollback(); return false;
+        }
+        std::string stepErr;
+        if (st.StepRow(stepErr)) { err = "unexpected row from DELETE gskill"; failStage = ResetSkillFailure::Skill; rollback(); return false; }
+        if (!stepErr.empty()) { err = stepErr; failStage = ResetSkillFailure::Skill; rollback(); return false; }
+        if (m_db.Changes() != 1) { err = "skill delete affected rows != 1"; failStage = ResetSkillFailure::Skill; rollback(); return false; }
+        out.skillLevelAfter = 0;
+    } else {
+        Statement st;
+        if (!st.Prepare(m_db,
+                "UPDATE gskill SET SkillLevel = ?, SkillCSPoint = 0"
+                " WHERE UnitUID = ? AND SkillID = ? AND SkillPageNumber = ?;", err)) {
+            failStage = ResetSkillFailure::Skill; rollback(); return false;
+        }
+        if (!st.BindInt(1, skillLevelAfter, err) || !st.BindInt(2, unitUID, err) ||
+            !st.BindInt(3, delSkillID, err) || !st.BindInt(4, activePage, err)) {
+            failStage = ResetSkillFailure::Skill; rollback(); return false;
+        }
+        std::string stepErr;
+        if (st.StepRow(stepErr)) { err = "unexpected row from UPDATE gskill"; failStage = ResetSkillFailure::Skill; rollback(); return false; }
+        if (!stepErr.empty()) { err = stepErr; failStage = ResetSkillFailure::Skill; rollback(); return false; }
+        if (m_db.Changes() != 1) { err = "skill update affected rows != 1"; failStage = ResetSkillFailure::Skill; rollback(); return false; }
+        out.skillLevelAfter = skillLevelAfter;
+    }
+
+    // (3) gunit.SPoint += delta（可為負；讀回絕對值供 ACK）
+    {
+        Statement st;
+        if (!st.Prepare(m_db, "UPDATE gunit SET SPoint = SPoint + ? WHERE UnitUID = ? AND Deleted = 0;", err)) {
+            failStage = ResetSkillFailure::SPoint; rollback(); return false;
+        }
+        if (!st.BindInt(1, sPointDelta, err) || !st.BindInt(2, unitUID, err)) {
+            failStage = ResetSkillFailure::SPoint; rollback(); return false;
+        }
+        std::string stepErr;
+        if (st.StepRow(stepErr)) { err = "unexpected row from UPDATE gunit SPoint"; failStage = ResetSkillFailure::SPoint; rollback(); return false; }
+        if (!stepErr.empty()) { err = stepErr; failStage = ResetSkillFailure::SPoint; rollback(); return false; }
+        if (m_db.Changes() != 1) { err = "gunit SPoint update affected rows != 1"; failStage = ResetSkillFailure::SPoint; rollback(); return false; }
+    }
+    {
+        Statement st;
+        if (!st.Prepare(m_db, "SELECT SPoint FROM gunit WHERE UnitUID = ?;", err)) { failStage = ResetSkillFailure::SPoint; rollback(); return false; }
+        if (!st.BindInt(1, unitUID, err)) { failStage = ResetSkillFailure::SPoint; rollback(); return false; }
+        std::string stepErr;
+        if (!st.StepRow(stepErr)) { err = stepErr.empty() ? "gunit row missing after SPoint update" : stepErr; failStage = ResetSkillFailure::SPoint; rollback(); return false; }
+        out.sPointAbsolute = static_cast<int32_t>(st.ColumnInt64(0));
+    }
+
+    // (4) gskillcash upsert CSPoint=newCSPoint（原 m_iCSPoint>=0 才更新；V2 為自洽一律寫入——見 docs §0a25 偏差）
+    {
+        Statement st;
+        if (!st.Prepare(m_db,
+                "INSERT INTO gskillcash (UnitUID, CSPoint) VALUES (?, ?) "
+                "ON CONFLICT(UnitUID) DO UPDATE SET CSPoint = excluded.CSPoint;", err)) {
+            failStage = ResetSkillFailure::CashPoint; rollback(); return false;
+        }
+        if (!st.BindInt(1, unitUID, err) || !st.BindInt(2, newCSPoint, err)) {
+            failStage = ResetSkillFailure::CashPoint; rollback(); return false;
+        }
+        std::string stepErr;
+        if (st.StepRow(stepErr)) { err = "unexpected row from gskillcash upsert"; failStage = ResetSkillFailure::CashPoint; rollback(); return false; }
+        if (!stepErr.empty()) { err = stepErr; failStage = ResetSkillFailure::CashPoint; rollback(); return false; }
+        out.csPoint = newCSPoint;
+    }
+
+    if (!m_db.Commit(err)) { failStage = ResetSkillFailure::Skill; return false; }  // commit 失敗 → 呼叫端映射 ERR_RESET_SKILL_03
+    err.clear();
+    return true;
+}
+
 }} // namespace x2::db

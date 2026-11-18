@@ -66,5 +66,16 @@ inline constexpr int ERR_SKILL_09 = 164;  // 변경할 스킬 슬롯 아이디�
 inline constexpr int ERR_SKILL_10 = 165;  // 배우지 않은 스킬을 등록하려고 하였습니다.（未學會的技能）
 inline constexpr int ERR_SKILL_13 = 167;  // 스킬 슬롯 B를 사용하실 수 없습니다.（技能欄位 B 不可用／已過期）
 inline constexpr int ERR_SKILL_14 = 168;  // 스킬 슬롯 B 확장 중 DB오류가 발생하였습니다.（V2 借用為「技能欄位寫入 DB 失敗」語列）
+// ERR_SKILL_20 / ERR_SKILL_24 / ERR_SKILL_PAGE_01 / ERR_RESET_SKILL_00..05（200·204·1387·444..449；2026-11-18 以 g++ -fpermissive 直接編譯原 Common/Neterror/NetError_def.h 機讀核對，五個地區變體 JP/TW/CN/US/Global 全部一致）
+inline constexpr int ERR_SKILL_20 = 200;  // 스킬 레벨 정보가 이상합니다.（技能等級資訊異常——V2 用於「未學會/等級不足 1」）
+inline constexpr int ERR_SKILL_24 = 204;  // 캐시 스킬포인트 정보 갱신이 실패하였습니다.（現金技能點更新失敗）
+inline constexpr int ERR_SKILL_PAGE_01 = 1387;  // 클라이언트에서 보내준 활성화된 스킬 페이지 번호가 서버의 정보와 다릅니다.（作用技能頁不一致）
+inline constexpr int ERR_RESET_SKILL_00 = 444;  // 존재하지 않는 스킬입니다.（不存在的技能）
+inline constexpr int ERR_RESET_SKILL_01 = 445;  // 스킬 초기화 아이템이 존재하지 않습니다.（無技能重置道具）
+inline constexpr int ERR_RESET_SKILL_02 = 446;  // 스킬 초기화 아이템을 DB에서 삭제하지 못했습니다.（重置道具 DB 更新/刪除失敗）
+inline constexpr int ERR_RESET_SKILL_03 = 447;  // 스킬 초기화 DB쿼리 결과 실패가 반환되었습니다.（技能重置 DB 查詢失敗）
+inline constexpr int ERR_RESET_SKILL_04 = 448;  // 초기화 할 수 없는 스킬입니다.（不可初始化的技能——V2 本切片不產生此碼）
+inline constexpr int ERR_RESET_SKILL_05 = 449;  // 스킬 슬롯에 장착 중인 스킬은 초기화 할 수 없습니다.（已裝備中的技能不可重置）
+// ERR_INVENTORY_LOCK_00 = 1030 / ERR_ODBC_01 = 555：原值已核對（同為全地區一致），V2 無對應路徑（無背包鎖定/無 ODBC）——本切片不使用。
 
 } // namespace x2

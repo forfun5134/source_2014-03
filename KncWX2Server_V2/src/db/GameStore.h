@@ -410,6 +410,32 @@ public:
     // 單一 transaction；任一步驟失敗 → rollback + false。
     bool UpdateSkillSlots(int64_t unitUID, int32_t pageNumber, const int32_t (&slotA)[4], const int32_t (&slotB)[4],
                           const std::string& slotBEndDate, std::string& err);
+    // 技能重置提交（§0a25；原 DBE_RESET_SKILL_REQ 的 GSGameDBThread 路徑之 V2 單一 transaction 版）：
+    //   (1) gitemquantity Quantity -= 1 WHERE ItemUID=? AND Quantity >= 1（原 gup_update_item PT_QUANTITY delta=-1；
+    //       影響列數 != 1 → failStage=ItemSeek/Item → false → 呼叫端映射 ERR_RESET_SKILL_02）；
+    //       新數量 == 0 → gitem 以原 gup_delete_item 慣例軟刪除（DelDate = max(nowUtc, RegDate+1s) → Deleted 翻 1），
+    //       gitemquantity 列保留 Quantity=0（原同：gup_update_item 先減量、gup_delete_item 不動數量列）。
+    //   (2) 技能列：levelAfter <= 0 → DELETE FROM gskill WHERE UnitUID/SkillID/SkillPageNumber（= 作用頁；影響列數 != 1 → Skill）；
+    //       否則 UPDATE gskill SET SkillLevel=levelAfter, SkillCSPoint=0（同上影響列數檢查）。
+    //   (3) gunit.SPoint += sPointDelta（可為負——原 SP 可倒扣；失敗 → SPoint）。
+    //   (4) gskillcash upsert CSPoint=csPoint（原 m_iCSPoint>=0 才更新；V2 為自洽一律寫入——見 docs §0a25 偏差）。
+    // 單一 transaction；任一步驟失敗 → 整體 rollback + false。failStage 指出失敗階段（None/Item/Skill/SPoint/CashPoint）。
+    enum class ResetSkillFailure { None, Item, Skill, SPoint, CashPoint };
+    struct ResetSkillCommit
+    {
+        int64_t itemUID = 0;
+        int32_t itemNewQuantity = 0;   // 消耗後數量；0 ＝ 已刪除（itemDeleted=true）
+        bool    itemDeleted = false;   // 消耗使數量歸零 → gitem 已標記刪除
+        int32_t skillLevelAfter = 0;   // 重置後技能等級（0 → gskill 列已刪除；1 → 預設技能保留）
+        int32_t sPointAbsolute = 0;    // gunit.SPoint 新絕對值
+        int32_t csPoint = 0;           // gskillcash.CSPoint 新值
+    };
+    bool CommitResetSkill(int64_t unitUID, int64_t itemUID, int32_t activePage,
+                          int32_t delSkillID, int32_t skillLevelAfter,
+                          int32_t sPointDelta, int32_t newCSPoint,
+                          const std::string& nowUtc,
+                          ResetSkillCommit& out, ResetSkillFailure& failStage,
+                          std::string& err);
 
 private:
     Database& m_db;

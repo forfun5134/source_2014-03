@@ -358,6 +358,47 @@ tests/test_string_filter.cpp 的字元集閘門斷言改為依 `X2_REGION_*` 分
 - **測試數**：**JP = 1297、TW = 1295、EU = 1293、CN = 1295 passed / 0 failed**。
 - 剩餘未移植：gmo_*_skill（技能 slot 更新）／gup_get_community_opt_unituid（社群選項查詢——V2 改以 gdenyoption 直接讀回近似，§0a9；relationship 6 欄寫入 EGS_UPDATE_COMMUNITY_OPT 已於 §0a10 以 write-through upsert 移植；P_GDenyOption_UPD 仍缺 proc）／class 5..9 技能列（原 proc 不存在）／LogDB；gspirit 的 Flag 完整語意與復活石補充/精力重置已於 §0a8 移植；Flag 並列槽位 UI 亦未建模。
 
+## 0a25. 2026-11-18 附記（EGS_RESET_SKILL_REQ/ACK：技能重置道具消耗；schema v14 沿用）
+
+承 §0a23（技能頁讀回）／§0a24（欄位變更）。本期實作**技能重置**——消耗「技能重置道具」退還 SP／技能點並重置技能等級：`EGS_RESET_SKILL_REQ`（305）→ `EGS_RESET_SKILL_ACK`（306）。原版對應 `DBE_RESET_SKILL_REQ`（DB worker）→ `DBE_RESET_SKILL_ACK`（GSGameDBThread 派發）路徑；V2 無 DB worker → 驗證→單一 transaction→ACK 一跳完成（write-through，§0a24 慣例）。
+
+**原版（SERV_SKILL_PAGE_SYSTEM／SERV_UPGRADE_SKILL_SYSTEM_2013 皆已定義）**：
+
+- **Handler**（`GameServer/GSUserGameCommon.cpp`：EGS_RESET_SKILL_REQ@4642–4887；DBE_RESET_SKILL_ACK@4900–5040）：VERIFY_STATE（S_FIELD_MAP/S_ROOM）→ `KUserSkillTree::CheckResetSkill`（UserSkillTree.cpp:2723）→ `ResetSkill`（:1868）→ 組 ACK；裝備中完全重置 → ERR_RESET_SKILL_05（449）；CSP 退還溢出 maxCSPoint 時溢出部分加回 SP（:1133 GetSkillLevelAndCSP / :564 IsCashSkillPointExpired ≡ `m_iMaxCSPoint == 0`）。
+- **DB 路徑**（`GSGameDBThread.cpp:14731` DBE_RESET_SKILL_REQ）：`Query_UpdateItemQuantity`@4681（gup_update_item PT_QUANTITY delta=-1）→ 數量歸零 `Query_DeleteItem`@4991（gitem 軟刪除）→ `P_GSkill_Cash_UPD_PointInfo`（gskillcash 寫回）→ `P_GSkill_New_MER`（技能列寫回）→ DBE_RESET_SKILL_ACK。
+- **REQ/ACK 結構**（`Common/ClientPacket.h:4827/4839`）：REQ{ m_iSkillID:int, m_iActiveSkillPageNumber:int }；ACK{ m_iOK, m_iActiveSkillPageNumber, m_iDelSkillID, m_iSPoint, m_iCSPoint, std::vector<KInventoryItemInfo> m_vecInventorySlotInfo }；wire PUT 序 ClientPacket.cpp:7012–7070（ACK=iOK, iActiveSkillPageNumber, iDelSkillID, iSPoint, iCSPoint, vec）。事件 ID：REQ=305／ACK=306（V2 EventIDs.h 已有）。
+- **NetError**（五地區值一致；2026-11-18 以 g++ 實編原 `Common/Neterror/NetError_def*.h` 核對；`Common/Neterror/NetError_def.h` 為正典，`Common/NetError_def.h` 較舊且缺 ERR_SKILL_PAGE_01、無 `_EU.h`）：ERR_SKILL_20=200、ERR_SKILL_24=204、ERR_SKILL_PAGE_01=1387、ERR_RESET_SKILL_00=444、_01=445、_02=446、_03=447、_04=448、_05=449、ERR_ODBC_01=555、ERR_INVENTORY_LOCK_00=1030。V2 已加入（ERR_RESET_SKILL_04=448 已登錄但本切片不產生）。
+- **重置道具**（ResetSkillItem@Inventory.cpp:15049）：IN_INVENTORY 分類 ST_*(1–7)、數量型（UsageType=2）、數量 ≥1；JP 生效優先序：60008069（UNLIMITED，僅 JP/TWHK 定義）→ 160947（EVENT_ITEM2）→ 130808（EVENT_ITEM）→ 67003592（EI_SKILL_RESET_EVENT_ITEM2）→ 200730（CI_SKILL_RESET_ITEM，恆定義）；最少堆疊優先（原 PT_QUANTITY 升序＋map ItemUID 序）。
+
+**V2 實作**：
+
+- **協議** `src/server/ResetSkillProtocol.{h,cpp}`（x2::reset_skill）：REQ/ACK codec（int32 BE ×2 / ×5＋count-prefix vector<InventoryItemInfo>）；golden bytes；`HandleResetSkillReq(gameDb, unitUID, req, ack, err, nowUtc)`。
+- **演算法**（檔頭 [0]–[12] 逐步對位原 handler；SERV_SKILL_PAGE_SYSTEM 分支）：[1] 作用頁一致性 → ERR_SKILL_PAGE_01；[2][3] templet 檢查（V2 無資料 → skillID>0 放行）；[4] 作用頁未學會 → ERR_SKILL_20；[5] GetSkillLevelAndCSP 失敗 → ERR_RESET_SKILL_00（V2 可達性＝僅資料不一致時）；[6] afterDel = 0/1；[7] 裝備中且完全重置 → ERR_RESET_SKILL_05；[8] SP 退還（第 1 級 Learn=1，其餘每級 Upgrade=1，減 invested CSP，可為負）；[9] CSP 退還（未過期(MaxCSPoint>0) → curCSP+invested，超上限溢出加回 SP；過期 → 0）；[10] 重置道具探測（無 → ERR_RESET_SKILL_01）；[11] 單一 transaction 提交；[12] ACK（iSPoint/iCSPoint 提交後讀回；vec=[消耗後道具]；歸零刪除 → itemUID=0 空槽）。
+- **GameStore**：新增 `CommitResetSkill(unitUID, itemUID, activePage, delSkillID, skillLevelAfter, sPointDelta, newCSPoint, nowUtc, &out, &failStage, &err)`——單一 transaction：(a) `UPDATE gitemquantity SET Quantity=Quantity-1 WHERE ItemUID=? AND Quantity>=1`（命中≠1 → failStage=Item）；(b) 讀回（仍為 0 → gitem 軟刪除 `DelDate = max(now, datetime(RegDate,'+1 second')) WHERE Deleted=0`）；(c) gskill：levelAfter≤0 → `DELETE … WHERE UnitUID/SkillID/SkillPageNumber`，否則 `UPDATE SkillLevel=?, SkillCSPoint=0`（命中≠1 → failStage=Skill）；(d) `gunit.SPoint = SPoint + ?`（差分，可負）＋讀回絕對值（failStage=SPoint）；(e) gskillcash upsert（`INSERT … ON CONFLICT(UnitUID) DO UPDATE SET CSPoint=excluded.CSPoint`——一律寫入）（failStage=CashPoint）→ COMMIT；任一失敗整體 rollback。呼叫端映射：Item→ERR_RESET_SKILL_02(446)、Skill/SPoint/Commit→ERR_RESET_SKILL_03(447)、CashPoint→ERR_SKILL_24(204)。TOCTOU：探測僅讀，ItemUID 於 transaction 內重驗（Quantity>=1）。
+- **測試**：`tests/test_reset_skill.cpp`（19 測試函數 / **129 檢查**）：REQ/ACK golden bytes＋roundtrip＋ctor 預設、事件 id、NetError 實編值、主流程（非預設技能重置 Lv3→刪除列、預設技能重置→保留 Lv1）、SP 退還（Learn+Upgrade−invested CSP，可為負）、CSP 退還/溢出截斷（溢出加回 SP）/過期歸零（MariaDB 現金池未啟用 → invested CSP 消失）、裝備中封鎖（ERR_RESET_SKILL_05）與裝備中預設技能放行、錯頁（ERR_SKILL_PAGE_01）、skillID≤0（ERR_RESET_SKILL_00）/未學會（ERR_SKILL_20）/他頁已學會不算本頁、無重置道具（ERR_RESET_SKILL_01、不落盤）、道具優先序（EVENT2>EVENT>plain）與最少堆疊優先、UNLIMITED 優先壓過全部、歸零軟刪除（gitem.Deleted=1＋ACK itemUID=0 空槽）、兩個故障注入（BEFORE INSERT/UPDATE trigger RAISE(ABORT)）驗證 rollback（ERR_RESET_SKILL_02；ERR_SKILL_24）與 iSPoint/iCSPoint=0、iDelSkillID 回顯、未變更道具槽、SPoint/SP/技能列全部回滾、預設技能 SkillCSPoint 歸零（§12 偏差 9）。
+- **測試數**：**JP = 2226、TW = 2224、EU = 2222、CN = 2224、US = 2223 passed / 0 failed**（vs §0a24：各 +129）。`verify_generated` OK（2026-11-18 以 pip 安裝 xlrd 2.0.2 後實機重跑——先前缺 xlrd 僅能跳過此步）；NUL clean；五地區以 `tools/build_and_test.sh REGION=<R>` 為準。Windows vcxproj/.filters 同步加入新檔。
+- **Schema**：v14 沿用（無 DDL；gitem 軟刪除慣例（DelDate 生成欄 Deleted）與 gskill/gskillcash 表結構不變）。
+
+**偏差聲明**（V2 vs 原版；全部為推定，非原版保證；完整 15 條逐條列於 `src/server/ResetSkillProtocol.h` 檔頭）：
+
+1. **背包鎖定**（KInventory::IsLocked → ERR_INVENTORY_LOCK_00=1030）：V2 無背包鎖定子系統 → 不檢查。
+2. **SkillTemplet**（NewSkillTempletVer2.lua 不在倉庫）→ V2 以 skillID>0 通過 templet 檢查；不存在之錯誤由 [4] 未學會 → ERR_SKILL_20 承接（原同碼）；ERR_RESET_SKILL_00 僅自 [5] 資料不一致可達。
+3. **SkillTreeTemplet** 逐職業合法性/費用判定不做（NewSkillTreeTable.xlsm 僅 2011 技能樹，且與 V2 CreateUnit 的 legacy ID 不相交）。
+4. **IsAllFollowingSkillLevelZero** ≡ true（無 m_vecFollowingSkill 資料）；副作用：有後續技能時原版重置後保留 Lv1，V2 一律重置到 0（預設技能走 default 分支＝保留 1，見偏差 5）。
+5. **IsUnitTypeDefaultSkill**：Lua 來源缺 → V2 推定 CreateUnit 預設技能 {10000=Swordsman、20030=VioletMage、30000=ElvenRanger、40010=Fighter}（class 1–4）；class 5+ 無可考來源 → 非預設技能。
+6. **RequireLearnSkillPoint / RequireUpgradeSkillPoint** 缺資料 → V2 定數 1/1（每級 1 SP 推定）。
+7. **重置道具優先序** 採 JP 生效集：60008069 → 160947 → 130808 → 67003592 → 200730（SERV_* 地區開關未移植；COBO/QUEST/2ND_CLASS/RURIEL/RESET_A 不列入）；最少堆疊優先以 `ORDER BY Quantity ASC, ItemUID ASC` 近似原 PT_QUANTITY 升序＋map ItemUID 序。
+8. **IsCashSkillPointExpired** ≡ `MaxCSPoint == 0`（原 `m_iMaxCSPoint == 0`；EndDate 完全不參與，原同）。
+9. **gskillcash 一律寫入**（含 iAfterCSP=0）：原僅 iAfterCSP>0 才 upsert（避免清空過期現金池）；V2 gskillcash 為 unit-global 主表，自洽優先一律寫。連帶：過期池投入的 CSP 一律消失（原同）。
+10. **失敗 ACK 形狀**：(A) 提交前失敗＝ACK 全零（iOK 除外）＋空向量（與原「驗證階段失敗無回顯」同形）；(B) 提交中失敗＝rollback 後帶 iActiveSkillPageNumber/iDelSkillID 回顯＋未變更道具槽，iSPoint=iCSPoint=0（原版帶遞減後內存值，與 DB 實際不符）。錯誤碼映射：Item→ERR_RESET_SKILL_02；Skill/SPoint/Commit→ERR_RESET_SKILL_03；CashPoint→ERR_SKILL_24（204；V2 借用 NetError 原「현금스킬포인트를 사용하는 중 에러가 발생하였습니다」語列）。
+11. **成功路徑**：原於 DBE_RESET_SKILL_ACK 才 ResetSkill/CheckAndUpdate（內存）後組 ACK；V2 transaction 內直接落盤，ACK 回讀回值（等價且不產生中途可見狀態）。
+12. **SERV_ROOM/S_FIELD_MAP VERIFY_STATE** 與成功後 ERM_CHANGE_SKILL_INFO_IN_ROOM_NOT 廣播：V2 無 Room/Field → 不送 NOT。
+13. **SPoint unit-global**（§0a23 偏差 8：每頁 SP 池無資料源）；可倒扣為負（原同）。
+14. **無 -1 通道**：原 DBE 以 iCSPoint<=0 → DB 傳 -1 跳過現金點更新；V2 一律寫入（偏差 9）。
+15. **wire 佈局自洽 golden bytes**，未對原 SDK 實機驗證；vec<KInventoryItemInfo> 逐元素依 §0a17/SelectUnit 讀回口徑（itemUID/slotCategory/slotID/itemInfo；randomSocket 固定空、itemState=0、expandedSocketNum=0）。
+
+**已知未覆蓋**：EGS_GET_SKILL_REQ（技能學習/升級，SERV_UPGRADE_SKILL_SYSTEM_2013；依賴 SkillTemplet/CalcLevelUpIncreaseSkillPoint Lua，**皆不在倉庫**）——**仍未開始**；EGS_ADMIN_* 屬管理協議，不納入；原 DBE 的「DB 兩跳」架構（GSGameDBThread worker thread）為永久性架構差異（V2 無 DB thread），不會再補。
+
 ## 0a24. 2026-11-18 附記（EGS_CHANGE_SKILL_SLOT_REQ/ACK：技能欄位變更寫路徑；schema v14 沿用）
 
 承 §0a23（技能頁讀回）。本期實作**技能欄位變更**寫路徑——`EGS_CHANGE_SKILL_SLOT_REQ`（296）→ `EGS_CHANGE_SKILL_SLOT_ACK`（297）：把已學會技能裝上/卸下欄位（技能欄位 A/B 共 8 欄）、含原碼的「交換」語意——客戶端只送 (iSlotID, iSkillID)，被擠出的技能由伺服器計算並回報。`EGS_CHANGE_SKILL_SLOT_NOT`（298）不移植（偏差 6/14）。
@@ -393,7 +434,7 @@ tests/test_string_filter.cpp 的字元集閘門斷言改為依 `X2_REGION_*` 分
 11. **交換目標**：iSlotID2 = **第一個**（欄位索引最小）裝備該技能的欄位（GetSlotID 語意）；同一技能可裝備多欄（原版允許）。
 12. 線路佈局為自洽 golden bytes（BE、tagging=false），未對原 SDK 實機驗證。
 13. 本期修復/補齊：NetError ERR_SKILL_09/10/13/14 常數（2026-11-18 實編原 NetError_def.h 核對）；`Database::Changes()`（sqlite3_changes64）已於 §0a21 存在，本期沿用。
-14. 已知未覆蓋：EGS_GET_SKILL_REQ（技能學習/升級，SERV_UPGRADE_SKILL_SYSTEM_2013；依賴 SkillTemplet/CalcLevelUpIncreaseSkillPoint Lua，**皆不在倉庫**）與 EGS_RESET_SKILL_REQ（DBE_INIT_SKILL_TREE_REQ）——**未開始**；EGS_ADMIN_* 屬管理協議，不納入。技能欄位變更的「副本結束延遲 flush」與「Room 廣播 NOT」為永久性架構差異（V2 無副本/Room），不會再補。
+14. 已知未覆蓋：EGS_GET_SKILL_REQ（技能學習/升級，SERV_UPGRADE_SKILL_SYSTEM_2013；依賴 SkillTemplet/CalcLevelUpIncreaseSkillPoint Lua，**皆不在倉庫**）——**仍未開始**；EGS_RESET_SKILL_REQ 已於 §0a25 移植（write-through；消耗重置道具）；EGS_ADMIN_* 屬管理協議，不納入。技能欄位變更的「副本結束延遲 flush」與「Room 廣播 NOT」為永久性架構差異（V2 無副本/Room），不會再補。
 
 ## 0a23. 2026-11-18 附記（SELECT_UNIT_1_NOT 技能頁系統：SERV_SKILL_PAGE_SYSTEM 2013 路徑反推；schema v14）
 
@@ -1180,8 +1221,8 @@ V2 目前**原樣保留**協議所需的密碼學直譯，這些本身**不符�
 6. 效能與容量測試；記憶體/句柄洩漏基線（原版以 VLD 除錯，V2 無對應）。
 7. `LoadINIFile`、設定檔格式與部署工具（原 `ReleaseTool`/`.bat` 流程）。
 8. EventIDs 以外的大型表（道具/技能/副本資料）從 `X2/dat/Script` 的轉換管道。
-9. `SELECT_UNIT` 的 REQ/收尾 ACK + 決策層已完成（§0c）；`SELECT_UNIT_1_NOT` codec + 組裝（gunit 表 → Not1，缺資料項佔位；背包 slot size/items/equippedItem 自 §0a14 ← gitem/giteminventorysize；復活石量 ← gresurrectionstone）已完成（§0e）；`SELECT_UNIT_2_NOT` codec + 組裝（§0f；任務讀回自 §0a11 ← gquests/gquests_complete/gquests_repeat）已完成（§0f）；`SELECT_UNIT_3_NOT` codec + 組裝（§0g；title/mission 讀回自 §0a12 ← gtitle_complete/gtitle_mission；pet 仍空佔位）已完成（§0g）；`SELECT_UNIT_4_NOT` codec + 組裝（Henir/Messenger/戰場狀態無資料源→空容器/零值佔位；kDenyOptions ← gdenyoption（§0a9）；vecChatBlackList ← gblacklist、vecTutorialDBUnitInfo ← gtutor（≤10 級＝學生／≥20 級＝老師）、vecConnectTimeEvent ← gis30min，§0a13）已完成（§0h）；`SELECT_UNIT_5_NOT` codec + 組裝（spirit/pshop/henir-reward/cashshop 無資料源→false/0 佔位）已完成（§0i），1_NOT…5_NOT 全數落地；1_NOT…5_NOT 分片 codec 全數移植（§0e…0i）；完整角色資料載入管線逐步推進（技能頁載入自 §0a23 起落地；技能欄位變更 EGS_CHANGE_SKILL_SLOT_REQ 已於 §0a24 移植（write-through）；技能學習/升級（EGS_GET_SKILL_REQ，依賴 SkillTemplet/CalcLevelUpIncreaseSkillPoint，Lua 未隨倉庫提供）與 EGS_RESET_SKILL_REQ 仍未開始）。Login 切片打通到 SELECT_UNIT_1_NOT 為止（items/寵物/ED/rating 等無資料來源，值為佔位；spirit 自 GSpirit 讀回，§0a8；任務自 §0a11 起讀 gquests/gquests_complete/gquests_repeat；稱號/稱號任務自 §0a12 起讀 gtitle_complete/gtitle_mission；黑名單/師徒/30 分鐘事件自 §0a13 起讀 gblacklist/gtutor/gis30min）。
-11. GDenyOption／GResurrectionStoneCnt／GSkill／GSkillSlot／GSpirit／GQuests——**建立流程副作用已移植（§0a5）；GSpirit 讀回與 gup_select_unit 每日重置／GResurrectionStone 每日補充／PlayDayCnt／LoginCount 登入副作用已移植（§0a8）**；其餘查詢/更新路徑（gup_get_community_opt_unituid——V2 改以 gdenyoption 直接讀回近似，§0a9；EGS_UPDATE_COMMUNITY_OPT 6 欄寫入（§0a10 write-through；P_GDenyOption_UPD 缺 proc，以 upsert 近似）已移植；gup_*_skill 之讀路徑（SELECT_UNIT 技能段）已於 §0a23 移植（v14 schema v14 反推），寫路徑（EGS_CHANGE_SKILL_SLOT_REQ/ACK §0a24 已移植，write-through）；EGS_GET_SKILL_REQ／EGS_RESET_SKILL_REQ 未實作；gspirit Flag 語意變體）未實作；建角道具發放（gup_create_unit_set_promotion／P_GItemPeriod_INS，**不隨倉庫提供**）不可移植。
+9. `SELECT_UNIT` 的 REQ/收尾 ACK + 決策層已完成（§0c）；`SELECT_UNIT_1_NOT` codec + 組裝（gunit 表 → Not1，缺資料項佔位；背包 slot size/items/equippedItem 自 §0a14 ← gitem/giteminventorysize；復活石量 ← gresurrectionstone）已完成（§0e）；`SELECT_UNIT_2_NOT` codec + 組裝（§0f；任務讀回自 §0a11 ← gquests/gquests_complete/gquests_repeat）已完成（§0f）；`SELECT_UNIT_3_NOT` codec + 組裝（§0g；title/mission 讀回自 §0a12 ← gtitle_complete/gtitle_mission；pet 仍空佔位）已完成（§0g）；`SELECT_UNIT_4_NOT` codec + 組裝（Henir/Messenger/戰場狀態無資料源→空容器/零值佔位；kDenyOptions ← gdenyoption（§0a9）；vecChatBlackList ← gblacklist、vecTutorialDBUnitInfo ← gtutor（≤10 級＝學生／≥20 級＝老師）、vecConnectTimeEvent ← gis30min，§0a13）已完成（§0h）；`SELECT_UNIT_5_NOT` codec + 組裝（spirit/pshop/henir-reward/cashshop 無資料源→false/0 佔位）已完成（§0i），1_NOT…5_NOT 全數落地；1_NOT…5_NOT 分片 codec 全數移植（§0e…0i）；完整角色資料載入管線逐步推進（技能頁載入自 §0a23 起落地；技能欄位變更 EGS_CHANGE_SKILL_SLOT_REQ 已於 §0a24 移植（write-through）；技能學習/升級（EGS_GET_SKILL_REQ，依賴 SkillTemplet/CalcLevelUpIncreaseSkillPoint，Lua 未隨倉庫提供）；EGS_RESET_SKILL_REQ（消耗重置道具退還 SP/CSP，§0a25，write-through）已完成）。Login 切片打通到 SELECT_UNIT_1_NOT 為止（items/寵物/ED/rating 等無資料來源，值為佔位；spirit 自 GSpirit 讀回，§0a8；任務自 §0a11 起讀 gquests/gquests_complete/gquests_repeat；稱號/稱號任務自 §0a12 起讀 gtitle_complete/gtitle_mission；黑名單/師徒/30 分鐘事件自 §0a13 起讀 gblacklist/gtutor/gis30min）。
+11. GDenyOption／GResurrectionStoneCnt／GSkill／GSkillSlot／GSpirit／GQuests——**建立流程副作用已移植（§0a5）；GSpirit 讀回與 gup_select_unit 每日重置／GResurrectionStone 每日補充／PlayDayCnt／LoginCount 登入副作用已移植（§0a8）**；其餘查詢/更新路徑（gup_get_community_opt_unituid——V2 改以 gdenyoption 直接讀回近似，§0a9；EGS_UPDATE_COMMUNITY_OPT 6 欄寫入（§0a10 write-through；P_GDenyOption_UPD 缺 proc，以 upsert 近似）已移植；gup_*_skill 之讀路徑（SELECT_UNIT 技能段）已於 §0a23 移植（v14 schema v14 反推），寫路徑（EGS_CHANGE_SKILL_SLOT_REQ/ACK §0a24 已移植，write-through）；EGS_GET_SKILL_REQ 未實作（EGS_RESET_SKILL_REQ 已於 §0a25 完成）；gspirit Flag 語意變體）未實作；建角道具發放（gup_create_unit_set_promotion／P_GItemPeriod_INS，**不隨倉庫提供**）不可移植。
 10. Wire 相容：Login 切片 codec 只有自洽 golden bytes，**缺原 SDK 實機對照向量**（見 §13）。
 
 ## 13. 風險

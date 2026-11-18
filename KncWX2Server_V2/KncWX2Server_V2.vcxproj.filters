@@ -40,6 +40,7 @@
     <ClCompile Include="src\server\CheckNicknameProtocol.cpp"><Filter>server</Filter></ClCompile>
     <ClCompile Include="src\server\ChangeNicknameProtocol.cpp"><Filter>server</Filter></ClCompile>
     <ClCompile Include="src\server\ChangeSkillSlotProtocol.cpp"><Filter>server</Filter></ClCompile>
+    <ClCompile Include="src\server\ResetSkillProtocol.cpp"><Filter>server</Filter></ClCompile>
     <ClCompile Include="src\server\CharacterListProtocol.cpp"><Filter>server</Filter></ClCompile>
     <ClCompile Include="src\server\EntryPointChannelListProtocol.cpp"><Filter>server</Filter></ClCompile>
     <ClCompile Include="src\server\ExpTable.cpp"><Filter>server</Filter></ClCompile>
@@ -90,6 +91,7 @@
     <ClInclude Include="src\server\CheckNicknameProtocol.h"><Filter>server</Filter></ClInclude>
     <ClInclude Include="src\server\ChangeNicknameProtocol.h"><Filter>server</Filter></ClInclude>
     <ClInclude Include="src\server\ChangeSkillSlotProtocol.h"><Filter>server</Filter></ClInclude>
+    <ClInclude Include="src\server\ResetSkillProtocol.h"><Filter>server</Filter></ClInclude>
     <ClInclude Include="src\server\CharacterListProtocol.h"><Filter>server</Filter></ClInclude>
     <ClInclude Include="src\server\EntryPointChannelListProtocol.h"><Filter>server</Filter></ClInclude>
     <ClInclude Include="src\server\ExpTable.h"><Filter>server</Filter></ClInclude>
