@@ -44,6 +44,7 @@
     <ClCompile Include="src\server\GetSkillProtocol.cpp"><Filter>server</Filter></ClCompile>
     <ClCompile Include="src\server\DecideSkillPageProtocol.cpp"><Filter>server</Filter></ClCompile>
     <ClCompile Include="src\server\GetNextSkillPageEdProtocol.cpp"><Filter>server</Filter></ClCompile>
+    <ClCompile Include="src\server\GetNextInventoryEdProtocol.cpp"><Filter>server</Filter></ClCompile>
     <ClCompile Include="src\server\DeleteBlacklistUserProtocol.cpp"><Filter>server</Filter></ClCompile>
     <ClCompile Include="src\server\CharacterListProtocol.cpp"><Filter>server</Filter></ClCompile>
     <ClCompile Include="src\server\EntryPointChannelListProtocol.cpp"><Filter>server</Filter></ClCompile>
@@ -99,6 +100,7 @@
     <ClInclude Include="src\server\GetSkillProtocol.h"><Filter>server</Filter></ClInclude>
     <ClInclude Include="src\server\DecideSkillPageProtocol.h"><Filter>server</Filter></ClInclude>
     <ClInclude Include="src\server\GetNextSkillPageEdProtocol.h"><Filter>server</Filter></ClInclude>
+    <ClInclude Include="src\server\GetNextInventoryEdProtocol.h"><Filter>server</Filter></ClInclude>
     <ClInclude Include="src\server\DeleteBlacklistUserProtocol.h"><Filter>server</Filter></ClInclude>
     <ClInclude Include="src\server\CharacterListProtocol.h"><Filter>server</Filter></ClInclude>
     <ClInclude Include="src\server\EntryPointChannelListProtocol.h"><Filter>server</Filter></ClInclude>

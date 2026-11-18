@@ -47,6 +47,10 @@ inline constexpr int ERR_BLACKLIST_04 = 246;  // 黑名單 DB 刪除失敗
 inline constexpr int ERR_BLACKLIST_05 = 247;  // 不能把自己加入黑名單
 inline constexpr int ERR_BLACKLIST_06 = 248;  // 不能從黑名單刪除自己
 inline constexpr int ERR_BLACKLIST_07 = 249;  // 只能加入目前在線的使用者（V2 無在線狀態）
+// ERR_EXPAND_INVENTORY_ED_01..03（1355..1357；原 NetError_def.h enum 機讀值）
+inline constexpr int ERR_EXPAND_INVENTORY_ED_01 = 1355;  // ED 不足
+inline constexpr int ERR_EXPAND_INVENTORY_ED_02 = 1356;  // 背包欄位已達上限
+inline constexpr int ERR_EXPAND_INVENTORY_ED_03 = 1357;  // 找不到有效擴充費用
 // ERR_WISH_LIST_*（2026-11-17 以 g++ 編譯原 NetError_def.h 實測）
 inline constexpr int ERR_WISH_LIST_00 = 450;  // 찜 리스트에 등록할 수 없는 상품입니다.（不可加入願望清單的商品——V2 無腳本表，不產生此碼）
 inline constexpr int ERR_WISH_LIST_02 = 451;  // 찜 리스트에 더 이상 상품을 등록할 수 없습니다.（願望清單已滿／寫入失敗借用）
