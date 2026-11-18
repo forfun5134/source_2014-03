@@ -62,6 +62,7 @@ void RunInventoryReadbackTestsByRef(int& pass, int& fail);
 void RunSkillPageReadbackTestsByRef(int& pass, int& fail);
 void RunSelectNot45ReadbackTestsByRef(int& pass, int& fail);
 void RunEquipTitleTestsByRef(int& pass, int& fail);
+void RunChangeSkillSlotTestsByRef(int& pass, int& fail);
 void RunWishListTestsByRef(int& pass, int& fail);
 void RunCurrentTimeTestsByRef(int& pass, int& fail);
 
@@ -446,6 +447,7 @@ int main() {
     RunSkillPageReadbackTestsByRef(g_pass, g_fail);
     RunSelectNot45ReadbackTestsByRef(g_pass, g_fail);
     RunEquipTitleTestsByRef(g_pass, g_fail);
+    RunChangeSkillSlotTestsByRef(g_pass, g_fail);
     RunWishListTestsByRef(g_pass, g_fail);
     RunCurrentTimeTestsByRef(g_pass, g_fail);
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);

@@ -404,6 +404,12 @@ public:
     //   否則 → 先脫 oldTitleID（≠0 才執行；proc @iOldID），再掛 newTitleID（proc @iTitleID）。
     // 單一 transaction；attach 前驗證持有列存在；失敗 → rollback + false。
     bool EquipTitleHang(int64_t unitUID, int32_t oldTitleID, int32_t newTitleID, std::string& err);
+    // 技能欄位寫入（§0a24；原 DBE_UPDATE_UNIT_INFO_REQ → Query_UpdateSkillSlotInfo 的作用頁版，write-through）：
+    //   upsert gskillslotnew（Slot01..04）與 gskillslot2new（Slot01..04 ＋ EndDate←slotBEndDate，unit-global 值＝原 flush 行為）；
+    //   缺列 → INSERT；EndDate 空 → 哨兵 '2000-01-01 00:00:00'。pageNumber 必須 >= 1。
+    // 單一 transaction；任一步驟失敗 → rollback + false。
+    bool UpdateSkillSlots(int64_t unitUID, int32_t pageNumber, const int32_t (&slotA)[4], const int32_t (&slotB)[4],
+                          const std::string& slotBEndDate, std::string& err);
 
 private:
     Database& m_db;

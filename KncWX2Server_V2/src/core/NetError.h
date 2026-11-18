@@ -61,5 +61,10 @@ inline constexpr int ERR_TITLE_02 = 496;  // 사용 가능한 기간이 지난 �
 inline constexpr int ERR_TITLE_03 = 497;  // 존재하지 않는 칭호입니다.（不存在該稱號）
 inline constexpr int ERR_TITLE_04 = 498;  // 칭호를 획득하지 못했습니다.
 inline constexpr int ERR_TITLE_05 = 499;  // 이미 보유 중인 칭호입니다.
+// ERR_SKILL_*（164–180；2026-11-18 以 g++ 直接編譯原 NetError_def.h 機讀核對，純連續 enum；ERR_SKILL_27=528 顯式值未納入）
+inline constexpr int ERR_SKILL_09 = 164;  // 변경할 스킬 슬롯 아이디가 잘못되었습니다.（技能欄位 ID 錯誤）
+inline constexpr int ERR_SKILL_10 = 165;  // 배우지 않은 스킬을 등록하려고 하였습니다.（未學會的技能）
+inline constexpr int ERR_SKILL_13 = 167;  // 스킬 슬롯 B를 사용하실 수 없습니다.（技能欄位 B 不可用／已過期）
+inline constexpr int ERR_SKILL_14 = 168;  // 스킬 슬롯 B 확장 중 DB오류가 발생하였습니다.（V2 借用為「技能欄位寫入 DB 失敗」語列）
 
 } // namespace x2

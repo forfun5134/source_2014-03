@@ -2060,4 +2060,71 @@ bool GameStore::RecordUnitLogin(int64_t unitUID, std::string& err)
     return true;
 }
 
+bool GameStore::UpdateSkillSlots(int64_t unitUID, int32_t pageNumber, const int32_t (&slotA)[4], const int32_t (&slotB)[4],
+                                 const std::string& slotBEndDate, std::string& err)
+{
+    if (unitUID <= 0) { err = "invalid unit uid"; return false; }
+    if (pageNumber < 1) { err = "invalid page number"; return false; }
+    const std::string bEnd = slotBEndDate.empty() ? std::string("2000-01-01 00:00:00") : slotBEndDate;
+
+    if (!m_db.Begin(err)) return false;
+    auto rollback = [this]() { std::string u; m_db.Rollback(u); };
+
+    // 欄位值為原生 int（DB 欄無範圍限制；wire short 截斷僅在 Not1 組裝層處理）——不在此拒絕，
+    // 否則 legacy 髒資料會永久卡死寫入（§0a24 deviation：無原 proc 範圍限制可對照）。
+    // gskillslotnew：UPDATE 命中 → UPDATE；否則 INSERT（對應原 INS＝upsert 語義）
+    {
+        Statement st;
+        if (!st.Prepare(m_db,
+                "UPDATE gskillslotnew SET Slot01 = ?, Slot02 = ?, Slot03 = ?, Slot04 = ? "
+                "WHERE UnitUID = ? AND SkillPageNumber = ?;", err)) { rollback(); return false; }
+        for (int i = 0; i < 4; ++i) if (!st.BindInt(i + 1, slotA[i], err)) { rollback(); return false; }
+        if (!st.BindInt(5, unitUID, err) || !st.BindInt(6, pageNumber, err)) { rollback(); return false; }
+        std::string stepErr;
+        if (st.StepRow(stepErr)) { rollback(); err = "unexpected row from UPDATE gskillslotnew"; return false; }
+        if (!stepErr.empty()) { err = stepErr; rollback(); return false; }
+        if (m_db.Changes() == 0) {
+            Statement ins;
+            if (!ins.Prepare(m_db,
+                    "INSERT INTO gskillslotnew (UnitUID, SkillPageNumber, Slot01, Slot02, Slot03, Slot04) "
+                    "VALUES (?, ?, ?, ?, ?, ?);", err)) { rollback(); return false; }
+            if (!ins.BindInt(1, unitUID, err) || !ins.BindInt(2, pageNumber, err)) { rollback(); return false; }
+            for (int i = 0; i < 4; ++i) if (!ins.BindInt(3 + i, slotA[i], err)) { rollback(); return false; }
+            std::string insErr;
+            if (ins.StepRow(insErr)) { rollback(); err = "unexpected row from INSERT gskillslotnew"; return false; }
+            if (!insErr.empty()) { err = "insert gskillslotnew: " + insErr; rollback(); return false; }
+            if (m_db.Changes() != 1) { rollback(); err = "insert gskillslotnew affected rows != 1"; return false; }
+        }
+    }
+
+    // gskillslot2new：同上＋EndDate（unit-global 值，原 flush 寫法）
+    {
+        Statement st;
+        if (!st.Prepare(m_db,
+                "UPDATE gskillslot2new SET Slot01 = ?, Slot02 = ?, Slot03 = ?, Slot04 = ?, EndDate = ? "
+                "WHERE UnitUID = ? AND SkillPageNumber = ?;", err)) { rollback(); return false; }
+        for (int i = 0; i < 4; ++i) if (!st.BindInt(i + 1, slotB[i], err)) { rollback(); return false; }
+        if (!st.BindText(5, bEnd, err)) { rollback(); return false; }
+        if (!st.BindInt(6, unitUID, err) || !st.BindInt(7, pageNumber, err)) { rollback(); return false; }
+        std::string stepErr;
+        if (st.StepRow(stepErr)) { rollback(); err = "unexpected row from UPDATE gskillslot2new"; return false; }
+        if (!stepErr.empty()) { err = stepErr; rollback(); return false; }
+        if (m_db.Changes() == 0) {
+            Statement ins;
+            if (!ins.Prepare(m_db,
+                    "INSERT INTO gskillslot2new (UnitUID, SkillPageNumber, Slot01, Slot02, Slot03, Slot04, EndDate) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?);", err)) { rollback(); return false; }
+            if (!ins.BindInt(1, unitUID, err) || !ins.BindInt(2, pageNumber, err)) { rollback(); return false; }
+            for (int i = 0; i < 4; ++i) if (!ins.BindInt(3 + i, slotB[i], err)) { rollback(); return false; }
+            if (!ins.BindText(7, bEnd, err)) { rollback(); return false; }
+            std::string insErr;
+            if (ins.StepRow(insErr)) { rollback(); err = "unexpected row from INSERT gskillslot2new"; return false; }
+            if (!insErr.empty()) { err = "insert gskillslot2new: " + insErr; rollback(); return false; }
+            if (m_db.Changes() != 1) { rollback(); err = "insert gskillslot2new affected rows != 1"; return false; }
+        }
+    }
+
+    return m_db.Commit(err);
+}
+
 }} // namespace x2::db

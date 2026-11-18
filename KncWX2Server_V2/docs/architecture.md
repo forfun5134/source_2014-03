@@ -358,6 +358,43 @@ tests/test_string_filter.cpp 的字元集閘門斷言改為依 `X2_REGION_*` 分
 - **測試數**：**JP = 1297、TW = 1295、EU = 1293、CN = 1295 passed / 0 failed**。
 - 剩餘未移植：gmo_*_skill（技能 slot 更新）／gup_get_community_opt_unituid（社群選項查詢——V2 改以 gdenyoption 直接讀回近似，§0a9；relationship 6 欄寫入 EGS_UPDATE_COMMUNITY_OPT 已於 §0a10 以 write-through upsert 移植；P_GDenyOption_UPD 仍缺 proc）／class 5..9 技能列（原 proc 不存在）／LogDB；gspirit 的 Flag 完整語意與復活石補充/精力重置已於 §0a8 移植；Flag 並列槽位 UI 亦未建模。
 
+## 0a24. 2026-11-18 附記（EGS_CHANGE_SKILL_SLOT_REQ/ACK：技能欄位變更寫路徑；schema v14 沿用）
+
+承 §0a23（技能頁讀回）。本期實作**技能欄位變更**寫路徑——`EGS_CHANGE_SKILL_SLOT_REQ`（296）→ `EGS_CHANGE_SKILL_SLOT_ACK`（297）：把已學會技能裝上/卸下欄位（技能欄位 A/B 共 8 欄）、含原碼的「交換」語意——客戶端只送 (iSlotID, iSkillID)，被擠出的技能由伺服器計算並回報。`EGS_CHANGE_SKILL_SLOT_NOT`（298）不移植（偏差 6/14）。
+
+**原版（SERV_SKILL_PAGE_SYSTEM／SERV_SKILL_SLOT_CHANGE_PACKET_INTEGRATE 皆已定義）**：
+
+- **REQ/ACK 結構**（`Common/ClientPacket.h:2568/2580`）：REQ{ m_iSlotID, m_iSkillID }；ACK{ m_iOK, m_iSlotID, m_iSkillID, m_iSlotID2, m_iSkillID2 }（INTEGRATE 追加後兩欄）。
+- **Handler**（`GSUserGameCommon.cpp:2756–2832`）：VERIFY_STATE（S_FIELD_MAP/S_ROOM）→ `KUserSkillTree::ChangeSkillSlot(req, ack)`（`UserSkillTree.cpp:353–470`）→ 失敗即回 ACK（iOK=GetLastError()）、成功回顯＋iSlotID2/iSkillID2；人在 Room（PVP/副本/競技場/練習場）且為 Field 狀態時送 ERM_SET_UNIT_INFO_NOT 廣播。
+- **ChangeSkillSlot（整合版）演算法**：iSlotID2 = GetSlotID(iSkillID)（該技能目前欄位，未學會/未裝備 → -1）；iSkillID2 = GetSkillID(iSlotID)。[1] iSlotID 越界 → ERR_SKILL_09（=164）；[2] iSkillID==0 → 清空 iSlotID，否則該技能須在「使用中頁」學會（IsExistOnUsedPage；硬編碼 SI_ETC_WS_COMMON_LOVE=6001 恆學會），否則 ERR_SKILL_10（=165）；且 iSlotID 屬欄位 B（索引 4–7）且 SlotB 已過期（`now > m_tSkillSlotBEndDate`）→ ERR_SKILL_13（=167）；[3] 僅當 0 <= iSlotID2 < 8：iSkillID2 > 0 且未學會 → ERR_SKILL_10；若 iSlotID2 屬欄位 B 且已過期 → ERR_SKILL_13；否則欄位 iSlotID2 寫入 iSkillID2（iSkillID2==0 即清空）；[4] 欄位 iSlotID 寫入 iSkillID。ACK 成功：iOK=NET_OK、iSlotID/iSkillID 回顯、iSlotID2=交換前欄位（未裝備 → -1）、iSkillID2=被擠出的技能（目標欄為空 → 0）。
+- **持久化（延遲 flush）**：handler 不碰 DB——成功只改記憶體該頁 `m_aiSkillSlot`；副本結束時 `DBE_UPDATE_UNIT_INFO_REQ → Query_UpdateSkillSlotInfo`（`GSGameDBThread.cpp:5801–5990`；SERV_SKILL_PAGE_SYSTEM 且 SERV_ALL_RENEWAL_SP 未定義 → `P_GSkillSlot_New_INS`／`P_GSkillSlot2_New_INS`；SERV_ALL_RENEWAL_SP 已定義時才用 _MER）逐頁 upsert，B 列帶 unit-global EndDate。
+- **事件 ID**（V2 EventIDs.h 已有 296/297/298）；**NetError**（V2 NetError.h 本期新增）：ERR_SKILL_09=164、ERR_SKILL_10=165、ERR_SKILL_13=167、ERR_SKILL_14=168——2026-11-18 以 g++ 直接編譯原 `Common/NetError_def.h` 機讀核對（純連續 enum；ERR_SKILL_27=528 顯式值未納入）。
+
+**V2 實作**：
+
+- **協議** `src/server/ChangeSkillSlotProtocol.{h,cpp}`（x2::change_skill_slot）：REQ/ACK codec（int32 BE ×2 / ×5；REQ/ACK ctor 預設對齊原碼 -1/0、0/-1/0/-1/0）；golden bytes 驗證。
+- **`HandleChangeSkillSlotReq(gameDb, unitUID, req, ack, err, nowUtc)`**：`nowUtc` 空 → 執行時刻 UTC；測試注入固定時間。流程：① `LoadSkillPageState`（失敗（含 hostile 錯誤、FK 自癒失敗）→ ERR_SKILL_14＋err）② 取**作用頁** 8 欄位工作副本（slotA/slotB 缺列 → 0；unit-global SlotB EndDate ＝ 最高頁列，沿用 §0a23 讀回語意）③ 學會集＝作用頁 gskill 列（SkillID>0 && SkillLevel>0，LoadSkillPageState 已過濾）∪ {6001} ④ validate-then-commit：iSlotID 越界 → ERR_SKILL_09；iSkillID≠0 且未學會（含負值）→ ERR_SKILL_10；iSlotID 屬 B 且已過期 → ERR_SKILL_13；若 iSlotID2∈[0,8)：iSkillID2>0 未學會 → ERR_SKILL_10、iSlotID2 屬 B 且已過期 → ERR_SKILL_13；否則交換並於**單一 transaction** upsert 作用頁 `gskillslotnew`／`gskillslot2new`（缺列 → INSERT，B 列 EndDate 寫回 unit-global 值＝原 flush 行為）。⑤ ACK 成功回顯；失敗保留 ctor 預設（不回顯）。
+- **GameStore**：新增 `UpdateSkillSlots(unitUID, pageNumber, slotA[4], slotB[4], slotBEndDate, err)`——單一 transaction；逐表先 UPDATE 命中驗證、0 命中 → INSERT（對應原 INS＝upsert）；失敗整體 rollback → false。
+- **測試**：`tests/test_change_skill_slot.cpp`（REQ/ACK golden bytes ×2、ctor 預設值、事件 id、NetError 實編值、基本流程（移動/交換/自身交換/卸下/越界/未學會/欄位 B 過期與未過期、unit-global EndDate 寫回斷言、作用頁限定、iSlotID2 過期路徑不落盤、未裝備請求技能不驗證 iSkillID2 之原碼語意、6001 硬編碼、跨頁技能、不存在 unit → ERR_SKILL_14、now == EndDate 不算過期（嚴格 >））。
+- **測試數**：**JP = 2097、TW = 2095、EU = 2093、CN = 2095、US = 2094 passed / 0 failed**（vs §0a23：各 +80）。`verify_generated` OK；NUL clean；五地區以 `tools/build_and_test.sh` 為準。Windows vcxproj 同步加入新檔（tests 不列入）。
+
+**偏差聲明**（V2 vs 原版；全部為推定，非原版保證）：
+
+1. **write-through**：原版只改記憶體、延遲到副本結束 flush（Query_UpdateSkillSlotInfo，INS 路徑）；V2 無 session UnitInfo、無副本結束路徑 → 驗證通過後立即單一 transaction 寫回作用頁兩列（與 §0a10/§0a20 慣例一致）。
+2. **validate-then-commit**：原版為 in-memory 漸進修改，失敗時部分欄位可能已變更——特別是 iSkillID2==0 且 iSlotID2 屬欄位 B 且已過期時，原碼會**先把欄位 iSlotID2 寫成字面值 2**（`SetSkillIDToSlotUsedPage( iSlotID2, 2 )`，顯然的原碼缺陷，成功路徑隨即被覆寫為 0）。V2 不重現：失敗 → 不寫任何欄位；iSkillID==0 的卸下語意（原碼先行清空）在 V2 同為 commit 階段一次寫入。
+3. **iSkillID 負值**：原碼對負值 iSkillID 放行（`iSkillID > 0` 檢查不攔），會把負 ID 寫進欄位；V2 視為未學會 → ERR_SKILL_10。
+4. **SlotB 過期判斷**：沿用原 write 路徑的嚴格 `>`（與 `GetSkillSlotBExpirationState` 的 `>=` 不一致——照抄 write 路徑）；`m_tSkillSlotBEndDate` 為 unit-global 值（V2 = gskillslot2new 最高頁列 EndDate，缺列/不可解析 → 哨兵 → 過期；即建角未購買 SlotB 的角色恆不可用 B 欄，語意與原版一致）；**不**使用作用頁自身 EndDate（原 KUserSkillTree 亦然）。EndDate 以 UTC 字典序比較（同 EquipTitleProtocol 慣例）。
+5. **SI_ETC_WS_COMMON_LOVE=6001**：原碼硬編碼的恆學會技能（UserSkillTree.cpp:1222），V2 同值硬編碼；其餘「學會」= 作用頁 gskill 列（SkillID>0 && SkillLevel>0，與 LoadSkillPageState 過濾一致）。
+6. **VERIFY_STATE／冷卻／NOT**：V2 無 FSM、無 session timer、無 Room/Field 子系統 → VERIFY_STATE（S_FIELD_MAP/S_ROOM）不移植；SERV_SKILL_CHANGE_COOL_TIME_AT_START_COUNT（3 秒冷卻）不移植；EGS_CHANGE_SKILL_SLOT_NOT 與 ERM_SET_UNIT_INFO_NOT 廣播不產生。
+7. **DB 失敗**：原版無對應路徑（純 in-memory）；V2 映射 ERR_SKILL_14（原「스킬 슬롯 B 확장 중 DB오류가 발생하였습니다」——V2 借用為「技能欄位寫入 DB 失敗」語列，含 LoadSkillPageState 失敗、UpdateSkillSlots 失敗、作用頁自癒 INSERT 撞 FK 等）。
+8. **ACK 失敗路徑**：保留 ctor 預設（iSlotID=-1、iSkillID=0、iSlotID2=-1、iSkillID2=0），不回顯輸入值（原碼同）。
+9. **iSkillID2 的驗證範圍**：僅當 iSlotID2∈[0,8)（請求技能已裝備於某欄位）時才驗證被擠出的 iSkillID2（須學會）——與原碼一致；請求技能未裝備時，被擠出的未學會技能**不**觸發 ERR_SKILL_10、直接覆寫（測試明示此原碼語意）。
+10. **UpdateSkillSlots 語意**：B 列 EndDate 一律寫回 unit-global 值（覆寫作用頁自身 EndDate）——對齊原 flush「整張 map 帶 m_wstrSkillSlotBEndDate 重寫」行為；缺列 → INSERT（upsert）；不對欄位值做 int16 範圍拒絕（DB 為 64-bit INTEGER，wire short clamp 僅在 Not1 組裝層處理；否則 legacy 髒資料會永久卡死寫入）。
+11. **交換目標**：iSlotID2 = **第一個**（欄位索引最小）裝備該技能的欄位（GetSlotID 語意）；同一技能可裝備多欄（原版允許）。
+12. 線路佈局為自洽 golden bytes（BE、tagging=false），未對原 SDK 實機驗證。
+13. 本期修復/補齊：NetError ERR_SKILL_09/10/13/14 常數（2026-11-18 實編原 NetError_def.h 核對）；`Database::Changes()`（sqlite3_changes64）已於 §0a21 存在，本期沿用。
+14. 已知未覆蓋：EGS_GET_SKILL_REQ（技能學習/升級，SERV_UPGRADE_SKILL_SYSTEM_2013；依賴 SkillTemplet/CalcLevelUpIncreaseSkillPoint Lua，**皆不在倉庫**）與 EGS_RESET_SKILL_REQ（DBE_INIT_SKILL_TREE_REQ）——**未開始**；EGS_ADMIN_* 屬管理協議，不納入。技能欄位變更的「副本結束延遲 flush」與「Room 廣播 NOT」為永久性架構差異（V2 無副本/Room），不會再補。
+
 ## 0a23. 2026-11-18 附記（SELECT_UNIT_1_NOT 技能頁系統：SERV_SKILL_PAGE_SYSTEM 2013 路徑反推；schema v14）
 
 **用戶選定「硬啃 2013 版（大量推測）」**（2026-11-18 決定；在「缺 xlsm→TempletVer2、缺全部頁系統 proc/表、缺 SkillTemplet.lua」的前提下仍實作）。反推資料源**僅**以下幾處（全部唯讀機讀）：
@@ -1143,8 +1180,8 @@ V2 目前**原樣保留**協議所需的密碼學直譯，這些本身**不符�
 6. 效能與容量測試；記憶體/句柄洩漏基線（原版以 VLD 除錯，V2 無對應）。
 7. `LoadINIFile`、設定檔格式與部署工具（原 `ReleaseTool`/`.bat` 流程）。
 8. EventIDs 以外的大型表（道具/技能/副本資料）從 `X2/dat/Script` 的轉換管道。
-9. `SELECT_UNIT` 的 REQ/收尾 ACK + 決策層已完成（§0c）；`SELECT_UNIT_1_NOT` codec + 組裝（gunit 表 → Not1，缺資料項佔位；背包 slot size/items/equippedItem 自 §0a14 ← gitem/giteminventorysize；復活石量 ← gresurrectionstone）已完成（§0e）；`SELECT_UNIT_2_NOT` codec + 組裝（§0f；任務讀回自 §0a11 ← gquests/gquests_complete/gquests_repeat）已完成（§0f）；`SELECT_UNIT_3_NOT` codec + 組裝（§0g；title/mission 讀回自 §0a12 ← gtitle_complete/gtitle_mission；pet 仍空佔位）已完成（§0g）；`SELECT_UNIT_4_NOT` codec + 組裝（Henir/Messenger/戰場狀態無資料源→空容器/零值佔位；kDenyOptions ← gdenyoption（§0a9）；vecChatBlackList ← gblacklist、vecTutorialDBUnitInfo ← gtutor（≤10 級＝學生／≥20 級＝老師）、vecConnectTimeEvent ← gis30min，§0a13）已完成（§0h）；`SELECT_UNIT_5_NOT` codec + 組裝（spirit/pshop/henir-reward/cashshop 無資料源→false/0 佔位）已完成（§0i），1_NOT…5_NOT 全數落地；1_NOT…5_NOT 分片 codec 全數移植（§0e…0i）；完整角色資料載入管線逐步推進（技能頁載入自 §0a23 起落地；技能升級/寫入路徑仍未開始）。Login 切片打通到 SELECT_UNIT_1_NOT 為止（items/寵物/ED/rating 等無資料來源，值為佔位；spirit 自 GSpirit 讀回，§0a8；任務自 §0a11 起讀 gquests/gquests_complete/gquests_repeat；稱號/稱號任務自 §0a12 起讀 gtitle_complete/gtitle_mission；黑名單/師徒/30 分鐘事件自 §0a13 起讀 gblacklist/gtutor/gis30min）。
-11. GDenyOption／GResurrectionStoneCnt／GSkill／GSkillSlot／GSpirit／GQuests——**建立流程副作用已移植（§0a5）；GSpirit 讀回與 gup_select_unit 每日重置／GResurrectionStone 每日補充／PlayDayCnt／LoginCount 登入副作用已移植（§0a8）**；其餘查詢/更新路徑（gup_get_community_opt_unituid——V2 改以 gdenyoption 直接讀回近似，§0a9；EGS_UPDATE_COMMUNITY_OPT 6 欄寫入（§0a10 write-through；P_GDenyOption_UPD 缺 proc，以 upsert 近似）已移植；gup_*_skill 之讀路徑（SELECT_UNIT 技能段）已於 §0a23 移植（v14 schema v14 反推），寫路徑（EGS_SKILL_*）未實作；gspirit Flag 語意變體）未實作；建角道具發放（gup_create_unit_set_promotion／P_GItemPeriod_INS，**不隨倉庫提供**）不可移植。
+9. `SELECT_UNIT` 的 REQ/收尾 ACK + 決策層已完成（§0c）；`SELECT_UNIT_1_NOT` codec + 組裝（gunit 表 → Not1，缺資料項佔位；背包 slot size/items/equippedItem 自 §0a14 ← gitem/giteminventorysize；復活石量 ← gresurrectionstone）已完成（§0e）；`SELECT_UNIT_2_NOT` codec + 組裝（§0f；任務讀回自 §0a11 ← gquests/gquests_complete/gquests_repeat）已完成（§0f）；`SELECT_UNIT_3_NOT` codec + 組裝（§0g；title/mission 讀回自 §0a12 ← gtitle_complete/gtitle_mission；pet 仍空佔位）已完成（§0g）；`SELECT_UNIT_4_NOT` codec + 組裝（Henir/Messenger/戰場狀態無資料源→空容器/零值佔位；kDenyOptions ← gdenyoption（§0a9）；vecChatBlackList ← gblacklist、vecTutorialDBUnitInfo ← gtutor（≤10 級＝學生／≥20 級＝老師）、vecConnectTimeEvent ← gis30min，§0a13）已完成（§0h）；`SELECT_UNIT_5_NOT` codec + 組裝（spirit/pshop/henir-reward/cashshop 無資料源→false/0 佔位）已完成（§0i），1_NOT…5_NOT 全數落地；1_NOT…5_NOT 分片 codec 全數移植（§0e…0i）；完整角色資料載入管線逐步推進（技能頁載入自 §0a23 起落地；技能欄位變更 EGS_CHANGE_SKILL_SLOT_REQ 已於 §0a24 移植（write-through）；技能學習/升級（EGS_GET_SKILL_REQ，依賴 SkillTemplet/CalcLevelUpIncreaseSkillPoint，Lua 未隨倉庫提供）與 EGS_RESET_SKILL_REQ 仍未開始）。Login 切片打通到 SELECT_UNIT_1_NOT 為止（items/寵物/ED/rating 等無資料來源，值為佔位；spirit 自 GSpirit 讀回，§0a8；任務自 §0a11 起讀 gquests/gquests_complete/gquests_repeat；稱號/稱號任務自 §0a12 起讀 gtitle_complete/gtitle_mission；黑名單/師徒/30 分鐘事件自 §0a13 起讀 gblacklist/gtutor/gis30min）。
+11. GDenyOption／GResurrectionStoneCnt／GSkill／GSkillSlot／GSpirit／GQuests——**建立流程副作用已移植（§0a5）；GSpirit 讀回與 gup_select_unit 每日重置／GResurrectionStone 每日補充／PlayDayCnt／LoginCount 登入副作用已移植（§0a8）**；其餘查詢/更新路徑（gup_get_community_opt_unituid——V2 改以 gdenyoption 直接讀回近似，§0a9；EGS_UPDATE_COMMUNITY_OPT 6 欄寫入（§0a10 write-through；P_GDenyOption_UPD 缺 proc，以 upsert 近似）已移植；gup_*_skill 之讀路徑（SELECT_UNIT 技能段）已於 §0a23 移植（v14 schema v14 反推），寫路徑（EGS_CHANGE_SKILL_SLOT_REQ/ACK §0a24 已移植，write-through）；EGS_GET_SKILL_REQ／EGS_RESET_SKILL_REQ 未實作；gspirit Flag 語意變體）未實作；建角道具發放（gup_create_unit_set_promotion／P_GItemPeriod_INS，**不隨倉庫提供**）不可移植。
 10. Wire 相容：Login 切片 codec 只有自洽 golden bytes，**缺原 SDK 實機對照向量**（見 §13）。
 
 ## 13. 風險
