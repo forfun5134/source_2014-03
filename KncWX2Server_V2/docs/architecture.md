@@ -358,6 +358,26 @@ tests/test_string_filter.cpp 的字元集閘門斷言改為依 `X2_REGION_*` 分
 - **測試數**：**JP = 1297、TW = 1295、EU = 1293、CN = 1295 passed / 0 failed**。
 - 剩餘未移植：gmo_*_skill（技能 slot 更新）／gup_get_community_opt_unituid（社群選項查詢——V2 改以 gdenyoption 直接讀回近似，§0a9；relationship 6 欄寫入 EGS_UPDATE_COMMUNITY_OPT 已於 §0a10 以 write-through upsert 移植；P_GDenyOption_UPD 仍缺 proc）／class 5..9 技能列（原 proc 不存在）／LogDB；gspirit 的 Flag 完整語意與復活石補充/精力重置已於 §0a8 移植；Flag 並列槽位 UI 亦未建模。
 
+## 0a27. 2026-11-18 附記（EGS_DECIDE_TO_USE_THIS_SKILL_PAGE_REQ/ACK：切換作用技能頁；schema v15 沿用）
+
+承 §0a23（技能頁資料讀回）／§0a26（技能學習與升級）。本切片移植 `EGS_DECIDE_TO_USE_THIS_SKILL_PAGE_REQ`（1153）→ `EGS_DECIDE_TO_USE_THIS_SKILL_PAGE_ACK`（1154）：將某個已擴充頁設為作用頁，並回傳該頁欄位與已學技能資料。
+
+**原版對照**：
+
+- `GSUserGameCommon.cpp:10436+`：僅 S_FIELD_MAP 可切頁；頁碼 `<1` 或 `> GetTheNumberOfSkillPagesAvailable()` → ERR_SKILL_PAGE_03；否則送 DBE_DECIDE_TO_USE_THIS_SKILL_PAGE_REQ。
+- `GSGameDBThread.cpp:25285+`：SERV_ALL_RENEWAL_SP（僅 IN）走 `P_GSkill_Expand_UPD_Active`，其他區走 `P_GSkill_Expand_UPD`；回傳 -1（未擴充過）→ ERR_SKILL_PAGE_06，-2（更新失敗）→ ERR_SKILL_PAGE_07；成功 ACK 帶 requested page。
+- DB ACK handler 驗證頁碼一次（超範圍仍 PAGE_03），設 in-memory ActivePage，再回 ACK=`iOK, requestedPage, GetSPoint(), GetCSPoint(), KUserSkillPageData`。REQ 單 int；ACK 順序如上（`ClientPacket.h:10908`、`ClientPacket.cpp:14929–14961`）。錯誤碼原版機讀（原 NetError_def.h）：PAGE_03=1388、PAGE_06=1391、PAGE_07=1392。原 state gate 是 S_FIELD_MAP（村莊／休息處），重複包 ACK gate 同。
+
+**V2 實作**：
+
+- `src/server/DecideSkillPageProtocol.{h,cpp}`：REQ/ACK codec、`HandleDecideSkillPageReq`；以已存在的 `LoadSkillPageState` 取得可用頁與作用頁資料，頁碼驗證後呼叫 `GameStore::SetActiveSkillPage`，成功 transaction 提交後回傳該頁 `UserSkillPageData`。
+- `SetActiveSkillPage` 單一 transaction：查 `gskillexpand`；列不存在→NeverExpanded（PAGE_06），頁碼大於 PageCount→InvalidPage（PAGE_03），否則 UPDATE ActivePage（命中非 1 或 SQL/commit 失敗→PAGE_07），失敗 rollback。與 §0a26 v15 composite key 可跨頁保存技能資料相容。
+- **無新增 migration**：v15 `gskillexpand(PageCount,ActivePage)`、`gskill`、`gskillslotnew/gskillslot2new` 已足夠；原 update proc 不在倉庫，以 GSGameDBThread 回傳碼分支反推。
+- **偏差**：(1) V2 無 FSM/村莊狀態，無法執行原 S_FIELD_MAP gate；(2) 原 ACK SPoint/CSP 與每頁池相關，V2 無 page-local pool，`iSPointAvailable` 使用 `gunit.SPoint`、`iCSPointAvailable` 使用 unit-global `gskillcash.CSPoint`；`KUserSkillPageData.usSkillPoint/usCashSkillPoint` 沿用 §0a23 的 0 佔位；(3) 技能欄位對應等級若 gskill row 缺失回 0，無 SkillTemplet 無法重建原技能等級規則；(4) 切頁 ACK 不包含 unit-wide 通知；(5) wire golden bytes 自洽，未對原 SDK 實機驗證。
+- **測試**：codec golden/roundtrip、1153/1154、三個錯誤碼、成功切換持久化與目標頁 payload、越界／未擴充／更新 trigger 故障及頁碼未變。五地區 `tools/build_and_test.sh` 全綠：JP **2298**、TW **2296**、EU **2294**、CN **2296**、US **2295 passed / 0 failed**；本 slice 新增 20 checks。
+
+**狀態**：驗收完成；五地區 build/test 全綠，`verify_generated` OK，NUL clean。
+
 ## 0a26. 2026-11-18 附記（EGS_GET_SKILL_REQ/ACK：技能學習／升級寫路徑；schema v15）
 
 承 §0a23（技能頁讀回）／§0a24（技能欄位變更）／§0a25（技能重置）。本切片實作技能學習與升級：`EGS_GET_SKILL_REQ`（294）→ `EGS_GET_SKILL_ACK`（295）。原版為 GS handler 先扣內存 SP/CSP、再非同步送 DB worker 寫技能；V2 無 DB worker／角色內存技能樹，以讀庫驗證→單一 transaction→ACK 一跳 write-through。
@@ -420,7 +440,7 @@ tests/test_string_filter.cpp 的字元集閘門斷言改為依 `X2_REGION_*` 分
 14. **無 -1 通道**：原 DBE 以 iCSPoint<=0 → DB 傳 -1 跳過現金點更新；V2 一律寫入（偏差 9）。
 15. **wire 佈局自洽 golden bytes**，未對原 SDK 實機驗證；vec<KInventoryItemInfo> 逐元素依 §0a17/SelectUnit 讀回口徑（itemUID/slotCategory/slotID/itemInfo；randomSocket 固定空、itemState=0、expandedSocketNum=0）。
 
-**已知未覆蓋**：EGS_GET_SKILL_REQ（技能學習/升級，SERV_UPGRADE_SKILL_SYSTEM_2013；依賴 SkillTemplet/CalcLevelUpIncreaseSkillPoint Lua，**皆不在倉庫**）——**仍未開始**；EGS_ADMIN_* 屬管理協議，不納入；原 DBE 的「DB 兩跳」架構（GSGameDBThread worker thread）為永久性架構差異（V2 無 DB thread），不會再補。
+**已移植**：EGS_GET_SKILL_REQ（§0a26；技能表資料缺失造成的規則偏差仍待補）、EGS_RESET_SKILL_REQ（§0a25）；EGS_ADMIN_* 屬管理協議，不納入；原 DBE 的 DB worker 兩跳為 V2 無 DB thread 的架構差異。技能頁切換/展開事件另行移植。
 
 ## 0a24. 2026-11-18 附記（EGS_CHANGE_SKILL_SLOT_REQ/ACK：技能欄位變更寫路徑；schema v14 沿用）
 

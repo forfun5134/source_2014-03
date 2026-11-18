@@ -466,6 +466,10 @@ public:
                         GetSkillCommit& out, GetSkillFailure& failStage,
                         std::string& err);
 
+    // 技能頁切換持久化（§0a27）：原 P_GSkill_Expand_UPD(Active)；單一 transaction。
+    enum class SetActiveSkillPageResult { Ok, NeverExpanded, InvalidPage, UpdateFailed };
+    SetActiveSkillPageResult SetActiveSkillPage(int64_t unitUID, int32_t pageNumber, std::string& err);
+
 private:
     Database& m_db;
 

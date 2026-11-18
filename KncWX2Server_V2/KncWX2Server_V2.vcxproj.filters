@@ -42,6 +42,7 @@
     <ClCompile Include="src\server\ChangeSkillSlotProtocol.cpp"><Filter>server</Filter></ClCompile>
     <ClCompile Include="src\server\ResetSkillProtocol.cpp"><Filter>server</Filter></ClCompile>
     <ClCompile Include="src\server\GetSkillProtocol.cpp"><Filter>server</Filter></ClCompile>
+    <ClCompile Include="src\server\DecideSkillPageProtocol.cpp"><Filter>server</Filter></ClCompile>
     <ClCompile Include="src\server\CharacterListProtocol.cpp"><Filter>server</Filter></ClCompile>
     <ClCompile Include="src\server\EntryPointChannelListProtocol.cpp"><Filter>server</Filter></ClCompile>
     <ClCompile Include="src\server\ExpTable.cpp"><Filter>server</Filter></ClCompile>
@@ -94,6 +95,7 @@
     <ClInclude Include="src\server\ChangeSkillSlotProtocol.h"><Filter>server</Filter></ClInclude>
     <ClInclude Include="src\server\ResetSkillProtocol.h"><Filter>server</Filter></ClInclude>
     <ClInclude Include="src\server\GetSkillProtocol.h"><Filter>server</Filter></ClInclude>
+    <ClInclude Include="src\server\DecideSkillPageProtocol.h"><Filter>server</Filter></ClInclude>
     <ClInclude Include="src\server\CharacterListProtocol.h"><Filter>server</Filter></ClInclude>
     <ClInclude Include="src\server\EntryPointChannelListProtocol.h"><Filter>server</Filter></ClInclude>
     <ClInclude Include="src\server\ExpTable.h"><Filter>server</Filter></ClInclude>

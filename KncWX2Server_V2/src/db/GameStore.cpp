@@ -2384,4 +2384,65 @@ bool GameStore::CommitGetSkill(int64_t unitUID, int32_t activePage,
     return true;
 }
 
+GameStore::SetActiveSkillPageResult GameStore::SetActiveSkillPage(int64_t unitUID, int32_t pageNumber,
+                                                                   std::string& err)
+{
+    err.clear();
+    if (unitUID <= 0 || pageNumber < 1) {
+        err = "invalid unit uid or skill page";
+        return SetActiveSkillPageResult::InvalidPage;
+    }
+    if (!m_db.Begin(err)) return SetActiveSkillPageResult::UpdateFailed;
+    auto rollback = [this]() { std::string unused; m_db.Rollback(unused); };
+
+    int32_t pageCount = 0;
+    {
+        Statement st;
+        if (!st.Prepare(m_db, "SELECT PageCount FROM gskillexpand WHERE UnitUID = ?;", err) ||
+            !st.BindInt(1, unitUID, err)) {
+            rollback();
+            return SetActiveSkillPageResult::UpdateFailed;
+        }
+        std::string stepErr;
+        if (!st.StepRow(stepErr)) {
+            if (stepErr.empty()) {
+                err = "skill page expansion row not found";
+                rollback();
+                return SetActiveSkillPageResult::NeverExpanded;
+            }
+            err = stepErr;
+            rollback();
+            return SetActiveSkillPageResult::UpdateFailed;
+        }
+        pageCount = static_cast<int32_t>(st.ColumnInt64(0));
+    }
+    if (pageNumber > pageCount) {
+        err = "requested skill page exceeds expanded page count";
+        rollback();
+        return SetActiveSkillPageResult::InvalidPage;
+    }
+    {
+        Statement st;
+        if (!st.Prepare(m_db, "UPDATE gskillexpand SET ActivePage = ? WHERE UnitUID = ? AND PageCount >= ?;", err) ||
+            !st.BindInt(1, pageNumber, err) || !st.BindInt(2, unitUID, err) || !st.BindInt(3, pageNumber, err)) {
+            rollback();
+            return SetActiveSkillPageResult::UpdateFailed;
+        }
+        std::string stepErr;
+        if (st.StepRow(stepErr)) {
+            err = "unexpected row from active skill page UPDATE";
+            rollback();
+            return SetActiveSkillPageResult::UpdateFailed;
+        }
+        if (!stepErr.empty() || m_db.Changes() != 1) {
+            err = stepErr.empty() ? "active skill page update affected rows != 1" : stepErr;
+            rollback();
+            return SetActiveSkillPageResult::UpdateFailed;
+        }
+    }
+    if (!m_db.Commit(err)) return SetActiveSkillPageResult::UpdateFailed;
+    err.clear();
+    return SetActiveSkillPageResult::Ok;
+}
+
 }} // namespace x2::db
