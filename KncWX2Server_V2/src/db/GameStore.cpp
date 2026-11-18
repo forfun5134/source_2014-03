@@ -1521,6 +1521,83 @@ bool GameStore::GetBlacklist(int64_t unitUID, std::vector<BlacklistRecord>& out,
     return true;
 }
 
+DeleteBlacklistResult GameStore::DeleteBlacklistEntry(int64_t unitUID, int64_t blockUnitUID,
+                                                        std::string& nickname, std::string& err)
+{
+    nickname.clear();
+    if (unitUID <= 0 || blockUnitUID <= 0) {
+        err = "invalid blacklist UID";
+        return DeleteBlacklistResult::DbError;
+    }
+    if (!m_db.Begin(err)) return DeleteBlacklistResult::DbError;
+    auto rollback = [this]() { std::string ignored; m_db.Rollback(ignored); };
+
+    // Read the nickname from the same transaction as the delete so the ACK reflects the removed entry.
+    {
+        Statement st;
+        if (!st.Prepare(m_db,
+                "SELECT n.NickName FROM gblacklist bl LEFT JOIN gunit_nickname n ON n.UnitUID = bl.BlockUID"
+                " WHERE bl.MyUID = ? AND bl.BlockUID = ?;", err) ||
+            !st.BindInt(1, unitUID, err) || !st.BindInt(2, blockUnitUID, err)) {
+            rollback();
+            return DeleteBlacklistResult::DbError;
+        }
+        std::string stepErr;
+        if (!st.StepRow(stepErr)) {
+            rollback();
+            if (stepErr.empty()) {
+                err.clear();
+                return DeleteBlacklistResult::NotFound;
+            }
+            err = stepErr;
+            return DeleteBlacklistResult::DbError;
+        }
+        if (!st.ColumnIsNull(0)) nickname = st.ColumnText(0);
+        if (st.StepRow(stepErr)) {
+            rollback();
+            err = "duplicate blacklist relation";
+            return DeleteBlacklistResult::DbError;
+        }
+        if (!stepErr.empty()) {
+            rollback();
+            err = stepErr;
+            return DeleteBlacklistResult::DbError;
+        }
+    }
+
+    {
+        Statement st;
+        if (!st.Prepare(m_db, "DELETE FROM gblacklist WHERE MyUID = ? AND BlockUID = ?;", err) ||
+            !st.BindInt(1, unitUID, err) || !st.BindInt(2, blockUnitUID, err)) {
+            rollback();
+            return DeleteBlacklistResult::DbError;
+        }
+        std::string stepErr;
+        if (st.StepRow(stepErr)) {
+            rollback();
+            err = "unexpected row from DELETE gblacklist";
+            return DeleteBlacklistResult::DbError;
+        }
+        if (!stepErr.empty()) {
+            rollback();
+            err = stepErr;
+            return DeleteBlacklistResult::DbError;
+        }
+        if (m_db.Changes() != 1) {
+            rollback();
+            err = "blacklist delete affected rows != 1";
+            return DeleteBlacklistResult::DbError;
+        }
+    }
+
+    if (!m_db.Commit(err)) {
+        rollback();
+        return DeleteBlacklistResult::DbError;
+    }
+    err.clear();
+    return DeleteBlacklistResult::Removed;
+}
+
 bool GameStore::GetTutorInfo(bool isTeacher, int64_t unitUID, std::vector<TutorRecord>& out, std::string& err)
 {
     out.clear();

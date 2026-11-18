@@ -179,6 +179,7 @@ struct BlacklistRecord
     int64_t blockUnitUID = 0;
     std::string nickname;                // gunit_nickname.NickName；NULL → 空字串
 };
+enum class DeleteBlacklistResult { Removed, NotFound, DbError };
 struct TutorRecord
 {
     int64_t     unitUID = 0;
@@ -342,6 +343,10 @@ public:
 
     // 讀取聊天黑名單（原 gup_select_blacklist：GBlackList ∩ gunit_nickname；deleted/無 nickname 列之對手方，暱稱 → 空字串）
     bool GetBlacklist(int64_t unitUID, std::vector<BlacklistRecord>& out, std::string& err);
+    // 原 gup_delete_blacklist：僅刪除 (MyUID, BlockUID) 關係；成功回傳被刪對象暱稱供 ACK。
+    // 單一 transaction；不存在 → NotFound；任何 SQL/commit 失敗 → DbError + rollback。
+    DeleteBlacklistResult DeleteBlacklistEntry(int64_t unitUID, int64_t blockUnitUID,
+                                               std::string& nickname, std::string& err);
 
     // 讀取稱號（사제）對象（原 gup_get_tutor，isTeacher=false → 讀「我的老師」（我是學生）、true → 「我的學生」（我是老師））：
     //   gtutor.Deleted = 0（生成欄位，鏡像原 CASE WHEN RegDate = DelDate THEN 0 ELSE 1 END）

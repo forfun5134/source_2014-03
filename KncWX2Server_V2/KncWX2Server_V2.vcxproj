@@ -123,6 +123,7 @@
     <ClCompile Include="src\server\GetSkillProtocol.cpp" />
     <ClCompile Include="src\server\DecideSkillPageProtocol.cpp" />
     <ClCompile Include="src\server\GetNextSkillPageEdProtocol.cpp" />
+    <ClCompile Include="src\server\DeleteBlacklistUserProtocol.cpp" />
     <ClCompile Include="src\server\CharacterListProtocol.cpp" />
     <ClCompile Include="src\server\EntryPointChannelListProtocol.cpp" />
     <ClCompile Include="src\server\ExpTable.cpp" />
@@ -190,6 +191,7 @@
     <ClInclude Include="src\server\GetSkillProtocol.h" />
     <ClInclude Include="src\server\DecideSkillPageProtocol.h" />
     <ClInclude Include="src\server\GetNextSkillPageEdProtocol.h" />
+    <ClInclude Include="src\server\DeleteBlacklistUserProtocol.h" />
     <ClInclude Include="src\server\CharacterListProtocol.h" />
     <ClInclude Include="src\server\EntryPointChannelListProtocol.h" />
     <ClInclude Include="src\server\ExpTable.h" />

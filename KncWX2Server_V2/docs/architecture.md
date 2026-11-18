@@ -375,7 +375,7 @@ tests/test_string_filter.cpp 的字元集閘門斷言改為依 `X2_REGION_*` 分
 - **阻塞 B：完整 class→預設技能清單**。原 `m_mapDefaultSkill` 來自缺失的技能樹資料；倉庫可追到初始建角時少數 class 的技能 seed，但不能代表各職業（含轉職）的 2/4/6 清單。V2 ResetSkill 既有 `{10000,20030,30000,40010}` 僅是 class 1..4 的近似，不能挪用為全職業初始化清單。
 - **額外相容缺口（可在取得資料後明確記錄/處理）**：原 CSP 過期檢查會查各技能頁 CSP；V2 目前 `gskillcash` 是 unit-global 且沒有 per-page pool；原 FIELD_MAP/ROOM 狀態 gate、Inventory Lock 子系統、Lua item whitelist 的地區條件皆未移植；DB stored procedure 原文缺失。wire request/ack、NetError 數值及背包數量型／耐久型消耗，仍需依 ClientPacket codec、原錯誤碼機讀與既有 V2 API 落實。
 
-**決定／下一步**：使用者選擇暫緩初始化切片並先做其他有資料支撐的功能；不新增會猜測 SP 或職業預設技能的可寫 handler。若日後重啟此切片，需取得可核對的 `CalcLevelUpIncreaseSkillPoint` 等級曲線與完整 class default-skill map（或明確核准有界限的替代規則），再實作協議、原子 DB transaction、錯誤 ACK／道具消耗測試。後續已改做只讀的技能頁擴充 ED 報價查詢（§0a29）。
+**決定／下一步**：使用者選擇暫緩初始化切片並先做其他有資料支撐的功能；不新增會猜測 SP 或職業預設技能的可寫 handler。若日後重啟此切片，需取得可核對的 `CalcLevelUpIncreaseSkillPoint` 等級曲線與完整 class default-skill map（或明確核准有界限的替代規則），再實作協議、原子 DB transaction、錯誤 ACK／道具消耗測試。後續先移植只讀的技能頁擴充 ED 報價查詢（§0a29），再改做資料表可支撐的黑名單刪除（§0a30）。
 
 ## 0a29. 2026-11-16 附記（EGS_GET_NEXT_SKILL_PAGE_ED_REQ/ACK：查詢下一技能頁 ED 費用）
 
@@ -386,6 +386,20 @@ tests/test_string_filter.cpp 的字元集閘門斷言改為依 `X2_REGION_*` 分
 **V2 實作**：`src/server/GetNextSkillPageEdProtocol.{h,cpp}` 提供空 REQ codec、`iOK+iED` ACK codec 與 `HandleGetNextSkillPageEdReq`；使用既有 `LoadSkillPageState`。頁數未達 3 → `NET_OK + 50,000,000`；已達 3 → `ERR_SKILL_PAGE_02 + iED=0`；無效 unit UID 或 DB 讀取失敗 → `ERR_ODBC_01 + iED=0`。此操作純查詢、不修改 DB；無新增 schema／migration。因 request 不需資料，handler 只為判斷頁數讀取 DB，V2 無法實作 Field/Room gate。
 
 **測試**：REQ 空 payload、ACK golden bytes／roundtrip、事件 ID、PAGE_02=1390；1/2 頁報價、3 頁錯誤 ACK、非法 UID、缺表造成 DB 讀取錯誤。新增 20 checks；五地區 build/test 全綠：JP **2318**、TW **2316**、EU **2314**、CN **2316**、US **2315 passed / 0 failed**。
+
+## 0a30. 2026-11-16 附記（EGS_DEL_BLACKLIST_USER_REQ/ACK：移除聊天黑名單對象）
+
+依使用者「都可以」的授權，選擇資料表與既有讀回路徑完整支撐、且不依賴缺失技能資料的刪除操作：`EGS_DEL_BLACKLIST_USER_REQ`（363）→ `EGS_DEL_BLACKLIST_USER_ACK`（364）。此切片僅處理**移除**；新增黑名單需 LoginServer 在線使用者查詢及新增上限邏輯，尚未移植。
+
+**原版對照**（`GSUserGameCommon.cpp:2935–2978`）：REQ=`iUnitUID`；ACK 與新增黑名單 ACK 共用 `{iOK, KChatBlackListUnit{iUnitUID,wstrNickName}}`。目標是自己 → `ERR_BLACKLIST_06`；目標不在記憶體黑名單 → `ERR_BLACKLIST_02`；DB worker 執行 `gup_delete_blacklist`／`P_GBlackList_DEL`，成功後 ACK 帶目標 UID／暱稱；DB 回 -1/-2 → BLACKLIST_02/04。原 NetError 機讀：BLACKLIST_02=244、_04=246、_06=248。
+
+**V2 實作**：
+
+- `GameStore::DeleteBlacklistEntry` 在單一 transaction 內讀取目標暱稱並按 `(MyUID,BlockUID)` 刪除；無關係→NotFound，不存在的目標 UID 不會被誤刪；SQL／commit 失敗 rollback。
+- `src/server/DeleteBlacklistUserProtocol.{h,cpp}` 實作 REQ/ACK codec 與 handler：自己→248；無關係→244；成功→NET_OK 並帶 UID／UTF-8 轉寬字暱稱；transaction 失敗→246。事件與 NetError 常數加入測試核對。
+- **偏差**：V2 沒有 FIELD_MAP/ROOM 狀態閘門，也沒有 `KUserGameOption` 的在線記憶體黑名單鏡像；以持久化 `gblacklist` 為來源。僅移除路徑，不提供新增流程；wire golden 對照使用 V2 serializer，自洽但未對原 SDK 實機驗證。
+
+**測試**：REQ golden／roundtrip、ACK roundtrip、事件碼與錯誤碼；成功刪除及回傳暱稱、自我刪除、缺少關係、trigger 注入失敗並驗證 rollback。19 checks。全五地區 build/test 全綠：JP **2337**、TW **2335**、EU **2333**、CN **2335**、US **2334 passed / 0 failed**；generated、NUL 與 VS project XML 驗證通過。
 
 ## 0a27. 2026-11-18 附記（EGS_DECIDE_TO_USE_THIS_SKILL_PAGE_REQ/ACK：切換作用技能頁；schema v15 沿用）
 
