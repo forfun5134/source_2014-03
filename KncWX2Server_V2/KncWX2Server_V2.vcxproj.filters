@@ -48,6 +48,7 @@
     <ClCompile Include="src\server\GetNextBankEdProtocol.cpp"><Filter>server</Filter></ClCompile>
     <ClCompile Include="src\server\FieldOptionProtocol.cpp"><Filter>server</Filter></ClCompile>
     <ClCompile Include="src\server\FrameAverageProtocol.cpp"><Filter>server</Filter></ClCompile>
+    <ClCompile Include="src\server\GameEventDispatcher.cpp"><Filter>server</Filter></ClCompile>
     <ClCompile Include="src\server\DeleteBlacklistUserProtocol.cpp"><Filter>server</Filter></ClCompile>
     <ClCompile Include="src\server\CharacterListProtocol.cpp"><Filter>server</Filter></ClCompile>
     <ClCompile Include="src\server\EntryPointChannelListProtocol.cpp"><Filter>server</Filter></ClCompile>
@@ -107,6 +108,7 @@
     <ClInclude Include="src\server\GetNextBankEdProtocol.h"><Filter>server</Filter></ClInclude>
     <ClInclude Include="src\server\FieldOptionProtocol.h"><Filter>server</Filter></ClInclude>
     <ClInclude Include="src\server\FrameAverageProtocol.h"><Filter>server</Filter></ClInclude>
+    <ClInclude Include="src\server\GameEventDispatcher.h"><Filter>server</Filter></ClInclude>
     <ClInclude Include="src\server\DeleteBlacklistUserProtocol.h"><Filter>server</Filter></ClInclude>
     <ClInclude Include="src\server\CharacterListProtocol.h"><Filter>server</Filter></ClInclude>
     <ClInclude Include="src\server\EntryPointChannelListProtocol.h"><Filter>server</Filter></ClInclude>

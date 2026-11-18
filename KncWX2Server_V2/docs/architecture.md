@@ -1353,3 +1353,10 @@ V2 目前**原樣保留**協議所需的密碼學直譯，這些本身**不符�
 - 對照 `GSUserGameCommon.cpp` 的 `EGS_FRAME_AVERAGE_REQ/ACK`（429/430）；REQ 欄位依序為 `char gameType, int totalFrame, int frameAverage`，ACK 是 `KPacketOK`。平均值為負時先回 `ERR_STATISTICS_00`（327）；非負但類型為 NONE 或未知時回成功、不記統計。PVP/DUNGEON/BATTLE_FIELD（1/2/3）對應統計鍵 0/1/2；依原版區間分為 0–20、21–30、31–40、41–50、51–60、61–70、71–80、81–90、91 以上九桶。`totalFrame` 在原 handler 中未使用，不額外驗證。
 - 偏差與範圍：原版呼叫 `KSIManager.IncreaseCount`；V2 僅回傳可供呼叫端消費的分類結果，尚無統計 sink、session 事件分派或 Field/Room 警告。未宣稱已持久化或實際收集統計。封包 golden bytes 為 V2 自洽向量，尚未與原 SDK 實機比對。
 - 驗收：JP 2509、TW 2507、EU 2505、CN 2507、US 2506 passed / 0 failed；覆蓋 wire、所有桶邊界、三類遊戲、未知類型、負值優先順序及截斷。
+
+### §0a35 GameEvent 分派原型（場景選項與 FPS）
+
+- 新增 `GameEventDispatcher`：接收解壓後 `Event`，辨識 573（場景選項）與 429（平均幀率），解碼後呼叫 §0a33／§0a34 handler，組裝各自 ACK。狀態按呼叫者持有的 `GameEventSession` 隔離；FPS 分類輸出交給呼叫端，adapter 不寫統計。
+- 安全及邊界：呼叫者**必須**綁定每條連線並自行驗證登入後才設 `authenticated`；adapter 不接受封包內 UID 作認證依據。未認證、未知事件、壓縮 payload、解碼失敗或多餘尾隨位元組不更新 session、不輸出 ACK；嚴格拒絕尾隨位元組為 V2 原型政策，尚未核對原版對尾隨資料的容忍度。
+- 尚未整合到正式 server、登入／角色選擇、狀態 FSM、統計 sink 或伺服器生命週期；`authenticated` 是呼叫端提供的信任邊界，不構成登入實作。測試以注入認證狀態模擬 caller，經既有 Session 加密握手與 loopback TCP 將兩事件送至 dispatcher 並讀回 ACK；並測試未知事件、錯誤封包及 session 隔離。
+- 驗收：JP 2530、TW 2528、EU 2526、CN 2528、US 2527 passed / 0 failed。loopback 在 POSIX 執行，Windows 執行環境尚未驗證。
