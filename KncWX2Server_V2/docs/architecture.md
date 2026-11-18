@@ -358,6 +358,28 @@ tests/test_string_filter.cpp 的字元集閘門斷言改為依 `X2_REGION_*` 分
 - **測試數**：**JP = 1297、TW = 1295、EU = 1293、CN = 1295 passed / 0 failed**。
 - 剩餘未移植：gmo_*_skill（技能 slot 更新）／gup_get_community_opt_unituid（社群選項查詢——V2 改以 gdenyoption 直接讀回近似，§0a9；relationship 6 欄寫入 EGS_UPDATE_COMMUNITY_OPT 已於 §0a10 以 write-through upsert 移植；P_GDenyOption_UPD 仍缺 proc）／class 5..9 技能列（原 proc 不存在）／LogDB；gspirit 的 Flag 完整語意與復活石補充/精力重置已於 §0a8 移植；Flag 並列槽位 UI 亦未建模。
 
+## 0a22. 2026-11-17 附記（EGS_CURRENT_TIME_REQ/ACK：サーバー現在時刻）
+
+SELECT_UNIT 全流程已落地；本期實作**完全自足、無 DB／無腳本表**的客戶端事件——`EGS_CURRENT_TIME_REQ`（NOPARAM）→ `EGS_CURRENT_TIME_ACK{ std::wstring m_wstrCurrentTime }`。
+
+原版：
+
+- **GSUserGameCommon::IMPL_ON_FUNC_NOPARAM( EGS_CURRENT_TIME_REQ )**（GSUserGameCommon.cpp:6232–6244）：
+  `CTime::GetCurrentTime().Format( _T( "%Y-%m-%d %H:%M:%S" ) )` → ACK；無狀態檢查、無 DB、無條件送出。
+- **ClientPacket.cpp**：PUT/GET 只含 `m_wstrCurrentTime`（`SERVER_CURRENT_TIME_INT64` **未定義**（ServerDefine.h 無此巨集）→ ACK 無 `m_tCurrentTime`）。
+
+**V2 實作**：
+
+- **協議** `src/server/CurrentTimeProtocol.{h,cpp}`（x2::current_time）：events 507/508；REQ NOPARAM／ACK{ wstring }；PUT/GET 逐字（`ks.Put(wstr)`＝[DWORD byte 長][UTF-16LE bytes]）；golden bytes 驗證。
+- **handler**：`HandleCurrentTimeReq(req, ack, wstrNow = L"")`——`wstrNow` 非空直接採用（測試注入）；空 → 本地時間格式化（`localtime_r`／Windows `localtime_s`＋snprintf；固定 19 寬 ASCII，與原 Format 形狀逐字一致）。
+- **測試**：`tests/test_current_time.cpp`（REQ NOPARAM、ACK golden bytes（注入 "2026-11-17 12:34:56"）、事件 id、注入路徑、真實時間路徑的形狀檢查（19 寬、`-`/` `/`:` 位置））。
+- **測試數**：**JP = 1908、TW = 1906、EU = 1904、CN = 1906、US = 1905 passed / 0 failed**。
+- **偏差聲明**（完整列表見 CurrentTimeProtocol.h 檔頭）：
+  1. **時區**：原 CTime::GetCurrentTime()＝Windows **本地時間**；V2 以 POSIX `localtime_r`／Windows `localtime_s` 格式化本地時間——皆屬 "server local time"，但 Windows CRT 與 POSIX 的本地時區來源不同（實作層差異）。
+  2. 形狀以手動組裝（不依賴 strftime 的 %Y-%m-%d 行為差異）；非法時間（localtime 失敗）→ 空 wstring。
+  3. 無 DBE 轉發（原 handler 也無）。
+  4. 線路佈局自洽 golden bytes；未對原 SDK 實機驗證。
+
 ## 0a21. 2026-11-17 附記（EGS_GET/MODIFY_WISH_LIST：찜 리스트讀寫；schema v13；帳號級）
 
 原版 `EGS_GET_WISH_LIST_REQ`（NOPARAM）→ in-memory `KUserWishList.GetWishList` → `EGS_GET_WISH_LIST_ACK{ map<int,int> m_mapWishList }`；`EGS_MODIFY_WISH_LIST_REQ{ vector<int> m_vecWishListItemID; bool m_bIsDelete }` → `AddWish`/`DelWish`（SLOT_MAX=21）→ `EGS_MODIFY_WISH_LIST_ACK{ iOK, vec, bIsDelete }`。ItemID 為**現金商城產品 ID**（DB 商品），非道具 ID。**帳號級（UserUID）**，與角色選擇無關；FK→GUser。
