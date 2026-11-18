@@ -84,6 +84,7 @@ inline constexpr int ERR_ODBC_01 = 555;  // ODBC 실패（原 DBE 系查詢失�
 inline constexpr int ERR_SKILL_20 = 200;  // 스킬 레벨 정보가 이상합니다.（技能等級資訊異常——V2 用於「未學會/等級不足 1」）
 inline constexpr int ERR_SKILL_24 = 204;  // 캐시 스킬포인트 정보 갱신이 실패하였습니다.（現金技能點更新失敗）
 inline constexpr int ERR_SKILL_PAGE_01 = 1387;  // 클라이언트에서 보내준 활성화된 스킬 페이지 번호가 서버의 정보와 다릅니다.（作用技能頁不一致）
+inline constexpr int ERR_SKILL_PAGE_02 = 1390;  // 더이상 스킬 페이지를 확장 할 수 없습니다.（技能頁已達上限）
 inline constexpr int ERR_SKILL_PAGE_03 = 1388;  // 사용하기로 선택한 스킬 페이지가 이상 합니다.（選擇的技能頁碼超出已擴充範圍）
 inline constexpr int ERR_SKILL_PAGE_04 = 1386;  // 활성화 중인 스킬 페이지 번호가 이상 합니다.（作用技能頁碼異常）
 inline constexpr int ERR_SKILL_PAGE_06 = 1391;  // 스킬 페이지를 확장한 적이 없는데 페이지 변경을 시도함（未曾擴充技能頁）

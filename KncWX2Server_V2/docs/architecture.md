@@ -358,6 +358,35 @@ tests/test_string_filter.cpp 的字元集閘門斷言改為依 `X2_REGION_*` 分
 - **測試數**：**JP = 1297、TW = 1295、EU = 1293、CN = 1295 passed / 0 failed**。
 - 剩餘未移植：gmo_*_skill（技能 slot 更新）／gup_get_community_opt_unituid（社群選項查詢——V2 改以 gdenyoption 直接讀回近似，§0a9；relationship 6 欄寫入 EGS_UPDATE_COMMUNITY_OPT 已於 §0a10 以 write-through upsert 移植；P_GDenyOption_UPD 仍缺 proc）／class 5..9 技能列（原 proc 不存在）／LogDB；gspirit 的 Flag 完整語意與復活石補充/精力重置已於 §0a8 移植；Flag 並列槽位 UI 亦未建模。
 
+## 0a28. 2026-11-16 可行性稽核（EGS_INIT_SKILL_TREE_REQ/ACK：技能樹初始化／重置）
+
+本輪先對照原 GS handler、技能樹 helper、DB worker 協議與 V2 schema/API；**尚未實作協議或資料庫寫入**。結論：V2 已有足以承載部分交易的技能／背包資料表，但缺少兩項會直接決定重置結果的權威遊戲資料，因此不能安全地以猜測值完成「技能樹初始化」。重置會消耗道具並刪除作用頁技能列，錯誤預設技能或 SP 會造成不可逆資料損失；本切片暫停在可行性稽核，不將技能頁切換（§0a27）視為技能樹初始化。
+
+**原版行為查核**：
+
+- `GameServer/GSUserGameCommon.cpp` `EGS_INIT_SKILL_TREE_REQ/ACK`：Inventory Lock → 作用頁須與 server active page 一致（PAGE_01）→ item UID 必須存在且 item ID 必須在白名單（否則 ITEM_04）→ `GetUnitClassDefaultSkill` 取本職業 2/4/6 個預設技能（失敗 SKILL_12）→ `GetCalcInitSkillPoint(level)` 累加 Lua `CalcLevelUpIncreaseSkillPoint` 的 2..level 各級點數（失敗 SKILL_20）→ CSP 未過期時重設為 MaxCSP；過期時若任一頁仍有 CSP 則 SKILL_12 → DB request。
+- DB worker 使用倉庫未提供的 `P_GSkill_New_UPD_Reset` 或 `P_GSkill_New_All_DEL_20131212`（依 SERV_ALL_RENEWAL_SP）；DB 成功後 GS 消耗道具、清空作用頁技能、加回最多六個預設技能，設定該頁 SP/CSP，並回 ACK／日誌。DB 內部 ACK 還攜帶六個 default skill ID 與 before SP/CSP；對 client 的 wire 則是 `iOK`、（技能頁制）active page、SPoint、CSPoint、inventory-slot-info vector（`ClientPacket.h:4421`、`ClientPacket.cpp:6350–6387`）。REQ 為 item UID、（技能頁制）active page。
+- 此倉庫 `XSLItem.h` 可確認基本道具 `203800`、事件道具 `130633/135416/135417/160946`、JP `65000430`、以及條件編譯的 `60001727/67006454`；實際白名單會受地區 `SERV_*` 巨集影響。V2 `GetInventoryItems` 已可取得 item ID、分類、槽位、quantity/endurance、到期資料，可支持道具存在／數量型消耗的基本判定。
+
+**V2 能力與阻塞**：
+
+- 已有 schema v15 `gskill(UnitUID,SkillID,SkillPageNumber,SkillLevel,SkillCSPoint)`、技能槽頁表、`gunit.SPoint`、unit-global `gskillcash(CSPoint,MaxCSPoint,EndDate)`，以及背包表與 `GetInventoryItems`；基本上可用單一 SQLite transaction 實作「扣道具、刪作用頁 gskill、插入預設技能、更新 SP/CSP」。DB transaction 本身不是阻塞項。
+- **阻塞 A：等級→總 SP 曲線**。原 `XSLSkillTree.cpp:GetCalcInitSkillPoint` 是 `sum(CalcLevelUpIncreaseSkillPoint(level), level=2..characterLevel)`；函式實作只存在缺失/加密的 Lua 資料，倉庫無可信表格或公式。把 V2 現有 `gunit.SPoint` 當初始化總額會把「目前可用點數」誤當「角色應有總點數」，不等價且會讓重置後點數錯誤。
+- **阻塞 B：完整 class→預設技能清單**。原 `m_mapDefaultSkill` 來自缺失的技能樹資料；倉庫可追到初始建角時少數 class 的技能 seed，但不能代表各職業（含轉職）的 2/4/6 清單。V2 ResetSkill 既有 `{10000,20030,30000,40010}` 僅是 class 1..4 的近似，不能挪用為全職業初始化清單。
+- **額外相容缺口（可在取得資料後明確記錄/處理）**：原 CSP 過期檢查會查各技能頁 CSP；V2 目前 `gskillcash` 是 unit-global 且沒有 per-page pool；原 FIELD_MAP/ROOM 狀態 gate、Inventory Lock 子系統、Lua item whitelist 的地區條件皆未移植；DB stored procedure 原文缺失。wire request/ack、NetError 數值及背包數量型／耐久型消耗，仍需依 ClientPacket codec、原錯誤碼機讀與既有 V2 API 落實。
+
+**決定／下一步**：使用者選擇暫緩初始化切片並先做其他有資料支撐的功能；不新增會猜測 SP 或職業預設技能的可寫 handler。若日後重啟此切片，需取得可核對的 `CalcLevelUpIncreaseSkillPoint` 等級曲線與完整 class default-skill map（或明確核准有界限的替代規則），再實作協議、原子 DB transaction、錯誤 ACK／道具消耗測試。後續已改做只讀的技能頁擴充 ED 報價查詢（§0a29）。
+
+## 0a29. 2026-11-16 附記（EGS_GET_NEXT_SKILL_PAGE_ED_REQ/ACK：查詢下一技能頁 ED 費用）
+
+依使用者選擇，暫緩需要缺失技能曲線／預設技能表的技能樹初始化（§0a28），改移植有原始常數與 schema 支援的 read-only 查詢 `EGS_GET_NEXT_SKILL_PAGE_ED_REQ`（1149）→ `EGS_GET_NEXT_SKILL_PAGE_ED_ACK`（1150）。這不是實際購買或擴充頁面；`EGS_EXPAND_SKILL_PAGE_REQ/ACK`（1151/1152）仍未實作。
+
+**原版對照**（`GSUserGameCommon.cpp:10248–10280`）：REQ 無欄位；ACK 沿用 `KEGS_GET_NEXT_BANK_ED_ACK`，wire 為 `iOK, iED`。可擴充頁數為 1 或 2 時回固定費用 `ED_NEEDED_TO_EXPAND_SECOND_SKILL_PAGE=50,000,000`；其他狀態回 `ERR_SKILL_PAGE_02`。`UserSkillTree.h` 的上限為 3。`ERR_SKILL_PAGE_02` 由原 `NetError_def.h` 實編核對為 **1390**（注意頁碼錯誤碼 enum 順序並非按尾數排序）。原 handler 的狀態 gate 允許 FIELD_MAP/ROOM；V2 無 FSM。
+
+**V2 實作**：`src/server/GetNextSkillPageEdProtocol.{h,cpp}` 提供空 REQ codec、`iOK+iED` ACK codec 與 `HandleGetNextSkillPageEdReq`；使用既有 `LoadSkillPageState`。頁數未達 3 → `NET_OK + 50,000,000`；已達 3 → `ERR_SKILL_PAGE_02 + iED=0`；無效 unit UID 或 DB 讀取失敗 → `ERR_ODBC_01 + iED=0`。此操作純查詢、不修改 DB；無新增 schema／migration。因 request 不需資料，handler 只為判斷頁數讀取 DB，V2 無法實作 Field/Room gate。
+
+**測試**：REQ 空 payload、ACK golden bytes／roundtrip、事件 ID、PAGE_02=1390；1/2 頁報價、3 頁錯誤 ACK、非法 UID、缺表造成 DB 讀取錯誤。新增 20 checks；五地區 build/test 全綠：JP **2318**、TW **2316**、EU **2314**、CN **2316**、US **2315 passed / 0 failed**。
+
 ## 0a27. 2026-11-18 附記（EGS_DECIDE_TO_USE_THIS_SKILL_PAGE_REQ/ACK：切換作用技能頁；schema v15 沿用）
 
 承 §0a23（技能頁資料讀回）／§0a26（技能學習與升級）。本切片移植 `EGS_DECIDE_TO_USE_THIS_SKILL_PAGE_REQ`（1153）→ `EGS_DECIDE_TO_USE_THIS_SKILL_PAGE_ACK`（1154）：將某個已擴充頁設為作用頁，並回傳該頁欄位與已學技能資料。
