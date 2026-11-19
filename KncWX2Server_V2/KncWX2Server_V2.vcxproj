@@ -128,6 +128,7 @@
     <ClCompile Include="src\server\FieldOptionProtocol.cpp" />
     <ClCompile Include="src\server\FrameAverageProtocol.cpp" />
     <ClCompile Include="src\server\GameEventDispatcher.cpp" />
+    <ClCompile Include="src\server\QuoteEventDispatcher.cpp" />
     <ClCompile Include="src\server\DeleteBlacklistUserProtocol.cpp" />
     <ClCompile Include="src\server\CharacterListProtocol.cpp" />
     <ClCompile Include="src\server\EntryPointChannelListProtocol.cpp" />
@@ -201,6 +202,7 @@
     <ClInclude Include="src\server\FieldOptionProtocol.h" />
     <ClInclude Include="src\server\FrameAverageProtocol.h" />
     <ClInclude Include="src\server\GameEventDispatcher.h" />
+    <ClInclude Include="src\server\QuoteEventDispatcher.h" />
     <ClInclude Include="src\server\DeleteBlacklistUserProtocol.h" />
     <ClInclude Include="src\server\CharacterListProtocol.h" />
     <ClInclude Include="src\server\EntryPointChannelListProtocol.h" />

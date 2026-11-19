@@ -1360,3 +1360,9 @@ V2 目前**原樣保留**協議所需的密碼學直譯，這些本身**不符�
 - 安全及邊界：呼叫者**必須**綁定每條連線並自行驗證登入後才設 `authenticated`；adapter 不接受封包內 UID 作認證依據。未認證、未知事件、壓縮 payload、解碼失敗或多餘尾隨位元組不更新 session、不輸出 ACK；嚴格拒絕尾隨位元組為 V2 原型政策，尚未核對原版對尾隨資料的容忍度。
 - 尚未整合到正式 server、登入／角色選擇、狀態 FSM、統計 sink 或伺服器生命週期；`authenticated` 是呼叫端提供的信任邊界，不構成登入實作。測試以注入認證狀態模擬 caller，經既有 Session 加密握手與 loopback TCP 將兩事件送至 dispatcher 並讀回 ACK；並測試未知事件、錯誤封包及 session 隔離。
 - 驗收：JP 2530、TW 2528、EU 2526、CN 2528、US 2527 passed / 0 failed。loopback 在 POSIX 執行，Windows 執行環境尚未驗證。
+
+### §0a36 擴充費用查詢分派原型
+
+- 新增 `QuoteEventDispatcher`，把銀行、背包、技能頁三個唯讀報價 REQ（1141、1145、1149）接至既有 handler，回傳相應 ACK。以可信 caller 提供的已認證帳號與選中角色 UID 驗證 `gunit` 所有權及未刪除狀態；不從封包接受角色 ID。所有權檢查失敗不傳報價；DB 查詢失敗與無效輸入分別返回分派結果，僅成功處理才替換 reply。
+- 範圍與偏差：這是可接入 Session 的 adapter，**不是**正式伺服器或認證流程。呼叫者必須依已驗證登入與角色選擇建立 session，負責事件路由、對分派失敗採取的策略及送出 ACK。現階段無 Field/Room FSM，並嚴格拒絕有尾隨資料的 NOPARAM 封包；原版是否容忍尾隨資料尚未核對。報價 handler 使用 DB 快照，其他偏差見 §0a31、§0a32 及技能頁報價紀錄。所有權與後續報價各自讀 DB，並非單一快照交易；不適用於扣款或寫入操作。
+- 測試涵蓋三種報價、不同帳號角色、未認證、未選角、已刪除、DB 故障及錯誤封包；POSIX loopback 使用測試注入的可信 session 經加密 Session 往返三種請求，不代表登入已接通。JP 2560、TW 2558、EU 2556、CN 2558、US 2557 passed / 0 failed。
